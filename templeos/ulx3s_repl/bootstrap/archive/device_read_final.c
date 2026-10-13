@@ -1,0 +1,1 @@
+/Users/npe/src/templeos-cursor-riscv/bootstrap/archive/device_read_final.c

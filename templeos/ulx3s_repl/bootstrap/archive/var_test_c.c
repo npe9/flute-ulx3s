@@ -1,0 +1,1 @@
+/Users/npe/src/templeos-cursor-riscv/bootstrap/archive/var_test_c.c

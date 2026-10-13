@@ -1,0 +1,1 @@
+/Users/npe/src/templeos-cursor-riscv/bootstrap/seed/tutorials/B14_ArtOfMulticore.hc

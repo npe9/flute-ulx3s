@@ -1,0 +1,16 @@
+[tb] basic ranges+align: 2000 iters done
+[tb] dist histogram: mode0=3628 mode1=1772 mode2=600 (want ~60/30/10)
+[tb] implication + if/else: 2000 iters done
+[tb] chained ordering: 2000 iters done
+[tb] foreach element bounds: 1000 iters ok; observed total.sum() max=33800 (unconstrained by solver)
+[tb] inline-with + soft: 1000 iters (soft x==10: 1000, other legal: 0)
+[tb] unique: 1000 iters done
+%Warning-UNSATCONSTR: tb_randomize.sv:65: Unsatisfied constraint: 'constraint q { a > 100; a < 5; }'
+%Warning-UNSATCONSTR: tb_randomize.sv:65: Unsatisfied constraint: 'constraint q { a > 100; a < 5; }'
+[tb] unsat constraint: randomize() rc=0 a=777 (want rc=0, a=777)
+[tb] constraint_mode(0): randomize ok (a=805437010, unconstrained)
+RANDOMIZE: PASS (15000 checks)
+- tb_randomize.sv:225: Verilog $finish
+- S i m u l a t i o n   R e p o r t: Verilator 5.052 2026-09-05
+- Verilator: $finish at 0s; walltime 154.622 s; speed 0.000 s/s
+- Verilator: cpu 7.922 s on 1 threads; allocated 3 MB

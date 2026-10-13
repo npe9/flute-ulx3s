@@ -1,0 +1,1 @@
+/Users/npe/src/templeos-cursor-riscv/bootstrap/archive/hash_table_bare.h

@@ -1,0 +1,1 @@
+/Users/npe/src/templeos-cursor-riscv/bootstrap/archive/test_spike_holyc.hc

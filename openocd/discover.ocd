@@ -1,0 +1,7 @@
+# Identify whatever TAP is on the populated header, without assuming the
+# RISC-V soft-TAP idcode. ECP5 hard config TAP: IR length 8.
+transport select jtag
+jtag newtap unknown tap -irlen 8
+init
+jtag arp_init
+scan_chain

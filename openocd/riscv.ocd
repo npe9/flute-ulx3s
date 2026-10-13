@@ -1,0 +1,31 @@
+# RISC-V debug target for the Flute SoC on ULX3S.
+# Connects to the RISC-V Debug Transport Module (DTM) exposed over JTAG.
+
+transport select jtag
+
+# The JtagTap module in Flute/src_SSITH_P2/src_BSV/JtagTap.bsv uses
+# IR length 5 and reports idcode 0x00000ffd.
+jtag newtap riscv cpu -irlen 5 -expected-id 0x00000ffd
+
+target create riscv.cpu riscv -chain-position riscv.cpu -rtos hwthread
+
+riscv set_reset_timeout_sec 5
+riscv set_command_timeout_sec 5
+
+# Use the Debug Module's system bus access (SBA) master for memory
+# reads/writes.  This maps directly onto the SoC AXI4 fabric, so
+# OpenOCD can load images into SDRAM at 0x80000000 without involving
+# the running CPU.
+riscv set_mem_access sysbus
+
+# Disable the abstract command path for memory; force system bus.
+# (OpenOCD sometimes defaults to progbuf for memory if it thinks SBA
+# is unavailable; this makes the choice explicit.)
+# riscv set_mem_access sysbus
+
+# Work area for algorithm support (unused when loading via sysbus).
+# $_TARGETNAME configure -work-area-phys 0x80010000 -work-area-size 0x1000
+
+init
+jtag arp_init
+scan_chain

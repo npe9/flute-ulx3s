@@ -1,0 +1,3 @@
+[16] %Error: a_conc_seq.sv:18: Assertion failed in TOP.tb_top.a_gnt_stays: gnt shape
+%Error: a_conc_seq.sv:18: Verilog $stop
+Aborting...

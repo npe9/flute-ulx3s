@@ -1,0 +1,8 @@
+# Olimex ARM-USB-TINY-H (FTDI FT2232H) wired to the ULX3S FPGA JTAG header:
+#   TCK -> TCK, TMS -> TMS, TDI -> TDI, TDO -> TDO, GND -> GND
+# The Flute SoC's JtagTap reports IR length 5, idcode 0x00000ffd (see riscv.ocd).
+adapter driver ftdi
+# This unit enumerates as 15ba:002a (not the textbook 0024) — confirmed via ioreg.
+ftdi vid_pid 0x15ba 0x002a
+ftdi layout_init 0x0808 0x0a1b
+adapter speed 1000

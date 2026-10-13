@@ -1,0 +1,20 @@
+# ---- build outputs (regenerable; GB-scale) ----
+build/
+# stray in-place Bluesim C++ emission at repo root
+/*.cxx
+/*.h
+*.o
+/-c
+# ---- sim build dirs ----
+obj_dir*/
+# ---- python ----
+__pycache__/
+*.pyc
+# ---- OS / editor ----
+.DS_Store
+*.bak
+*~
+# ---- verilator coverage ----
+*.dat
+# ---- templeos build artifacts ----
+templeos/build/

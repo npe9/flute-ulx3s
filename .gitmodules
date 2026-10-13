@@ -1,0 +1,3 @@
+[submodule "Flute"]
+	path = Flute
+	url = git@github.com:npe9/Flute.git

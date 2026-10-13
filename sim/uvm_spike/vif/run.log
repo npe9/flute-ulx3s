@@ -1,0 +1,5 @@
+[sv] inject byte 0xa5 at time 10
+[cpp] driver bits pending after 1st byte + 20 cy: 0
+[sv] inject byte 0x3c at time 50
+[cpp] injected=2 pending=0 mon_sample=0xff
+VIF+DPI: PASS

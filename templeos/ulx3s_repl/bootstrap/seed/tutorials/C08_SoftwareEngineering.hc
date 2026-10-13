@@ -1,0 +1,1 @@
+/Users/npe/src/templeos-cursor-riscv/bootstrap/seed/tutorials/C08_SoftwareEngineering.hc
