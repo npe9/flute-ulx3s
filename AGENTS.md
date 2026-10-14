@@ -131,6 +131,31 @@ Sources checked (bsc install + Yosys 0.51):
   strip; BSC silently drops $strobe). Net: the imem presentation path
   (~35.7 ns, 78% routing) has capped three designs; dmem cuts cannot
   move Fmax past it.
+- **step9 (2026-10-13, SHIPPED: new promoted base, 32.44 MHz)**: the
+  presentation-path campaign. Root-mapped the 35.7 ns wall first: it is
+  the WHOLE fetch->predict->ask loop in one comb cloud (icache.rg_addr
+  -> shim dw_* presentation mux -> CPU d_instr -> branch-predictor
+  predict_rsp (BTB read + RAS decode + fall-through add) ->
+  imem_req_addr -> ask-queue rg_q0.D; 7.9 ns logic / 27.8 ns routing;
+  confirmed imem_req_addr is comb-derived from predict_rsp).
+  CUT: registered the shim's CPU-facing presentation output
+  (rg_out_valid/pc/instr/exc/code/tval written by the unconditional
+  rl_shim_step; the dw_* DWire discipline RETAINED -- CPU rules call
+  imem value-methods and imem.req in the same rule, and direct register
+  reads in the interface re-trigger the G0004 method conflict). +1 cycle
+  uniform presentation latency; internal launch/arrival/reshow timing
+  unchanged (arrival-paced; not the failed decoupling class -- no queue
+  insertion). s3 32.44 MHz (+12.3% over 28.90; margin 29.8% over 25
+  MHz). J1 strict=error PASS (banner 20553, ACKs 162831, readback
+  222580, hello 50198125 -- the +1/fetch latency shift, content-exact);
+  Bluesim strict PASS; hw suite 70/0/2; cache test PASS. FIRST I-side
+  change to pass the bench (3/3 prior failures were all ask-stream
+  decoupling). New step9 J1 goldens: banner 20553, ACKs 162831,
+  readback 222580, hello 50198125. Rollback bit:
+  build/ulx3s_top.bit.step7-25mhz (also bits/). Next lever: new path0
+  is intDiv/regfile -> stage1/2 -> dcache.EN_req/ADDRB (30.8 ns); the
+  v6 dmem queue (step8b, preserved) cuts exactly that tail -- variant B
+  = step8b MMU_Cache + step9 shim is a ~38 MHz candidate.
   SECOND OCCURRENCE (Step 3 v2 fetch buffer, 2026-10-11): a CPU-side
   ask-queue buffer passed the strict-Bluesim gate with a functionally
   alive boot, then wedged DETERMINISTICALLY IN BOTH engines post-load

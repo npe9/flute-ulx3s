@@ -1,6 +1,25 @@
 # ULX3S Bluespec work: chat summary, current state, and plans
 
-Date of handoff: 2026-10-02 (updated 2026-10-13: step8 50MHz campaign CLOSED -- see below)
+Date of handoff: 2026-10-02 (updated 2026-10-13 late: step9 SHIPPED — new 32.44 MHz base)
+
+## 2026-10-13 (late) — step9 SHIPPED: presentation register breaks the I-side bench curse, 28.90 -> 32.44 MHz
+
+The imem presentation path was root-mapped: the whole
+fetch->present->decode->predict->ask loop was ONE combinational cloud
+(icache.rg_addr -> shim presentation mux -> CPU d_instr -> predict_rsp
+-> imem_req_addr -> ask queue; 35.7 ns, 78% routing, capped three
+prior designs). CUT (single architectural register): the shim's
+CPU-facing presentation output is now registered (rg_out_*; the dw_*
+DWire mirror retained to avoid the G0004 method conflict). +1 cycle
+uniform presentation latency; internal timing arrival-paced, unchanged.
+This is NOT the failed decoupling class, and it benched: s3 32.44 MHz
+(+12.3%; margin 29.8% over 25 MHz), J1 strict=error PASS, Bluesim
+strict PASS, hw suite 70/0/2, cache test PASS. New J1 goldens: banner
+20553, ACKs 162831, readback 222580, hello 50198125. Flute @ e1abb72;
+rollback bit build/ulx3s_top.bit.step7-25mhz. Next: variant B
+(step8b's v6 dmem queue under the step9 shim) targets the new 30.8 ns
+intDiv/regfile -> dcache.EN_req/ADDRB path -- a ~38 MHz candidate.
+F2 sweep was running at ship time as reset-cleanliness confirmation.
 
 ## 2026-10-13 (evening) — step8 50 MHz campaign CLOSED: both iterations fail the gain bar, tree at step7
 
