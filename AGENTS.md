@@ -190,6 +190,31 @@ Sources checked (bsc install + Yosys 0.51):
   pipelining or leaner shim per step4/DESIGN.md). See HANDOFF
   "2026-10-11 evening — STEP 4 VERDICT".
 
+- **step10-13 50 MHz campaign (2026-10-14, CLOSED — verdict recorded)**:
+  attempted the architectural push from the step9 base (32.99 s3) to
+  50 MHz.  Ladder: +v6-dreq queue +perf-tap regs (33.89); +elastic
+  CPU_Stage1 (34.91, J1 DEADLOCK — reverted); +registered bp-training
+  on the step10a base (34.88, J1 FAIL at the load phase); step9+perf+
+  bpFIFO without the v6 queue (32.03, below baseline).  Tree reverted
+  to shipped step9 (Flute 4f90b8b).  LESSONS: (1) the v6-dreq queue on
+  the step9 base STALLS THE ROM LOADER in J1 (banner byte-exact, then
+  loader silence; a >2h J1 run on this family = this stall, not
+  slowness) — the v6 queue stays closed on the step9 generation.
+  (2) Elastic-stage designs must clear SYNCHRONOUSLY with the
+  protocol that drains the upstream stage; a delayed clear wiped live
+  entries (step11 passed Bluesim on timing luck, deadlocked
+  Verilator).  (3) The live branch predictor is Branch_Predictor.bsv
+  (mkBranch_Predictor at ~line 193); Branch_Predictor_NORMAL/NULL are
+  ORPHANS — an edit to them produced a byte-identical timing report
+  (caught by grepping the netlist; always verify a timing-relevant
+  edit landed via grep on build/verilog_all.v).  (4) The ~28-30 ns
+  rl_pipe mega-cone (stage1/stageF comb read combinationally by
+  rl_pipe's feed/train/redirect/dcache-req blocks) is a structural
+  family: endpoint cuts move the wall between siblings for ~1 MHz
+  each and asymptote ~35-38 MHz.  50 MHz needs wholesale rl_pipe
+  decomposition (decoupled sequencers) as a scoped separate project.
+  Full analysis: build/timing-exp/step12-STATUS.md.
+
 ### Working rules (hard-won, do not relearn)
 
 0. DESIGN POLICY (user-set, standing): timing closure and performance
