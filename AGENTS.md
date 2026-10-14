@@ -111,6 +111,26 @@ Sources checked (bsc install + Yosys 0.51):
   stock req/probe/rereq/refill FSM cycle MUST state-guard its port-B
   reads against port-A-writing states; "queue then launch" patterns need
   the launcher's FSM-window guard, not just a not-empty guard.
+- **step8 (2026-10-13, CLOSED, reverted to step7)**: the 50 MHz campaign
+  spent its two iterations on the dmem side. (1) A naive shim deposit
+  register repeated the reqq mistake (bare-pend launcher fired mid-refill
+  because dmem loads are SCOREBOARDED, multiple in flight -- the
+  "one-outstanding, stage-2-blocking" model is wrong; the symptom was
+  r0=0xaaaaaaaa, Verilator's mkRegU power-up pattern, response never
+  driven). Fixed by porting the proven reqq-v6 queue into MMU_Cache:
+  functionally clean (J1 byte-exact v6 golden, Bluesim strict PASS) but
+  s3 = 28.01 MHz vs step7 28.90 -- no gain; clean-netlist path0 is the
+  imem presentation path, byte-identical to the reqq-v6 critical path.
+  (2) Store-hit cword write + fabric write-through pipelined into
+  rl_ST_AMO_RSP: 27.36 MHz (cone re-formation), reverted. MEASUREMENT
+  LANDMINE: the v6 queue first measured 29.10 MHz on a netlist with
+  SIM_TRACE $displayb baked in (BSC resolves `ifdef at COMPILE time, so
+  a verilator -D is a no-op) -- the trace perturbed Yosys/ABC and
+  inflated Fmax 1.1 MHz. MEASURE THE NETLIST YOU SHIP. Useful sim-trace
+  recipe preserved in step8-STATUS.md ($displayb slips the Makefile
+  strip; BSC silently drops $strobe). Net: the imem presentation path
+  (~35.7 ns, 78% routing) has capped three designs; dmem cuts cannot
+  move Fmax past it.
   SECOND OCCURRENCE (Step 3 v2 fetch buffer, 2026-10-11): a CPU-side
   ask-queue buffer passed the strict-Bluesim gate with a functionally
   alive boot, then wedged DETERMINISTICALLY IN BOTH engines post-load

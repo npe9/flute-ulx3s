@@ -1,6 +1,40 @@
 # ULX3S Bluespec work: chat summary, current state, and plans
 
-Date of handoff: 2026-10-02 (updated 2026-10-13: reqq retry CLOSED -- see below)
+Date of handoff: 2026-10-02 (updated 2026-10-13: step8 50MHz campaign CLOSED -- see below)
+
+## 2026-10-13 (evening) — step8 50 MHz campaign CLOSED: both iterations fail the gain bar, tree at step7
+
+Picking up the promoted 50 MHz lever ("register the dmem request side;
+the response side is already pipelined"), step8 spent its two RTL
+iterations on the dmem path:
+
+- Iteration 1 (step8b): ported the proven reqq-v6 request queue
+  (pure-enqueue req + FSM-window-guarded launcher inside MMU_Cache) onto
+  the dmem req path, cutting step7's 34.6 ns stage1->BRAM critical path.
+  A naive shim deposit register first FAILED functionally (r0=0xaaaaaaaa
+  -- loads are SCOREBOARDED, multiple in flight; the bare-pend launcher
+  fired mid-refill and clobbered the FSM -- the reqq root-cause class
+  again, proven by SIM_TRACE). With the v6 queue: functionally clean (J1
+  byte-exact v6 golden 20551/163824/223573; Bluesim strict PASS) but
+  s3 = 28.01 MHz vs step7 28.90 -- NO gain; the clean-netlist critical
+  path is the imem presentation path, byte-identical to reqq-v6's.
+- Iteration 2 (step8c): store-hit cword write + fabric write-through
+  pipelined into rl_ST_AMO_RSP. s3 = 27.36 MHz (cone re-formation).
+  Reverted.
+- MEASUREMENT LANDMINE: iteration 1 first measured 29.10 MHz on a
+  netlist with SIM_TRACE $displayb baked in (BSC resolves `ifdef at
+  compile time; a verilator -D is a no-op) -- trace perturbation of
+  Yosys/ABC inflated Fmax 1.1 MHz. The trace-free ship netlist measures
+  28.01. MEASURE THE NETLIST YOU SHIP.
+- Scoreboard gate improvement landed (kept): banner-prefix mismatch now
+  non-fatal per-byte with received-so-far dump, judged at final_check --
+  collects the full transcript on failure instead of aborting at byte 1.
+- Tree reverted to step7 (28.90 MHz promoted base). Full record:
+  build/timing-exp/step8-STATUS.md + AGENTS.md incident map. The imem
+  presentation path (~35.7 ns, routing-dominated) has now capped three
+  independent designs; the next 50 MHz attempt must attack it (register
+  shim output earlier / cut reshow_pend depth / pipeline CPU-facing imem
+  mux) or go exec-side.
 
 ## 2026-10-13 — reqq-class retry CLOSED: wedge root-caused, variant rejected on timing
 

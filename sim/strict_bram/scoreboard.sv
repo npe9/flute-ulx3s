@@ -77,6 +77,7 @@ package scoreboard_pkg;
     int acks_seen = 0;
     int naks_seen = 0;
     int n_bytes   = 0;
+    int n_prefix_mism = 0;
 
     string postload = "";
     string full_tx  = "";
@@ -112,9 +113,11 @@ package scoreboard_pkg;
         full_tx = {full_tx, string'(b8)};
         case (phase)
           PH_PREFIX: begin
-            assert (b8 == 8'(golden_prefix[pre_idx]))
-              else $error("[scoreboard] banner prefix mismatch at byte %0d: got 0x%02x want 0x%02x",
-                          n_bytes - 1, b8, 8'(golden_prefix[pre_idx]));
+            if (b8 != 8'(golden_prefix[pre_idx])) begin
+               n_prefix_mism++;
+               $display("[scoreboard] banner prefix mismatch at byte %0d: got 0x%02x want 0x%02x (received so far: %s)",
+                        n_bytes - 1, b8, 8'(golden_prefix[pre_idx]), full_tx);
+            end
             pre_idx++;
             if (pre_idx == golden_prefix.len()) begin
               m_prefix = 1;
@@ -199,6 +202,8 @@ package scoreboard_pkg;
     // Returns the number of failed checks (0 = pass).
     function int final_check(input int framing_errs);
       int errs = 0;
+      assert (n_prefix_mism == 0)
+        else begin $error("[scoreboard] %0d banner prefix mismatches", n_prefix_mism); errs++; end
       assert (configured)
         else begin $error("[scoreboard] never configured by the C++ main"); errs++; end
       assert (phase == PH_POSTLOAD)
