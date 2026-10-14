@@ -41,7 +41,7 @@ for seed in $(seq 1 "$N"); do
     fi
     # Compare on content, not Verilator's own compile-time stats (the
     # walltime/allocated lines legitimately differ run to run).
-    filt() { grep -v '^- Verilator:' "$1"; }
+    filt() { grep -avE '^(- Verilator:|c\+\+ |verilator |^rm |^make|V e r i l a t i o n)' "$1" | grep -avE 'Walltime|cpu .* on [0-9]+ threads|allocated'; }
     if [[ -z "$ref" ]]; then
         ref="$log"
         filt "$log" > "$OUTDIR/.ref.filt"

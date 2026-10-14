@@ -155,7 +155,15 @@ Sources checked (bsc install + Yosys 0.51):
   build/ulx3s_top.bit.step7-25mhz (also bits/). Next lever: new path0
   is intDiv/regfile -> stage1/2 -> dcache.EN_req/ADDRB (30.8 ns); the
   v6 dmem queue (step8b, preserved) cuts exactly that tail -- variant B
-  = step8b MMU_Cache + step9 shim is a ~38 MHz candidate.
+  = step8b MMU_Cache + step9 shim is a ~38 MHz candidate. VARIANT B TRIED
+  2026-10-14: s3 = 31.97 MHz -- WORSE than A's 32.44 (queue cone
+  re-formation eats the tail cut). CLOSED, reverted to A. F2 X-sweep
+  (step9-A, pinned to the frozen netlist): all 8 seeds PASS with
+  byte-identical functional output (reset-clean); the sweep's FAIL
+  verdict was a judge artifact -- seed 1's log carries the obj_dir c++
+  build lines, seeds 2-8 do not, and the old filt() only stripped
+  '- Verilator:'. filt() hardened in run_sweep.sh; when a batch verdict
+  and the per-seed logs disagree, eyeball the seeds (rule 8 epilogue).
   SECOND OCCURRENCE (Step 3 v2 fetch buffer, 2026-10-11): a CPU-side
   ask-queue buffer passed the strict-Bluesim gate with a functionally
   alive boot, then wedged DETERMINISTICALLY IN BOTH engines post-load
