@@ -190,6 +190,32 @@ Sources checked (bsc install + Yosys 0.51):
   pipelining or leaner shim per step4/DESIGN.md). See HANDOFF
   "2026-10-11 evening — STEP 4 VERDICT".
 
+- **RLD campaign (2026-10-14/15, CLOSED — +4.2 MHz, short of 50 MHz)**:
+  the scoped rl_pipe decomposition follow-up. (1) 3-rule rl_pipe split
+  (moves in rl_pipe_feed + rl_pipe_commit with pulse-commit): CLOSED —
+  BSC made the new rules mutually exclusive with the every-cycle
+  rl_pipe (`WILL_FIRE = CAN_FIRE && !WILL_FIRE_rl_pipe`), starved
+  silently; the tell is warning G0021 "rule can never fire" — GREP
+  ELABORATION WARNINGS, not errors. Fixed one real bug en route
+  (commit must HOLD fulls on blocked cycles, not just fire/no-fire —
+  stage3 evaporation), still starved. (2) WINNER pattern: MODULE-
+  INTERNAL cuts only. RLD-1' train FIFO in CPU_StageF (bp_train enqs,
+  local drain) s3 30.25->33.25; RLD-1'' perf-tap bridge (minstret-delta
+  for retire, tick reg for redirect; a PulseWire read carries the
+  sender's WILL_FIRE cone) s3 ->34.48. J1 strict PASS BYTE-EXACT both.
+  Train-FIFO zeroes the stock btb_cross_ba census by construction —
+  waive with J1_WAIVE_BTB_CENSUS=1 (loud, in run.sh). (3) RLD-2
+  deferred dcache req: s3 35.44 but J1 FAIL — the ROM's tight volatile
+  store->load sequence races the shifted write-through (SECOND
+  v6-dreq load-toxic occurrence; first was step10a). dreq-side timing
+  cuts are CLOSED unless same-core store ordering is preserved
+  (write-drain-on-miss). (4) Bluesim Repl_Boot_Tb functional verdict
+  REVOKED — pure stock also gets repl_responded=0 (prompt-detector
+  artifact of the bit-rate-mismatched decoder). J1/hw suite are the
+  only functional gates; DUT-internal Bluesim probes remain valid.
+  New binding cone: stage1 output fn/bypass -> GPR regfile (28.2 ns).
+  Committed: Flute b88680d, wrapper 6b2de18. Details:
+  build/timing-exp/rld-PLAN.md.
 - **step10-13 50 MHz campaign (2026-10-14, CLOSED — verdict recorded)**:
   attempted the architectural push from the step9 base (32.99 s3) to
   50 MHz.  Ladder: +v6-dreq queue +perf-tap regs (33.89); +elastic
