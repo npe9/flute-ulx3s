@@ -131,7 +131,8 @@ Sources checked (bsc install + Yosys 0.51):
   strip; BSC silently drops $strobe). Net: the imem presentation path
   (~35.7 ns, 78% routing) has capped three designs; dmem cuts cannot
   move Fmax past it.
-- **step9 (2026-10-13, SHIPPED: new promoted base, 32.44 MHz)**: the
+- **step9 (2026-10-13, WAS the promoted base at 32.44 MHz; superseded
+  2026-10-15 by rld1pp-34mhz — kept as rollback bit)**: the
   presentation-path campaign. Root-mapped the 35.7 ns wall first: it is
   the WHOLE fetch->predict->ask loop in one comb cloud (icache.rg_addr
   -> shim dw_* presentation mux -> CPU d_instr -> branch-predictor
@@ -190,6 +191,25 @@ Sources checked (bsc install + Yosys 0.51):
   pipelining or leaner shim per step4/DESIGN.md). See HANDOFF
   "2026-10-11 evening — STEP 4 VERDICT".
 
+- **rld1pp PROMOTED (2026-10-15): new base 34.48 MHz s3.** Bench on
+  the md5-verified bit (e1db0d31c2ae94a140b69205183e042f, re-packed
+  from the committed tree's rld1pp-s3.config, chain: Flute b88680d ->
+  verilog_all.v 73c6901e -> s3 config -> bit): hw suite 70/0/2 (the 2
+  known I64 hi-half P1 warns), cache test PASS. F2 X-sweep 8/8 PASS
+  byte-identical. Promotion artifacts: bits/ulx3s_top.bit.rld1pp-34mhz,
+  build/timing-exp/verilog_all.v.rld1pp, logs
+  build/timing-exp/bench-rld1pp.log + f2-sweep-rld1pp-waived.log.
+  Rollback bit: bits/ulx3s_top.bit.step9-32mhz (supersedes step9 as
+  the promoted base). Path0 on the shipped netlist: stage1 input reg
+  -> GPR regfile LUT-RAM read -> data_to_stage2_addr -> dcache tag-RAM
+  ADDRB -> DOB_R (29.0 ns; logic 6.1 / routing 22.4); all other paths
+  <=15.6 ns. SWEEP INVOCATION LANDMINE (cost 5.3h): run_sweep.sh on a
+  train-FIFO-era netlist needs J1_WAIVE_BTB_CENSUS=1 EXPORTED (the
+  census bin is zero by construction; without it all 8 seeds fail the
+  hazard-bin gate AFTER ~22 min of sim each, with functional PASS in
+  every log), and SWEEP_OUT is resolved AFTER the cd to sim/strict_bram
+  — pass an absolute path. Eyeball seed logs before believing a batch
+  FAIL (rule 8).
 - **RLD campaign (2026-10-14/15, CLOSED — +4.2 MHz, short of 50 MHz)**:
   the scoped rl_pipe decomposition follow-up. (1) 3-rule rl_pipe split
   (moves in rl_pipe_feed + rl_pipe_commit with pulse-commit): CLOSED —
