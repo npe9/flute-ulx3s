@@ -210,6 +210,59 @@ Sources checked (bsc install + Yosys 0.51):
   every log), and SWEEP_OUT is resolved AFTER the cd to sim/strict_bram
   — pass an absolute path. Eyeball seed logs before believing a batch
   FAIL (rule 8).
+- **RLD-3 (2026-10-15/16, CLOSED — REVERTED, no shippable gain)**: deferred
+  dmem request launch (stage2-internal `FIFOF#(DReq_Sample)`;
+  `dcache.req` issued one cycle after stage2 enqueue, from registered
+  state — intended to cut the 29 ns stage1-output/regfile -> dcache
+  tag-RAM cone; raw variant measured s3 36.69 and the cut WORKED as
+  designed, wall migrated to the fetch-predict/BTB cone). Three J1
+  failures, three root causes, all variants rejected:
+  (1) rld3: `Taaaaaaaa` — memory-store fabric writes vanished. ROOT
+  CAUSE: `rl_ST_AMO_response` (MMU_Cache) drives dw_valid but never
+  exits CACHE_ST_AMO_RSP; stock relies on the NEXT REQ (fired at
+  stage2-enqueue time, the very next cycle) clobbering the state, so
+  the store response is exactly 1 cycle. The deferred launch opens a
+  2nd valid cycle: the store still in stage2 falsely completes, the
+  pipeline advances, and the next op's req clobbers the store's
+  in-flight probe (2nd tag-RAM read overwrites its address before the
+  probe runs) -> write never posted -> refill reads unwritten SDRAM.
+  FIX (landed, then reverted with the rest): `rg_state <= MODULE_READY`
+  in rl_ST_AMO_response (netlist write-mux verified: EN_req wins the
+  coincident write, response still 1 cycle).
+  (2) rld3b (+ST_AMO fix): memory test PASSES (`T12345678`) but boot
+  wedges at the 10th putc — TX stops after r0's hex; loader never
+  starts. `rl_maintain_io_read_rsp` (IO_READ_RSP) and
+  `rl_drive_exception_rsp` (MODULE_EXCEPTION_RSP) have the SAME linger
+  contract (comments say so verbatim: "stays until the CPU's next
+  request puts it back into RUNNING"). Same false-completion cascade.
+  (3) rld3c (single-cycle exits in all three states): Bluesim boots
+  CLEAN through the exact wedge point (FSM verbosity-2 trace: r0/r1
+  loads complete, all 9 putc ops flow) — the remaining J1 wedge is
+  VERILATOR-SPECIFIC: two different netlists wedge at the identical
+  byte (not X-luck, unresolved; a seed sweep was not run — see
+  lessons). AND s3 collapsed 35.62 -> 27.18 MHz (state-exit muxes
+  perturbed placement; only the post-route fmax survived — nextpnr
+  was killed before writing report/config; treat 27.18 as real).
+  REVERTED to b88680d (rld1pp base; netlist re-emit diff vs the rld1pp
+  snapshot is documented BSC naming/factoring churn only — git state
+  is the identity guarantee, and the date define moves daily).
+  LESSONS: (a) stock near-mem FSM has THREE states holding dw_valid
+  until the next req's clobber — "request arrives the cycle after
+  stage2 enqueue" is an IMPLICIT FSM CONTRACT; any request-timing
+  change must fix all three or fail exactly like above. (b)
+  Bluesim-vs-Verilator divergence is diagnosable: CPU-side probes
+  (enq/launch pairs) were correct in both engines; Bluesim FSM trace
+  clean at the wedge point => sim-specific; record and revert rather
+  than burn gate-hours. (c) FSM-state micro-fixes can cost 8 MHz of
+  placement — s3 every increment. (d) The dmem request-launch family
+  is CLOSED (4th occurrence overall: v6-dreq, RLD-2, RLD-3 x3): the
+  single-cycle-response contract is too fragile for request-timing
+  moves without a protocol redesign (explicit response-consumed
+  handshake). Next 50 MHz lever: the fetch-predict/BTB cone
+  (rld3 forensics: speculative BTB read address comb-derived from the
+  ask stream — `predict_req_pc` mux, 27 ns routing-dominated) or the
+  stage1-output/bypass cone (28 ns, rld1pp-era) — both documented in
+  HANDOFF 2026-10-15.
 - **RLD campaign (2026-10-14/15, CLOSED — +4.2 MHz, short of 50 MHz)**:
   the scoped rl_pipe decomposition follow-up. (1) 3-rule rl_pipe split
   (moves in rl_pipe_feed + rl_pipe_commit with pulse-commit): CLOSED —
