@@ -240,9 +240,10 @@ Sources checked (bsc install + Yosys 0.51):
   loads complete, all 9 putc ops flow) — the remaining J1 wedge is
   VERILATOR-SPECIFIC: two different netlists wedge at the identical
   byte (not X-luck, unresolved; a seed sweep was not run — see
-  lessons). AND s3 collapsed 35.62 -> 27.18 MHz (state-exit muxes
-  perturbed placement; only the post-route fmax survived — nextpnr
-  was killed before writing report/config; treat 27.18 as real).
+  lessons). s3 = 35.26 MHz (CORRECTED 2026-10-16: an earlier reading
+  of 27.18 was a mid-run placement-stage line, not the post-route
+  fmax; the final report/config confirm 35.26 — the three state-exit
+  fixes cost ~1.4 MHz total across iterations, no collapse).
   REVERTED to b88680d (rld1pp base; netlist re-emit diff vs the rld1pp
   snapshot is documented BSC naming/factoring churn only — git state
   is the identity guarantee, and the date define moves daily).
