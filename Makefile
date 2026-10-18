@@ -65,7 +65,7 @@ DEFINES := -D RV32 -D ISA_I -D ISA_M -D ISA_A -D ISA_C \
 # same-address).  Sim-only: synthesis builds use $(DEFINES), not this.
 SIM_DEFINES := $(subst -D JTAG_TAP,,$(DEFINES)) -D BRAM_HAZARD_ASSERT
 
-BSC_FLAGS := -keep-fires -aggressive-conditions -no-warn-action-shadowing \
+BSC_FLAGS := -keep-fires -aggressive-conditions -no-warn-action-shadowing -show-schedule \
              -no-show-timestamps -suppress-warnings G0020 \
              +RTS -K128M -RTS
 
@@ -116,6 +116,26 @@ $(VERILOG): $(ROM_BSVI) $(wildcard src/*.bsv) $(wildcard $(REPO)/src_Core/*/*.bs
 	$(BSC) -u -verilog -g $(BSV_TOP) $(BSC_FLAGS) $(DEFINES) \
 	    -p $(BSC_PATH) -bdir $(BDIR) -vdir $(VDIR) -info-dir $(IDIR) \
 	    src/ULX3S_Top.bsv > $(BUILD)/elaboration.log 2>&1
+
+# ---- riscv-formal build (RVFI-instrumented mkCPU, own tree) ---------------
+# `make formal-verilog` compiles mkCPU (not the SoC) with -D RVFI into
+# build/formal/, where the tiny cache/BTB geometry and the RVFI record are
+# enabled.  Consumed by formal/run.sh (riscv-formal checks).  Never shares
+# build/bsc with the production build.
+FBDIR := $(BUILD)/formal/bsc
+FVDIR := $(BUILD)/formal/verilog
+FIDIR := $(BUILD)/formal/info
+FORMAL_VERILOG := $(BUILD)/formal/verilog_cpu.v
+
+.PHONY: formal-verilog
+formal-verilog: $(FORMAL_VERILOG)
+
+$(FORMAL_VERILOG): $(wildcard $(REPO)/src_Core/*/*.bsv)
+	mkdir -p $(FBDIR) $(FVDIR) $(FIDIR)
+	$(BSC) -u -verilog -g mkCPU $(BSC_FLAGS) $(DEFINES) -D RVFI \
+	    -p $(BSC_PATH) -bdir $(FBDIR) -vdir $(FVDIR) -info-dir $(FIDIR) \
+	    $(REPO)/src_Core/CPU/CPU.bsv > $(BUILD)/formal/elaboration.log 2>&1
+	cat $(FVDIR)/*.v > $@
 
 # ---- Elaboration-time SoC manifest (memory map / irqs / board) -----------
 # The Bluesoc design emits MEMMAP/MEMMAPIRQ/BOARD lines via messageM during

@@ -110,6 +110,10 @@ COMMON_FLAGS=(
     -Wno-STMTDLY
     -I"$ROOT/src"
 )
+# VERILATOR_TRACE=1: build with VCD tracing (then TB_TRACE=<file> TB_TRACE_FROM/TO=<cycle> at run time).
+# Keep VERILATOR_TRACE=1 on EVERY run that uses a traced BUILD_DIR: the flags are part of the
+# verilator build, so a run without it silently rebuilds that dir without tracing.
+if [[ "${VERILATOR_TRACE:-0}" == "1" ]]; then COMMON_FLAGS+=(--trace --trace-depth 12); fi
 
 if [[ "$LINT_ONLY" == "1" ]]; then
     verilator --lint-only "${COMMON_FLAGS[@]}" "${FILES[@]}"
@@ -173,7 +177,7 @@ if [[ -f "$COV_DB" ]]; then
     printf '[run.sh]   %-18s %s (benign BTB census, must be > 0)\n' "btb_cross_ba.hit" "${v:-MISSING}"
     if [[ "${v:--1}" == "0" || "${v:--1}" == "-1" ]]; then
         if [[ "${J1_WAIVE_BTB_CENSUS:-0}" == "1" ]]; then
-            echo "[run.sh] WARNING: btb_cross_ba census is ${v:-MISSING} but J1_WAIVE_BTB_CENSUS=1 (train-FIFO variants decouple bp_train from predict, eliminating the stock collision pattern; census-alive is cross-checked by the strict model's other bins and rc). Waiving."
+            echo "[run.sh] WARNING: btb_cross_ba census is ${v:-MISSING} but J1_WAIVE_BTB_CENSUS=1 (E2-E4 trained the BTB only from the fetch-feed block, so the stock same-cycle cross-port collision pattern vanished; from E5 on the single bp_train site brings the benign collisions back and the census is > 0 again, so this waiver is dormant. Census-alive is cross-checked by the strict model's other bins and rc). Waiving."
         else
             gate_fail=1
         fi

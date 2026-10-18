@@ -264,6 +264,66 @@ Sources checked (bsc install + Yosys 0.51):
   ask stream — `predict_req_pc` mux, 27 ns routing-dominated) or the
   stage1-output/bypass cone (28 ns, rld1pp-era) — both documented in
   HANDOFF 2026-10-15.
+- **E8d (2026-10-17, PROMOTED — new base 37.20 MHz s3): abandoned-refill fix +
+  C HINT decode fixes on top of RLD-4 + E1..E5.**  RLD-4 shipped with a hazard:
+  MMU_Cache.req has no flow control, so a request issued while a refill's AXI
+  burst was in flight (wrong-path miss, then a redirect) left the burst queued
+  and every later fill consumed the wrong data (E5 cache-test wedge; survey
+  "ROOT CAUSE", VCD-proven).  Fix in three iterations, each caught by the
+  cache test in sim and on hardware: E8 busy gate (mv_busy ConfigReg mirror) on
+  both launch sites; E8b busy excludes the hold-the-response states
+  CACHE_ST_AMO_RSP/IO_READ_RSP (else deadlock after the first store); E8c the
+  icache shim HOLDS an uncovered head while busy instead of popping it (else the
+  ask is lost; proven with the TB_STALL_WATCH snapshot).  E8d adds the C HINT
+  decode fixes riscv-formal found (rd=x0; C.ADDI nzimm=0; C shifts shamt=0).
+  The E1..E5 pipeline rework underneath gained no timing (35.1-36.3 band) and is
+  kept because E8 was built and verified on it; IPC = RLD-4.  Gates: J1 strict
+  PASS content-exact (hello 52,198,127 vs rld4 52,198,124); cache test T..D in
+  sim, PASS on hardware x2; bench 70/0/2 (same two I64 warns); F2 8/8; formal
+  smoke 10/10 + c.slli/srli/srai; s3 37.20 MHz.  Promotion custody: bit md5
+  89c95c82b6d86cb965f29c2ebbba996a = ecppack of e8d-s3.config (seed 3, from
+  verilog_all.v.e8d md5 efa849428a6a99447a1c5dc0f79dd1cc); bits/ulx3s_top.bit.e8d-37mhz.
+  Rollback bit: bits/ulx3s_top.bit.rld4-36mhz (md5 93a431d9...).  Still open on
+  E8d: the deep formal checks (reg, pc_fwd; build/formal/run-deep-e8d.log).
+  Flute commit d1385bf.  Records: build/timing-exp/50mhz-SURVEY.md rows e4..e8d,
+  ../HANDOFF.md 2026-10-17.
+- **RLD-4 (2026-10-16, PROMOTED — new base 35.94 MHz s3): deferred dmem
+  req launch + response-echo kill.**  The documented handshake unlock,
+  implemented G0033-SAFE AS A REGISTER: `rg_kill_echo` in MMU_Cache, set
+  by `ma_kill_echo` (CPU_Stage2.fa_enq on EVERY Stage2 enqueue), cleared
+  by the next `req`.  While set (exactly the one cycle between an op
+  entering Stage2 and its deferred request launch) the four dw_valid
+  drivers are silenced (probe guard += !rg_kill_echo; the three linger
+  states gate their drives) and the linger states exit to MODULE_READY.
+  First attempt used a PulseWire rsp_consumed; BSC rejected it with the
+  exact G0033 from the F4 lesson (Enable(dmem_rsp_consumed) ->
+  ReturnValue(dmem_valid), via stage2.enq losing always_ready).  LESSON:
+  same-cycle observation channels into MMU_Cache are the G0033 class even
+  OUTSIDE req; a method-written REGISTER read by rule guards is the safe
+  form.  Deferred launch (RLD-3 pattern + orphan guard on rg_stage2
+  holding a dmem op; dead tokens deq'd without launching).  Root analysis
+  BEFORE coding: stock safety = "next req fires at Stage2-enqueue time";
+  deferral breaks it via TWO echo classes RLD-3 never fixed (MODULE_RUNNING
+  probe re-drive every cycle until next req; orphan echoes from killed
+  ops) — both plausibly the rld3b/c putc#10 Verilator wedge.  Gates:
+  compile 0 err (no G0021/G0033); netlist verified (EN_req first in
+  rg_state mux — method wins linger exits; probe guard !rg_kill_echo);
+  J1 strict=error PASS content-exact (census clean, btb bin waived);
+  s3 35.94 MHz — the rld1pp-era 29.0 ns dcache cone is CUT, wall migrated
+  to the fetch-predict/enable cone (rg_pc -> fall-through add ->
+  predict_rsp -> rl_pipe enable cloud incl. perf taps + RLD FIFO fulls ->
+  csr rg_dpc, 27.82 ns); bench 70/0/2; cache test PASS; F2 8/8 (record
+  result in HANDOFF).  Promotion custody: bit md5
+  93a431d936c9d14f6c5a138d2af42fd3 = fresh ecppack from rld4-s3.config
+  (seed 3, from verilog_all.v.rld4 md5 281fd2090a760c9342ea3d17521ea8a6).
+  Rollback bit: bits/ulx3s_top.bit.rld1pp-34mhz (supersedes rld1pp as
+  promoted base).  Next 50 MHz lever: the 27.82 ns fetch-predict cone —
+  mapped in rld3-s3-report.json and rld4-s3-report.json path0; its mid-cone
+  runs through rl_pipe's ENABLE cloud (rg_step_count perf taps,
+  f_dreq_pending/f_bp_train full_regs), so the next cut likely slims the
+  enable cloud (endpoint cuts on the perf taps / FIFO full fan-in) before
+  or alongside registering the BTB read address.  Full design record:
+  build/timing-exp/rld4-PLAN.md.
 - **RLD campaign (2026-10-14/15, CLOSED — +4.2 MHz, short of 50 MHz)**:
   the scoped rl_pipe decomposition follow-up. (1) 3-rule rl_pipe split
   (moves in rl_pipe_feed + rl_pipe_commit with pulse-commit): CLOSED —
@@ -418,6 +478,93 @@ Sources checked (bsc install + Yosys 0.51):
    LESSON: sweep/runner judges must match the harness's actual PASS
    string; eyeball a failing seed's log tail before believing any
    batch verdict.
+
+9. BSC `-u` REBUILD KEYS ON SOURCE TIMESTAMPS, NOT ON `-D` DEFINES
+   (2026-10-16): changing DEFINES in the Makefile without `rm -rf
+   build/bsc` silently reuses .bo files compiled with the old defines
+   (an ISA_A removal "compiled clean" in 1 minute and left all 109
+   amo_funct7 references in the netlist).  Verify a define change by
+   grepping the netlist, and start define experiments from a clean bsc
+   dir.  Same class as the patched-Bluesim-header rule above.
+   ALSO (2026-10-17): `make compile` keys on SOURCE timestamps too -- the
+   $(VERILOG) target (build/verilog/mkULX3S_Top.v) is only remade when a
+   .bsv is newer, so a Makefile-only change prints "Nothing to be done"
+   even after `rm -rf build/bsc` (E6 first attempt produced the E5
+   netlist byte-for-byte).  For a define change do
+   `rm -rf build/bsc build/verilog/mkULX3S_Top.v` (or touch
+   src/ULX3S_Top.bsv), then check the netlist md5 actually changed.
+10. Timing structure without P&R: `scripts/depth_census.py <yosys json>`
+   (seconds) prints a LUT-depth histogram, a per-module deep-endpoint
+   table, and `--trace PATTERN` the deepest path into an endpoint.  Use
+   it to confirm a cone class is GONE (not moved) before spending 45 min
+   on nextpnr; single-seed s3 noise is ~±2 MHz between BSC re-emits.
+   New bridge registers read by rule guards must be mkConfigReg or they
+   join the G0021 class (E1 lesson, rl_stage1_xRET starved).  Campaign
+   record: build/timing-exp/50mhz-SURVEY.md.
+
+11. J1 "PASS" is content-exact only; it does NOT check IPC.  Always compare the
+    milestone cycle counts ("hello banner at cycle N") against the previous
+    netlist's J1 log: the loader's repair window is a fixed 2M-iteration poll
+    loop, so N is a direct IPC gate (rld4: 52,198,124).  E4 (2026-10-16) passed
+    J1 with N = 80,199,614 because a one-shot stage2 cf_info was consumed only
+    when the fetch-feed block happened to run; the BTB never learned a loop
+    jump.  For redirect counts without a re-run:
+    `verilator_coverage --annotate DIR --annotate-all --annotate-min 0 obj_dir_X/coverage.dat`
+    and read the toggle count on `reg rg_perf_redirect_tick;` (2 toggles per
+    redirect).  The .dat records the netlist path used at run time; sed the
+    path if that file has since been overwritten.
+    Also: bash reads a script incrementally, so NEVER edit run.sh /
+    run_sweep.sh while a run is in flight -- the E6/E7 J1 runs (2026-10-17)
+    passed the sim but died in run.sh's post-processing with a syntax error
+    because run.sh was edited mid-run (hazard bins were then re-read by hand
+    from obj_dir_X/coverage.dat).  Long Verilator builds launched from a
+    foreground tool call can be SIGTERMed when the call returns; launch them
+    as tracked background tasks.
+    CACHE-TEST IN SIM (the gate for this bug class, ~70 min):
+    `cd sim/strict_bram && TB_TX_TRACE=1 TB_HELLO_DEADLINE=70000000 BUILD_DIR=obj_dir_X
+     VERILOG_ALL=.../verilog_all.v.X ./run.sh --strict=warn .../test/cache_test.bin`
+    and expect `[tb] tx 0x44` ('D') after `tx 0x54` ('T'); `tx 0x4d` ('M') or no
+    'D' = fail (the scoreboard's hello FAIL is expected for this image).
+    TB_TRACE=<file.vcd> TB_TRACE_FROM/TO=<cycle> with VERILATOR_TRACE=1 on EVERY
+    run of that BUILD_DIR dumps a window; build/timing-exp/vcd_probe.py reads it.
+12. ABANDONED-REFILL HAZARD (2026-10-17, E5 cache-test wedge; survey "ROOT
+    CAUSE"): MMU_Cache.req has no flow control; a req while a refill's AXI
+    burst is in flight leaves that burst queued and the NEXT refill consumes it
+    (every fill one response behind).  The RLD-4 icache shim did this after a
+    flush (rg_inflight_valid cleared) and Stage2's rl_launch_dmem_req could too.
+    Fix (E8): MMU_Cache.mv_busy (ConfigReg mirror) gates both launch sites.
+    busy = not in {READY, RUNNING, EXCEPTION_RSP, CACHE_ST_AMO_RSP, IO_READ_RSP}:
+    the last two are hold-the-response states that only leave on the next req,
+    so counting them as busy deadlocks after the first store (E8a: T then hang).
+    The shim must HOLD an uncovered head while the inner is busy (E8c); popping it
+    (the pre-E8c "every head pops" rule) loses the ask and fetch hangs (E8b).
+    E8c (2026-10-17 13:52) = first E-series netlist to pass the hardware cache test
+    (J1 PASS, hello 52,198,127, 37.20 MHz s3); snapshots: MMU_Cache.bsv.e8a (bad busy
+    set), Near_Mem_Caches.bsv.e8b (popping shim).  E8d PROMOTED 2026-10-17 (user's call).
+    Locating a sim hang: TB_STALL_WATCH=<cycles> (needs a VERILATOR_TRACE=1 build dir;
+    no TB_TRACE needed) fails with a cpu/dcache/icache/shim register snapshot when
+    minstret stops advancing after the loader jump, and prints a progress line every
+    2M cycles.  The cache test's T comes ~52M cycles after the jump, so
+    TB_HELLO_DEADLINE must be > 52M for any cache-test sim.
+    Reliable BTB training (E5) is what made the wrong-path-miss-then-redirect
+    sequence common; E1-E4 passed by luck, not by design.
+    Branch_Predictor.bsv is the package CPU_StageF compiles; Branch_Predictor_NORMAL.bsv
+    and _NULL.bsv are unused copies (the first E7 edited _NORMAL and measured nothing).
+    SOC_BUILD_DATE changes the netlist md5 across days, so an md5 change alone does not
+    prove an edit landed -- grep the generated module for the feature.
+
+13. RISCV-FORMAL GATE (2026-10-17): `bash formal/run.sh` (~4 min, 10 checks: insn
+    add/addi/lw/sw/beq/jal/c.addi/c.j, causal, unique at the depths baked into
+    run.sh) MUST pass before any P&R or J1 run of a CPU change.  It checks the
+    real mkCPU (1KB caches, 16-entry BTB, all-memory SoC_Map, RVFI record at every
+    retirement site, see formal/README.md).  `formal/run.sh deep` = reg + pc_fwd
+    (hours).  Found so far: C.ADDI/LI/LUI/SLLI/MV/ADD rd=x0 HINTs, C.ADDI nzimm=0
+    and C.SLLI/SRLI/SRAI shamt=0 HINTs all trapped as illegal (fixed in
+    CPU_Decode_C.bsv; snapshots .pre-hint / .e8c).  Counterexamples:
+    ~/src/riscv-formal/cores/flute/checks/<check>/engine_0/trace.vcd; read them with
+    build/timing-exp/vcd_probe.py (rvfi_* vs spec_* under checker_inst, mcause/mtval
+    under wrapper.uut.csr_regfile).  A trap record must carry rs1/rs2 values: the
+    checker derives expected traps (misaligned address) from rvfi_rs1_rdata.
 
 ## Repository map
 

@@ -43,6 +43,9 @@
 #include "Vsv_tb_top__Dpi.h"
 #include "verilated.h"
 #include "verilated_cov.h"
+#if VM_TRACE_VCD
+#include "verilated_vcd_c.h"
+#endif
 #include "svdpi.h"
 
 #include <cstdint>
@@ -70,12 +73,14 @@ static std::deque<int> tx_stream; // byte queue for ACK/NAK scanning
 static size_t          tx_polled = 0;
 static int             dump_tx   = 0;
 
+static int tx_trace = 0;             // TB_TX_TRACE=1: print every TX byte with its cycle
 static void poll_tx() {
     int avail = sv_tx_avail();
     while ((int)tx_polled < avail) {
         int b = sv_tx_byte((int)tx_polled);
         if (b < 0) break;
         tx_log += (char)(b & 0xFF);
+        if (tx_trace) printf("[tb] tx 0x%02x at cycle %llu\n", b & 0xFF, (unsigned long long)g_cycle);
         tx_stream.push_back(b & 0xFF);
         tx_polled++;
     }
@@ -133,6 +138,31 @@ static bool deadline(vluint64_t cycles) {
     return (g_cycle - stage_start) > cycles;
 }
 
+#if VM_TRACE_VCD
+#include "Vsv_tb_top___024root.h"
+// TB_STALL_WATCH=<cycles>: in the post-jump stage, fail with a state snapshot when
+// minstret has not advanced for that many cycles (locates a hang without a VCD).
+#define CPU_SIG(x) (top->rootp->sv_tb_top__DOT__board__DOT__top__DOT__top__DOT__soc_top__DOT__core__DOT__cpu__DOT__##x)
+static void stall_snapshot(Vsv_tb_top* top, vluint64_t g_cycle) {
+    printf("[tb] STALL SNAPSHOT at cycle %llu: minstret=%llu cpu.rg_state=%u next_pc=%08x full F/D/1/2/3=%u%u%u%u%u dreq_pending empty=%u full=%u near_mem.rg_state=%u\n",
+           (unsigned long long)g_cycle, (unsigned long long)CPU_SIG(csr_regfile__DOT__rg_minstret), CPU_SIG(rg_state), CPU_SIG(rg_next_pc),
+           CPU_SIG(stageF_rg_full), CPU_SIG(stageD_rg_full), CPU_SIG(stage1_rg_full), CPU_SIG(stage2_rg_full), CPU_SIG(stage3_rg_full),
+           CPU_SIG(stage2_f_dreq_pending__DOT__empty_reg), CPU_SIG(stage2_f_dreq_pending__DOT__full_reg), CPU_SIG(near_mem__DOT__rg_state));
+    printf("[tb]   dcache: state=%u busy=%u kill_echo=%u op=%u addr=%08x req_seq=%u age_seen=%u\n",
+           CPU_SIG(near_mem__DOT__dcache__DOT__rg_state), CPU_SIG(near_mem__DOT__dcache__DOT__rg_busy_mirror), CPU_SIG(near_mem__DOT__dcache__DOT__rg_kill_echo),
+           CPU_SIG(near_mem__DOT__dcache__DOT__rg_op), CPU_SIG(near_mem__DOT__dcache__DOT__rg_addr), CPU_SIG(near_mem__DOT__dcache__DOT__rg_req_seq), CPU_SIG(near_mem__DOT__dcache__DOT__rg_age_seen));
+    printf("[tb]   icache: state=%u busy=%u kill_echo=%u op=%u addr=%08x req_seq=%u age_seen=%u\n",
+           CPU_SIG(near_mem__DOT__icache__DOT__rg_state), CPU_SIG(near_mem__DOT__icache__DOT__rg_busy_mirror), CPU_SIG(near_mem__DOT__icache__DOT__rg_kill_echo),
+           CPU_SIG(near_mem__DOT__icache__DOT__rg_op), CPU_SIG(near_mem__DOT__icache__DOT__rg_addr), CPU_SIG(near_mem__DOT__icache__DOT__rg_req_seq), CPU_SIG(near_mem__DOT__icache__DOT__rg_age_seen));
+    printf("[tb]   shim: q_wr=%u q_rd=%u inflight=%u@%08x last=%u@%08x slots=%u%u%u%u await=%u shown=%u w_valid=%u reshow_pend=%u\n",
+           CPU_SIG(near_mem__DOT__idec_rg_q_wr), CPU_SIG(near_mem__DOT__idec_rg_q_rd),
+           CPU_SIG(near_mem__DOT__idec_rg_inflight_valid), CPU_SIG(near_mem__DOT__idec_rg_inflight_addr),
+           CPU_SIG(near_mem__DOT__idec_rg_last_valid), CPU_SIG(near_mem__DOT__idec_rg_last_addr),
+           CPU_SIG(near_mem__DOT__idec_rg_s3_valid), CPU_SIG(near_mem__DOT__idec_rg_s2_valid), CPU_SIG(near_mem__DOT__idec_rg_s1_valid), CPU_SIG(near_mem__DOT__idec_rg_s0_valid),
+           CPU_SIG(near_mem__DOT__idec_rg_await_valid), CPU_SIG(near_mem__DOT__idec_rg_shown), CPU_SIG(near_mem__DOT__idec_rg_w_valid), CPU_SIG(near_mem__DOT__idec_rg_reshow_pend));
+}
+#endif
+
 int main(int argc, char** argv) {
     setvbuf(stdout, NULL, _IOLBF, 0);   // line-buffered: progress under load
 
@@ -157,6 +187,7 @@ int main(int argc, char** argv) {
         args.push_back(synthesized.c_str());
     }
     Verilated::commandArgs((int)args.size(), (char**)&args[0]);
+    tx_trace = getenv("TB_TX_TRACE") != nullptr;
 
     printf("[tb] image: %s\n", image_path);
     if (env_strict) printf("[tb] STRICT_BRAM=%s\n", env_strict);
@@ -171,6 +202,21 @@ int main(int argc, char** argv) {
            image.size(), (image.size() + 255) / 256);
 
     top = new Vsv_tb_top;
+#if VM_TRACE_VCD
+    VerilatedVcdC* tfp = nullptr;            // TB_TRACE=<file.vcd> [TB_TRACE_FROM/TO=<cycle>]
+    vluint64_t tr_from = 0, tr_to = ~0ULL;
+    if (const char* tf = getenv("TB_TRACE")) {
+        Verilated::traceEverOn(true);
+        tfp = new VerilatedVcdC; top->trace(tfp, 99); tfp->open(tf);
+        if (const char* a = getenv("TB_TRACE_FROM")) tr_from = strtoull(a, nullptr, 10);
+        if (const char* b = getenv("TB_TRACE_TO"))   tr_to   = strtoull(b, nullptr, 10);
+        printf("[tb] VCD trace %s cycles %llu..%llu\n", tf, (unsigned long long)tr_from, (unsigned long long)tr_to);
+    }
+#define TB_DUMP(t) do { if (tfp && g_cycle >= tr_from) { if (g_cycle <= tr_to) tfp->dump((vluint64_t)(t)); else { tfp->close(); tfp = nullptr; } } } while (0)
+#else
+#define TB_DUMP(t) do {} while (0)
+#endif
+
     top->clk = 0;
     top->btn1 = 0;          // FIRE1 not pressed: power-on reset only
     top->jtag_tck = 0;      // JTAG TAP tied off
@@ -189,9 +235,14 @@ int main(int argc, char** argv) {
     vluint64_t chunk_deadline    = 200000000;  // 8 s per ACK
     vluint64_t readback_deadline = 200000000;
     vluint64_t hello_deadline    = 600000000;  // repair window is ~10 s+
+    if (const char* hd = getenv("TB_HELLO_DEADLINE")) hello_deadline = strtoull(hd, nullptr, 10);  // override for short diagnostic runs
     vluint64_t overall_deadline  = 900000000;
 
     int dpi_ready = 0;
+#if VM_TRACE_VCD
+    vluint64_t stall_watch = 0, stall_last_cycle = 0, stall_last_minstret = 0, stall_next_report = 0;
+    if (const char* sw = getenv("TB_STALL_WATCH")) stall_watch = strtoull(sw, nullptr, 10);
+#endif
 
     while (stage != ST_PASS && stage != ST_FAIL) {
         if (g_cycle > overall_deadline) { fail("overall deadline"); break; }
@@ -200,6 +251,7 @@ int main(int argc, char** argv) {
         top->clk = 1;
         top->eval();
         g_cycle++;
+        TB_DUMP(2 * g_cycle);
 
         if (!dpi_ready) {
             // initial blocks have now run: agents exist.  One-time DPI
@@ -213,9 +265,26 @@ int main(int argc, char** argv) {
 
         top->clk = 0;
         top->eval();
+        TB_DUMP(2 * g_cycle + 1);
 
         // pull freshly assembled monitor bytes (negedge tick ran above)
         poll_tx();
+#if VM_TRACE_VCD
+        if (stall_watch && stage == ST_HELLO) {
+            vluint64_t m = CPU_SIG(csr_regfile__DOT__rg_minstret);
+            if (m != stall_last_minstret) { stall_last_minstret = m; stall_last_cycle = g_cycle; }
+            else if (g_cycle - stall_last_cycle > stall_watch) {
+                printf("[tb] no retirement since cycle %llu (minstret %llu)\n", (unsigned long long)stall_last_cycle, (unsigned long long)m);
+                stall_snapshot(top, g_cycle);
+                fail("retirement stalled");
+                break;
+            }
+            if (g_cycle >= stall_next_report) {
+                printf("[tb] progress cycle %llu minstret %llu next_pc %08x\n", (unsigned long long)g_cycle, (unsigned long long)m, CPU_SIG(rg_next_pc));
+                stall_next_report = g_cycle + 2000000;
+            }
+        }
+#endif
 
         // ---- scenario state machine -------------------------------
         switch (stage) {
@@ -325,6 +394,9 @@ int main(int argc, char** argv) {
         }
     }
 
+#if VM_TRACE_VCD
+    if (tfp) tfp->close();
+#endif
     // ---- SV-side verdict + coverage sampling (the gate) -------------
     int sb_rc = sv_final_checks();
     if (sb_rc != 0) {
