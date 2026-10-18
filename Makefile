@@ -56,6 +56,17 @@ DEFINES := -D RV32 -D ISA_I -D ISA_M -D ISA_A -D ISA_C \
            -D INCLUDE_ACCEL0 \
            -D INCLUDE_GDB_CONTROL -D JTAG_TAP
 
+# SYS_PLL=1: 32.142857 MHz system clock from the ECP5 PLL (src/Top.v).
+# Changing it needs a clean bsc build (rm -rf build/bsc build/verilog/mkULX3S_Top.v):
+# bsc -u does not see -D changes.  Bench: EXPECT_HZ=32142857 scripts/hw_test_suite.py.
+SYS_PLL ?= 0
+ifeq ($(SYS_PLL),1)
+DEFINES     += -D SYS_CLK_HZ=32142857
+YOSYS_DEFS  := -DSYS_PLL
+else
+YOSYS_DEFS  :=
+endif
+
 # Sim builds omit the JTAG TAP (the Bluesim top is the BSV module
 # itself); the UART DMI bridge provides debug access in simulation too.
 # subst (not filter-out): "JTAG_TAP" alone would match nothing, "-D"
@@ -171,7 +182,7 @@ $(SYNTH_VERILOG): $(VERILOG)
 	done > $@
 
 $(JSON): $(SYNTH_VERILOG) src/Top.v src/ASSIGN1.v
-	$(YOSYS) -p 'read_verilog -DINCLUDE_GDB_CONTROL $(BSC_VERILOG_FILES) src/ASSIGN1.v $(SYNTH_VERILOG) src/Top.v; synth_ecp5 -top $(TOP) -json $@'
+	$(YOSYS) -p 'read_verilog -DINCLUDE_GDB_CONTROL $(YOSYS_DEFS) $(BSC_VERILOG_FILES) src/ASSIGN1.v $(SYNTH_VERILOG) src/Top.v; synth_ecp5 -top $(TOP) -json $@'
 
 synth: $(JSON)
 

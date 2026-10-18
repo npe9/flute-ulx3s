@@ -29,7 +29,11 @@ package uart_agent_pkg;
 
   class uart_driver;
     virtual board_pins_if vif;
+    `ifdef UART_CPB
+    localparam int CYCLES_PER_BIT = `UART_CPB;   // PLL netlist (run.sh UART_CPB=51)
+`else
     localparam int CYCLES_PER_BIT = 40;   // 25 MHz / 625000 baud
+`endif
 
     logic bits[$];     // pending wire levels, one per bit cell
     int   timer = 0;
@@ -63,7 +67,11 @@ package uart_agent_pkg;
   class uart_monitor;
     virtual board_pins_if vif;
     mailbox #(byte) mbx;
+    `ifdef UART_CPB
+    localparam int CYCLES_PER_BIT = `UART_CPB;   // must match the driver
+`else
     localparam int CYCLES_PER_BIT = 40;   // must match the driver
+`endif
 
     // mid-bit sampling state (ports tb_top.cpp's tx_sample())
     int        st     = 0;   // 0 idle, 1 in start, 2 data, 3 stop

@@ -25,6 +25,10 @@ import termios
 import fcntl
 import time
 
+# System clock the bitstream under test runs at (SoC Info CPU_HZ): 25 MHz raw board
+# clock by default, EXPECT_HZ=32142857 for a `make SYS_PLL=1` bitstream.
+EXPECT_HZ = int(os.environ.get('EXPECT_HZ', '25000000'))
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dmi import DMI  # noqa: E402
 
@@ -409,9 +413,9 @@ def main():
                   lambda: dmi.mem_read32(0xC000300C), lambda v: bool(v & 0x10))
         dmi_check('SoCInfo features perf',
                   lambda: dmi.mem_read32(0xC000300C), lambda v: bool(v & 0x80))
-        dmi_check('SoCInfo cpu_hz 25M',
+        dmi_check(f'SoCInfo cpu_hz {EXPECT_HZ}',
                   lambda: dmi.mem_read32(0xC0003010),
-                  lambda v: v == 25000000)
+                  lambda v: v == EXPECT_HZ)
         dmi_check('SoCInfo memory 32MB',
                   lambda: dmi.mem_read32(0xC0003018),
                   lambda v: v == 0x2000000)
@@ -480,8 +484,8 @@ def main():
             time.sleep(1.2)
             b = dmi.mem_read32(PERF_CNT[0])
             return b - a
-        dmi_check('perf cycles rate ~25 MHz', _cycles_rate,
-                  lambda d: 20_000_000 <= d <= 32_000_000)
+        dmi_check(f'perf cycles rate ~{EXPECT_HZ/1e6:.2f} MHz', _cycles_rate,
+                  lambda d: 0.8 * EXPECT_HZ <= d <= 1.28 * EXPECT_HZ)
 
         def _retire():
             dmi.mem_write32(PERF_SEL[1], 1)    # counter1 = retired instructions

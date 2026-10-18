@@ -1,10 +1,10 @@
 // Verilog wrapper: connects the BSC-generated mkULX3S_Top to ULX3S-85F
 // board pins (clock, FTDI UART, LEDs, ESP32 reset, SDR SDRAM).
 //
-// The board clock is 25 MHz and the design closes timing at 25 MHz on
-// the 85F (26.99 MHz worst seed-1 path after the Stage2 BYPASS_RD fix),
-// so the system clock is the raw board clock.  SDRAM/UART timing
-// parameters derive from sys_clk_hz in src/ULX3S_Top.bsv.
+// The board clock is 25 MHz.  Default build: the system clock is the raw
+// board clock.  `make SYS_PLL=1`: the system clock is 32.14 MHz from the
+// ECP5 PLL (see below).  SDRAM/UART timing parameters derive from
+// sys_clk_hz in src/ULX3S_Top.bsv (SYS_CLK_HZ define in the PLL build).
 module ulx3s_top(
     input  wire        CLK,         // 25 MHz, G2
     input  wire        BTN1,        // FIRE1, active high, R1
@@ -32,14 +32,46 @@ module ulx3s_top(
     inout  wire [15:0] sdram_dq,    // J16..J17
     output wire [1:0]  sdram_dqm    // U19 E20
 );
-    // System clock: raw 25 MHz board clock (timing closes at 25 MHz).
+`ifdef SYS_PLL
+    // System clock: 32.142857 MHz from the ECP5 PLL (25 MHz x 9 / 7; the
+    // VCO runs at 610.7 MHz, CLKOP_DIV 19).  32.5 MHz is not reachable
+    // (25 x 13/10 needs a 2.5 MHz PFD, below the 3.125 MHz minimum);
+    // `ecppll -i 25 -o 32.5` picks this.  Build with `make SYS_PLL=1`,
+    // which also passes SYS_CLK_HZ=32142857 to bsc (UART divisor 51,
+    // 0.8% fast; SDRAM tRFC 3 clocks).  Timing margin vs the 37.2 MHz
+    // E8d fmax: 13.6%, inside the 12% rule.
+    wire sys_clk;
+    wire pll_locked;
+    (* FREQUENCY_PIN_CLKI="25" *)
+    (* FREQUENCY_PIN_CLKOP="32.142857" *)
+    (* ICP_CURRENT="12" *) (* LPF_RESISTOR="8" *) (* MFG_ENABLE_FILTEROPAMP="1" *) (* MFG_GMCREF_SEL="2" *)
+    EHXPLLL #(
+        .PLLRST_ENA("DISABLED"), .INTFB_WAKE("DISABLED"), .STDBY_ENABLE("DISABLED"),
+        .DPHASE_SOURCE("DISABLED"),
+        .OUTDIVIDER_MUXA("DIVA"), .OUTDIVIDER_MUXB("DIVB"),
+        .OUTDIVIDER_MUXC("DIVC"), .OUTDIVIDER_MUXD("DIVD"),
+        .CLKI_DIV(7), .CLKOP_ENABLE("ENABLED"), .CLKOP_DIV(19),
+        .CLKOP_CPHASE(9), .CLKOP_FPHASE(0),
+        .FEEDBK_PATH("CLKOP"), .CLKFB_DIV(9)
+    ) sys_pll (
+        .RST(1'b0), .STDBY(1'b0), .CLKI(CLK),
+        .CLKOP(sys_clk), .CLKFB(sys_clk),
+        .PHASESEL0(1'b0), .PHASESEL1(1'b0), .PHASEDIR(1'b1),
+        .PHASESTEP(1'b1), .PHASELOADREG(1'b1), .PLLWAKESYNC(1'b0),
+        .ENCLKOP(1'b0), .LOCK(pll_locked)
+    );
+`else
+    // System clock: raw 25 MHz board clock.
     wire sys_clk = CLK;
+    wire pll_locked = 1'b1;
+`endif
 
-    // Hold the design in reset briefly after configuration; FIRE1
-    // restarts it manually.  Count on the sys_clk domain.
+    // Hold the design in reset briefly after configuration (and until the
+    // PLL locks, in the PLL build); FIRE1 restarts it manually.  Count on
+    // the sys_clk domain.
     reg [7:0] power_on_reset = 8'h00;
     always @(posedge sys_clk) begin
-        if (BTN1)
+        if (BTN1 || !pll_locked)
             power_on_reset <= 8'h00;
         else if (!&power_on_reset)
             power_on_reset <= power_on_reset + 1'b1;

@@ -114,6 +114,9 @@ COMMON_FLAGS=(
 # Keep VERILATOR_TRACE=1 on EVERY run that uses a traced BUILD_DIR: the flags are part of the
 # verilator build, so a run without it silently rebuilds that dir without tracing.
 if [[ "${VERILATOR_TRACE:-0}" == "1" ]]; then COMMON_FLAGS+=(--trace --trace-depth 12); fi
+# UART_CPB=<n>: UART agent bit period in clocks for a netlist built at another clock
+# (clk_hz / 625000 rounded down: 51 for the SYS_PLL=1 netlist).  Part of the build too.
+if [[ -n "${UART_CPB:-}" ]]; then COMMON_FLAGS+=(-DUART_CPB=$UART_CPB); fi
 
 if [[ "$LINT_ONLY" == "1" ]]; then
     verilator --lint-only "${COMMON_FLAGS[@]}" "${FILES[@]}"

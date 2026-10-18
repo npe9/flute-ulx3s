@@ -85,7 +85,11 @@ module mkULX3S_Top (ULX3S_Top_IFC);
    // Board-level constants, single-sourced: used by the UART/SDRAM
    // instantiation AND the elaboration-time BOARD manifest line (captured
    // with the MEMMAP lines into build/soc-memory-map.json).
+`ifdef SYS_CLK_HZ
+   Integer sys_clk_hz = `SYS_CLK_HZ;   // PLL build (make SYS_PLL=1; src/Top.v)
+`else
    Integer sys_clk_hz = 25_000_000;    // raw 25 MHz board clock (src/Top.v)
+`endif
    Integer uart_baud  = 625_000;
 
    rule rl_emit_board_manifest;

@@ -552,6 +552,10 @@ Sources checked (bsc install + Yosys 0.51):
     and _NULL.bsv are unused copies (the first E7 edited _NORMAL and measured nothing).
     SOC_BUILD_DATE changes the netlist md5 across days, so an md5 change alone does not
     prove an edit landed -- grep the generated module for the feature.
+    Conversely an md5 change does not prove the LOGIC changed: an incremental `bsc -u`
+    build and a clean build of the same sources differ in MUX/CSE wire naming (seen
+    2026-10-17: E8d incremental vs clean, 6 modules differ, all proven equivalent).
+    Use build/timing-exp/equiv_modules.sh A.v B.v (yosys equiv per module).
 
 13. RISCV-FORMAL GATE (2026-10-17): `bash formal/run.sh` (~4 min, 10 checks: insn
     add/addi/lw/sw/beq/jal/c.addi/c.j, causal, unique at the depths baked into
@@ -565,6 +569,14 @@ Sources checked (bsc install + Yosys 0.51):
     build/timing-exp/vcd_probe.py (rvfi_* vs spec_* under checker_inst, mcause/mtval
     under wrapper.uut.csr_regfile).  A trap record must carry rs1/rs2 values: the
     checker derives expected traps (misaligned address) from rvfi_rs1_rdata.
+
+14. CLOCK BUILDS (2026-10-18): `make SYS_PLL=1` = 32.142857 MHz system clock from an
+    EHXPLLL in src/Top.v (needs a clean bsc build); sim it with UART_CPB=51 run.sh;
+    bench it with EXPECT_HZ=32142857.  e4-bench.sh now refuses a bitstream whose last
+    post-route fmax is < 10% over its clock (rule 7; BENCH_FORCE_LOW_MARGIN=1 overrides).
+    E8d at 32.14 MHz: seeds 35.2-38.7 MHz, seed 1 passed bench + cache test on
+    hardware; not promoted (rule 0 + seed pick = user decision).  ISA_C off (E9):
+    40.5-41.1 MHz at 25, 44.2-46.2 at the 32.14 constraint (survey, 2026-10-17/18).
 
 ## Repository map
 

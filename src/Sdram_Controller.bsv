@@ -11,9 +11,10 @@
 // col+8), with auto-precharge, so all banks are closed between
 // requests and refresh can be inserted at request boundaries.
 //
-// Timing constants are in 12.5 MHz clock cycles (80 ns):
-//   tRCD 1 (>=18 ns),  CL 2,  tRFC 2 (>=66 ns),  tRP/tMRD 2,
-//   refresh every 98 cycles (7.8 us),  power-up wait 200 us.
+// Timing constants are in system clock cycles (25 MHz = 40 ns; the PLL
+// build runs at 32.14 MHz = 31.1 ns): tRCD 1 (>=18 ns), CL 2, tRFC and the
+// init gaps derived from clk_hz (>=66 ns, at least 2), refresh every 98
+// cycles (<= 7.8 us at any clock >= 12.5 MHz), power-up wait 200 us.
 // ================================================================
 
 package Sdram_Controller;
@@ -42,10 +43,8 @@ Bit #(4) cmd_mrs     = 4'b0000;
 // Mode register: CL2, BL8, sequential burst, write bursts enabled
 Bit #(13) mode_reg_value = 13'h0023;
 
-Integer t_init_gap    = 2;     // between init commands (tRP, tRFC, tMRD)
 Integer t_rcd         = 1;     // ACT -> READ/WRITE
 Integer t_cas_first   = 3;     // IOB reg + BSV input reg pipeline (sim-validated)
-Integer t_rfc         = 2;
 Integer refresh_div   = 98;     // 7.8 us at 12.5 MHz (80 ns/cycle)
 
 // ================================================================
@@ -96,6 +95,14 @@ endfunction
 module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
 
    Integer t_powerup = clk_hz / 5000;    // 200 us
+   // tRFC >= 66 ns (and the init gaps tRP/tRFC/tMRD, which it covers), in
+   // clocks, at least 2: 2 at 25 MHz (80 ns), 3 at the 32.14 MHz PLL clock
+   // (2 would be 62 ns).  Refresh interval refresh_div (98 clocks) stays
+   // well under tREFI 7.8 us at any clock >= 12.5 MHz.
+   Integer ns_x_hz   = 66 * clk_hz;
+   Integer t_rfc_c   = (ns_x_hz + 999_999_999) / 1_000_000_000;
+   Integer t_rfc     = max (2, t_rfc_c);
+   Integer t_init_gap = t_rfc;
 
    Reg #(State)     rg_state     <- mkReg (ST_PWR_WAIT);
    Reg #(Bit #(16)) rg_wait      <- mkReg (0);
