@@ -5,7 +5,8 @@ debug module) against the RISC-V ISA with [riscv-formal](https://github.com/Yosy
 to be run **before** a 40-minute P&R / 40-minute J1 sim.
 
     formal/run.sh            # THE GATE: build + smoke set (insn x8, causal, unique), ~4 min, run before every FPGA build
-    formal/run.sh deep       # pc_fwd + reg at depth 75: hours (pc_fwd 2.3 h), not part of the gate
+    formal/run.sh deep       # pc_fwd + reg at depth 75: pc_fwd ~2 h (PASS on E8d); reg proves 0-74 then
+                             # stalls >10 h on step 75 -- use REG_DEPTH=74 for a run that finishes
     formal/run.sh cover      # find the first-retirement depth after a geometry change
     formal/run.sh insn_lw_ch0 pc_fwd_ch0    # individual checks
 

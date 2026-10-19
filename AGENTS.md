@@ -264,6 +264,31 @@ Sources checked (bsc install + Yosys 0.51):
   ask stream — `predict_req_pc` mux, 27 ns routing-dominated) or the
   stage1-output/bypass cone (28 ns, rld1pp-era) — both documented in
   HANDOFF 2026-10-15.
+- **E12 (2026-10-19, PROMOTED — new base 44.18 MHz s3, seeds 44.2-45.8): E11
+  decode-free return prediction + E12 dcache AMO split, on E8d + the mepc fix.**
+  E11: the ISA_C timing cost was the branch predictor decoding the realigned
+  16/32-bit instruction in the fetch cycle to spot returns.  Returns are now
+  classified when JALR resolves (CF_Info.is_ret: rs1 in {x1,x5} and not
+  rd==rs1 link) and stored as a BTB bit; a flagged BTB hit predicts from the RAS
+  top.  Fetch census 22.9 -> 18.0 levels (= ISA_C off) with ISA_C kept.
+  mepc fix (found by riscv-formal c.beqz): mepc reads with bit 0 cleared and
+  MRET masks bit 0, so an unwritten (unreset) mepc can no longer send MRET to an
+  odd PC.  E12: the AMO ALU ran in the dcache probe cycle (tag compare -> AMO
+  add/compare chains -> cword merge -> BRAM DIA, 24.5 levels, deepest in the
+  SoC).  An AMO hit now captures cword_set/way/word64 and goes to
+  CACHE_AMO_EXEC (rl_amo_exec: AMO op, cache write, write-through), then
+  CACHE_ST_AMO_RSP as before; +1 cycle per AMO.  Census max 24.5 -> 18.9; the
+  critical path left the core (soc_info slave rd_addr -> rd_data).  Seeds
+  45.72/45.83/44.18/44.52 MHz (clean E8e baseline 34.3-34.9).  Gates: formal
+  smoke 10/10 (E11: 16/16 incl. the jump and C-branch checks); J1 strict PASS
+  hello 52,198,124; cache test sim T..D + hw PASS x2; NEW AMO test
+  (test/amo_test.S, rule 15) sim + hw PASS; bench 70/0/2; F2 8/8.  Custody:
+  bit md5 caaa8e8c25acb7ff2c0674ec477e8996 = ecppack of e12-s3.config (seed 3,
+  verilog_all.v.e12 md5 95694054a65b0c124451c2177b1de1e2);
+  bits/ulx3s_top.bit.e12-44mhz.  Rollback: bits/ulx3s_top.bit.e8d-37mhz.
+  Flute commit 75815cd.
+  Records: build/timing-exp/50mhz-SURVEY.md (E10, E11, E12), ../HANDOFF.md
+  2026-10-19.
 - **E8d (2026-10-17, PROMOTED — new base 37.20 MHz s3): abandoned-refill fix +
   C HINT decode fixes on top of RLD-4 + E1..E5.**  RLD-4 shipped with a hazard:
   MMU_Cache.req has no flow control, so a request issued while a refill's AXI
@@ -577,6 +602,16 @@ Sources checked (bsc install + Yosys 0.51):
     E8d at 32.14 MHz: seeds 35.2-38.7 MHz, seed 1 passed bench + cache test on
     hardware; not promoted (rule 0 + seed pick = user decision).  ISA_C off (E9):
     40.5-41.1 MHz at 25, 44.2-46.2 at the 32.14 constraint (survey, 2026-10-17/18).
+
+15. AMO GATE (2026-10-19): riscv-formal has no RV32A checks (commented out
+    upstream), so any change to the LR/SC/AMO path (MMU_Cache probe, rl_amo_exec,
+    Stage2 AMO launch) must pass test/amo_test.S in sim
+    (`run.sh --strict=warn $PWD/test/amo_test.bin`, expect tx 0x54 then 0x44, no
+    0x4d) and on hardware (`python3 test/run_cache_test.py <bit> test/amo_test.bin`,
+    raw "TD").  Boot-loader images must have a word-multiple length (pad the .bin)
+    or the loader falls back to its byte path and the sim scoreboard aborts on
+    '.'.  For test images the scoreboard's final "hello banner missing from
+    postload" FAIL is expected; judge by the T/M/D bytes.
 
 ## Repository map
 
