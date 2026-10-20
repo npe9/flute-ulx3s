@@ -146,20 +146,17 @@ static bool deadline(vluint64_t cycles) {
 static void stall_snapshot(Vsv_tb_top* top, vluint64_t g_cycle) {
     printf("[tb] STALL SNAPSHOT at cycle %llu: minstret=%llu cpu.rg_state=%u next_pc=%08x full F/D/1/2/3=%u%u%u%u%u dreq_pending empty=%u full=%u near_mem.rg_state=%u\n",
            (unsigned long long)g_cycle, (unsigned long long)CPU_SIG(csr_regfile__DOT__rg_minstret), CPU_SIG(rg_state), CPU_SIG(rg_next_pc),
-           CPU_SIG(stageF_rg_full), CPU_SIG(stageD_rg_full), CPU_SIG(stage1_rg_full), CPU_SIG(stage2_rg_full), CPU_SIG(stage3_rg_full),
+           CPU_SIG(stageF_rg_full), !CPU_SIG(stageD_f_data__DOT__empty_reg), CPU_SIG(stage1_rg_full), CPU_SIG(stage2_rg_full), CPU_SIG(stage3_rg_full),
            CPU_SIG(stage2_f_dreq_pending__DOT__empty_reg), CPU_SIG(stage2_f_dreq_pending__DOT__full_reg), CPU_SIG(near_mem__DOT__rg_state));
     printf("[tb]   dcache: state=%u busy=%u kill_echo=%u op=%u addr=%08x req_seq=%u age_seen=%u\n",
            CPU_SIG(near_mem__DOT__dcache__DOT__rg_state), CPU_SIG(near_mem__DOT__dcache__DOT__rg_busy_mirror), CPU_SIG(near_mem__DOT__dcache__DOT__rg_kill_echo),
            CPU_SIG(near_mem__DOT__dcache__DOT__rg_op), CPU_SIG(near_mem__DOT__dcache__DOT__rg_addr), CPU_SIG(near_mem__DOT__dcache__DOT__rg_req_seq), CPU_SIG(near_mem__DOT__dcache__DOT__rg_age_seen));
-    printf("[tb]   icache: state=%u busy=%u kill_echo=%u op=%u addr=%08x req_seq=%u age_seen=%u\n",
-           CPU_SIG(near_mem__DOT__icache__DOT__rg_state), CPU_SIG(near_mem__DOT__icache__DOT__rg_busy_mirror), CPU_SIG(near_mem__DOT__icache__DOT__rg_kill_echo),
-           CPU_SIG(near_mem__DOT__icache__DOT__rg_op), CPU_SIG(near_mem__DOT__icache__DOT__rg_addr), CPU_SIG(near_mem__DOT__icache__DOT__rg_req_seq), CPU_SIG(near_mem__DOT__icache__DOT__rg_age_seen));
-    printf("[tb]   shim: q_wr=%u q_rd=%u inflight=%u@%08x last=%u@%08x slots=%u%u%u%u await=%u shown=%u w_valid=%u reshow_pend=%u\n",
-           CPU_SIG(near_mem__DOT__idec_rg_q_wr), CPU_SIG(near_mem__DOT__idec_rg_q_rd),
-           CPU_SIG(near_mem__DOT__idec_rg_inflight_valid), CPU_SIG(near_mem__DOT__idec_rg_inflight_addr),
-           CPU_SIG(near_mem__DOT__idec_rg_last_valid), CPU_SIG(near_mem__DOT__idec_rg_last_addr),
-           CPU_SIG(near_mem__DOT__idec_rg_s3_valid), CPU_SIG(near_mem__DOT__idec_rg_s2_valid), CPU_SIG(near_mem__DOT__idec_rg_s1_valid), CPU_SIG(near_mem__DOT__idec_rg_s0_valid),
-           CPU_SIG(near_mem__DOT__idec_rg_await_valid), CPU_SIG(near_mem__DOT__idec_rg_shown), CPU_SIG(near_mem__DOT__idec_rg_w_valid), CPU_SIG(near_mem__DOT__idec_rg_reshow_pend));
+    // E20: I-side is ICache_Pipe (the I MMU_Cache and the Imem_Decoup shim are retired)
+    printf("[tb]   icache: st=%u want=%u pc=%08x pf=%08x halt_io=%u halt_exc=%u s1=%u s2=%u stale=%u miss=%08x\n",
+           CPU_SIG(near_mem__DOT__icache__DOT__rg_st), CPU_SIG(near_mem__DOT__icache__DOT__rg_want), CPU_SIG(near_mem__DOT__icache__DOT__rg_pc),
+           CPU_SIG(near_mem__DOT__icache__DOT__rg_pf) << 3, CPU_SIG(near_mem__DOT__icache__DOT__rg_halt_io), CPU_SIG(near_mem__DOT__icache__DOT__rg_halt_exc),
+           CPU_SIG(near_mem__DOT__icache__DOT__rg_s1_v), CPU_SIG(near_mem__DOT__icache__DOT__rg_s2_v), CPU_SIG(near_mem__DOT__icache__DOT__rg_stale),
+           CPU_SIG(near_mem__DOT__icache__DOT__rg_miss_a) << 3);
 }
 #endif
 

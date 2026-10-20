@@ -264,6 +264,34 @@ Sources checked (bsc install + Yosys 0.51):
   ask stream — `predict_req_pc` mux, 27 ns routing-dominated) or the
   stage1-output/bypass cone (28 ns, rld1pp-era) — both documented in
   HANDOFF 2026-10-15.
+- **E20 (2026-10-20, PROMOTED — new base 48.88 MHz s3, seeds 48.9-53.1,
+  CPI 4.00 -> 1.05 on straight-line code): pipelined I-side on E13 + E14 + E15 +
+  E18 + E19.**  E13: soc_info two-stage read; Stage3 always-on GPR writeback.
+  E14: front end decoupled from the dcache response (2-entry StageD UGFIFOF,
+  rl_front, unguarded bp_train).  E15: Mem_Controller address check at merge +
+  BTB write enable.  E18: AXI4_Fabric per-master registered route decode (+1
+  cycle per AW/AR hop).  E19: debug reset/halt rules most urgent (G0010 116 ->
+  83).  E20: new ICache_Pipe.bsv replaces the I-side MMU_Cache, the
+  Imem_Decoup shim and CPU_Fetch_C: one always-firing rule reads tag+data BRAM
+  every cycle along the sequential stream into a 4-entry cword queue (S1 BRAM
+  read, S2 hit test), prefetch only within cacheable memory, refills never
+  abandoned (a redirect marks them stale), device-space fetch by single demand
+  read.  New test/ipc_bench.S (+ scripts/ipc_bench_decode.py): 8 kernels, CPI
+  E19 -> E20 alu32 4.00 -> 1.05, aluc 2.50 -> 1.05, branchy 4.17 -> 2.11,
+  calls 4.01 -> 2.18, chase 3.78 -> 3.23, MMIO poll 5.00 -> 5.20.  J1 hello
+  52,194,077 (E12 52,198,124; E18/E19 50,198,181: +4M from the fabric hop on
+  the boot loader's UART poll, then +2M from E20's +1 cycle per MMIO-stalled
+  loop iteration).  Census >=18: 18 endpoints (E19 71).  Seeds 1/2/3/4 =
+  53.13 / 50.99 / 48.88 / 51.92.  Gates: formal smoke 10/10; J1 strict PASS;
+  cache + AMO test sim + hw PASS; ipc_bench hw = sim; bench 70/0/2; F2 8/8.
+  Not covered by any gate: device-space fetch (formal treats all addresses as
+  memory), fetch access fault via refill error, stream halt at a region
+  boundary, reset during a refill.  Critical paths now: CSR write address
+  decode -> CSR CE (s1/s4), dcache AXI xactor (s2), dcache rsp -> minstret
+  (s3).  Custody: bit md5 e8521522ce3759cb7d4a1819c353731c = ecppack of
+  e20-s3.config (verilog_all.v.e20 md5 5c71b373be1ab4c50d15913117ae8096);
+  bits/ulx3s_top.bit.e20-48mhz.  Rollback: bits/ulx3s_top.bit.e12-44mhz.
+  Records: build/timing-exp/50mhz-SURVEY.md (E13-E20), ../HANDOFF.md 2026-10-20.
 - **E12 (2026-10-19, PROMOTED — new base 44.18 MHz s3, seeds 44.2-45.8): E11
   decode-free return prediction + E12 dcache AMO split, on E8d + the mepc fix.**
   E11: the ISA_C timing cost was the branch predictor decoding the realigned

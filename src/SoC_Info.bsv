@@ -189,18 +189,17 @@ module mkSoC_Info #(int clk_hz) (SoC_Info_IFC);
       else             return 0;
    endfunction
 
-   function Bit #(32) fn_devrom_walk (Bit #(32) idx, List #(MemRegion) rs);
-      if (List::isNull (rs))
-         return 0;
-      else if (idx < 8)
-         return fn_devrom_field (List::head (rs), idx);
-      else
-         return fn_devrom_walk (idx - 8, List::tail (rs));
-   endfunction
-
-   // u32 index within the ROM (each record = 8 u32)
+   // u32 index within the ROM (each record = 8 u32).  E13: one parallel
+   // compare per record on idx[31:3] (was a recursive walk subtracting 8 per
+   // record, a carry chain per device in series).
    function Bit #(32) fn_devrom (Bit #(32) u32_idx);
-      return fn_devrom_walk (u32_idx, fn_soc_memmap ());
+      List #(MemRegion) rs = fn_soc_memmap ();
+      Bit #(32) rec = u32_idx >> 3;
+      Bit #(32) v   = 0;
+      for (Integer i = 0; i < List::length (rs); i = i + 1)
+         if (rec == fromInteger (i))
+            v = fn_devrom_field (rs [i], zeroExtend (u32_idx [2:0]));
+      return v;
    endfunction
 
    // ---- combinational register read ------------------------------------
@@ -248,7 +247,7 @@ module mkSoC_Info #(int clk_hz) (SoC_Info_IFC);
    // word containing the address; the requester picks the lanes.
    function Bit #(Wd_Data) fn_read (Bit #(Wd_Addr) addr);
       Bit #(32) word_addr = truncate (addr) & 32'hFFFF_FFF8;
-      return { fn_read32 (word_addr + 4), fn_read32 (word_addr) };
+      return { fn_read32 (word_addr | 4), fn_read32 (word_addr) };    // E13: | not + (8-aligned)
    endfunction
 
 
@@ -283,17 +282,26 @@ module mkSoC_Info #(int clk_hz) (SoC_Info_IFC);
 
    // ---- read handler ----------------------------------------------------
 
-   rule rl_rd;
+   // E13: two-stage read.  rl_rd_addr does the range check and the base
+   // subtract; rl_rd_data reads the register/ROM mux from the registered
+   // offset (the one-cycle form was a 22 ns critical path: subtract -> 32-bit
+   // compares -> device-ROM walk -> rdata).  The FIFO keeps AXI read order.
+   FIFOF #(Tuple4 #(Bit #(Wd_Id), Bit #(Wd_User), Bool, Bit #(Wd_Addr))) f_rd_pending <- mkFIFOF;
+
+   rule rl_rd_addr;
       let rda <- pop_o (slave_xactor.o_rd_addr);
-      AXI4_Resp   rresp = ((rda.araddr < rg_addr_base) || (rda.araddr >= rg_addr_lim))
-                          ? axi4_resp_decerr : axi4_resp_okay;
-      Fabric_Data rdata = ((rda.araddr < rg_addr_base) || (rda.araddr >= rg_addr_lim))
-                          ? 0 : fn_read (rda.araddr - rg_addr_base);
-      slave_xactor.i_rd_data.enq (AXI4_Rd_Data {rid:   rda.arid,
-                                                rdata: rdata,
-                                                rresp: rresp,
+      Bool in_range = (rda.araddr >= rg_addr_base) && (rda.araddr < rg_addr_lim);
+      f_rd_pending.enq (tuple4 (rda.arid, rda.aruser, in_range, rda.araddr - rg_addr_base));
+   endrule
+
+   rule rl_rd_data;
+      match { .arid, .aruser, .in_range, .offset } = f_rd_pending.first;
+      f_rd_pending.deq;
+      slave_xactor.i_rd_data.enq (AXI4_Rd_Data {rid:   arid,
+                                                rdata: (in_range ? fn_read (offset) : 0),
+                                                rresp: (in_range ? axi4_resp_okay : axi4_resp_decerr),
                                                 rlast: True,
-                                                ruser: rda.aruser});
+                                                ruser: aruser});
    endrule
 
    // ---- INTERFACE
