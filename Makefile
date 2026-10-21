@@ -49,8 +49,9 @@ BSC_PATH  := +:$(CURDIR)/src:$(CORE_DIRS):$(TB_DIRS)
 BUILD_DATE := $(shell date +%Y%m%d)
 
 DEFINES := -D RV32 -D ISA_I -D ISA_M -D ISA_A -D ISA_C \
+           -D ISA_B -D ISA_ZKN -D ISA_XBOX \
            -D SOC_BUILD_DATE=$(BUILD_DATE) \
-           -D ISA_PRIV_M -D ISA_PRIV_U \
+           -D ISA_PRIV_M -D ISA_PRIV_U -D ISA_PRIV_S -D SV32 -D SV32_ITLB \
            -D SHIFT_BARREL -D MULT_SYNTH \
            -D Near_Mem_Caches -D FABRIC64 \
            -D INCLUDE_ACCEL0 \

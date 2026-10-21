@@ -3,7 +3,7 @@
 # Depths: the core needs ~N cycles after reset (cache/regfile/BTB reset loops,
 # first fetch through the AXI slave) before the first retirement; see README.md.
 [options]
-isa rv32imc
+isa @ISA@
 nret 1
 solver boolector
 
@@ -19,7 +19,9 @@ cover       1 @COVER_DEPTH@
 
 [defines]
 `define RISCV_FORMAL_ALIGNED_MEM
+`define RISCV_FORMAL_MEM_FAULT
 `define RISCV_FORMAL_UMODE
+`define RISCV_FORMAL_SMODE
 `define FLUTE_AXI_STALL 0
 `define BSV_NO_INITIAL_BLOCKS
 

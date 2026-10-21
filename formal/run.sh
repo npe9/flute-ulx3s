@@ -4,14 +4,18 @@
 #   formal/run.sh cover           -> only the cover check (find the first-retire depth)
 #   formal/run.sh deep            -> the slow checks (pc_fwd, reg); hours, not a smoke gate
 #   formal/run.sh insn_addi_ch0 reg_ch0 ...   -> specific checks
-# Env: INSN_DEPTH REG_DEPTH PC_DEPTH COVER_DEPTH LIVE_START LIVE_DEPTH JOBS RISCV_FORMAL
+# Env: INSN_DEPTH REG_DEPTH PC_DEPTH COVER_DEPTH LIVE_START LIVE_DEPTH JOBS RISCV_FORMAL ISA CSRCFG
+#   CSRCFG=formal/csrs_mu.cfg adds the CSR checks (csrw_*, csrc_*, csr_ill_*) and the Sail-derived
+#   trap_ch0 / mret_ch0 (riscv-formal-a); needs the RVFI CSR channel in mkCPU.
+#   ISA (default rv32imc): rv32imac needs a riscv-formal with the A-extension models
+#   (~/src/riscv-formal-a, branch a-ext: insn_lr_w / insn_sc_w / insn_amo*_w from the Sail model).
 set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 RF=${RISCV_FORMAL:-$HOME/src/riscv-formal}
 BSCLIB=${BSC_LIB:-$HOME/src/bsc/inst/lib/Verilog}
 # Gate depths (2026-10-17, 1KB caches + 16-entry BTB: first retirement at BMC step 52, 4th at 58):
 # the smoke set finishes in ~4 min with these; raise them only after a geometry change (run `cover` first).
-: "${INSN_DEPTH:=62}" "${REG_DEPTH:=75}" "${PC_DEPTH:=75}" "${COVER_DEPTH:=60}" "${LIVE_START:=55}" "${LIVE_DEPTH:=75}" "${JOBS:=4}"
+: "${ISA:=rv32imc}" "${INSN_DEPTH:=62}" "${REG_DEPTH:=75}" "${PC_DEPTH:=75}" "${COVER_DEPTH:=60}" "${LIVE_START:=55}" "${LIVE_DEPTH:=75}" "${JOBS:=4}"
 # smoke = the checks that finish in minutes at the gate depths; reg_ch0 / pc_fwd_ch0 take hours at
 # depth 75 (pc_fwd 2.3 h, reg > 3 h unfinished on 2026-10-17) and run as `formal/run.sh deep`.
 SMOKE="insn_addi_ch0 insn_add_ch0 insn_lw_ch0 insn_sw_ch0 insn_beq_ch0 insn_jal_ch0 insn_c_addi_ch0 insn_c_j_ch0 causal_ch0 unique_ch0"
@@ -23,12 +27,20 @@ python3 formal/gen_wrapper.py build/formal/verilog/mkCPU.v > formal/wrapper.sv
 cp build/formal/verilog_cpu.v formal/verilog_cpu.v
 # BSC library modules the CPU can instantiate (clock/reset/probe/sync helpers excluded: not synthesizable in formal)
 LIBS=$(ls $BSCLIB/*.v | grep -vE "main.v|Probe|InoutConnect|TriState|Clock|Reset|Sync|Crossing|Inout|ConvertToZ|ConvertFromZ|ResolveZ|ConstrainedRandom|ScanIn|Fork|Empty|DualPortRam|RegAligned|Load.v|ASSIGN|SampleReg|McpRegUN|RevertReg|InitialReset|LatchCrossing")
-python3 - "$ROOT" "$INSN_DEPTH" "$REG_DEPTH" "$PC_DEPTH" "$COVER_DEPTH" "$LIVE_START" "$LIVE_DEPTH" $LIBS <<'PY'
+python3 - "$ROOT" "$INSN_DEPTH" "$REG_DEPTH" "$PC_DEPTH" "$COVER_DEPTH" "$LIVE_START" "$LIVE_DEPTH" "$ISA" $LIBS <<'PY'
 import sys
-root, insn, reg, pc, cover, lstart, ldepth = sys.argv[1:8]; libs = sys.argv[8:]
+root, insn, reg, pc, cover, lstart, ldepth, isa = sys.argv[1:9]; libs = sys.argv[9:]
 s = open(f"{root}/formal/checks.cfg.in").read()
-for k, v in (("@INSN_DEPTH@", insn), ("@REG_DEPTH@", reg), ("@PC_DEPTH@", pc), ("@COVER_DEPTH@", cover), ("@LIVE_START@", lstart), ("@LIVE_DEPTH@", ldepth), ("@LIBS@", "\n".join(libs))):
+for k, v in (("@INSN_DEPTH@", insn), ("@REG_DEPTH@", reg), ("@PC_DEPTH@", pc), ("@COVER_DEPTH@", cover), ("@LIVE_START@", lstart), ("@LIVE_DEPTH@", ldepth), ("@ISA@", isa), ("@LIBS@", "\n".join(libs))):
     s = s.replace(k, v)
+# CSRCFG: an extra config snippet (e.g. formal/csrs_mu.cfg: [csrs], [illegal_csrs], CSR/trap depths)
+import os
+extra = os.environ.get("CSRCFG")
+if extra:
+    t = open(extra if extra.startswith("/") else f"{root}/{extra}").read()
+    for k, v in (("@INSN_DEPTH@", insn), ("@REG_DEPTH@", reg)):
+        t = t.replace(k, v)
+    s += "\n" + t
 open(f"{root}/formal/checks.cfg", "w").write(s)
 PY
 # genchecks.py derives basedir/core name from the PHYSICAL cwd, so the core dir must live

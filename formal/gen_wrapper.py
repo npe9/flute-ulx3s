@@ -73,7 +73,97 @@ for n in names:
 P('')
 P('\t// ---- RVFI ----')
 for f in ('valid', 'order', 'insn', 'trap', 'halt', 'intr', 'mode', 'ixl', 'rs1_addr', 'rs2_addr', 'rs1_rdata', 'rs2_rdata',
-          'rd_addr', 'rd_wdata', 'pc_rdata', 'pc_wdata', 'mem_addr', 'mem_rmask', 'mem_wmask', 'mem_rdata', 'mem_wdata'):
+          'rd_addr', 'rd_wdata', 'pc_rdata', 'pc_wdata', 'mem_rmask', 'mem_wmask', 'mem_rdata', 'mem_wdata'):
     P(f'\tassign rvfi_{f} = mv_rvfi_{f};')
+# Load / store / AMO access and page faults (PMP, PA above 32 bits, Sv32) are reported through riscv-formal's
+# RISCV_FORMAL_MEM_FAULT channel: a trap whose cause is 5, 7, 13 or 15 names the faulting access
+# (tval = its address).  The insn checks then require the fault to sit on the model's access
+# (same word, same write bytes); the trap check pins the cause class.
+P('`ifdef RISCV_FORMAL_MEM_FAULT')
+P('\twire rvfi_xfault = mv_rvfi_trap && (mv_rvfi_csr_kind == 2 || mv_rvfi_csr_kind == 4)'
+  ' && (mv_rvfi_mcause == 5 || mv_rvfi_mcause == 7 || mv_rvfi_mcause == 13 || mv_rvfi_mcause == 15);')
+P("\twire [1:0] rvfi_st_size = (mv_rvfi_insn[6:0] == 7'b0100011) ? mv_rvfi_insn[13:12] : 2'd2;   // SB/SH/SW; C.SW/C.SWSP/AMO/SC word")
+P("\twire [3:0] rvfi_st_bytes = (rvfi_st_size == 0) ? 4'b0001 : (rvfi_st_size == 1) ? 4'b0011 : 4'b1111;")
+P('\tassign rvfi_mem_fault = rvfi_xfault;')
+P("\tassign rvfi_mem_fault_rmask = rvfi_xfault ? 4'b1111 : 4'b0;")
+P("\tassign rvfi_mem_fault_wmask = (rvfi_xfault && (mv_rvfi_mcause == 7 || mv_rvfi_mcause == 15)) ? (rvfi_st_bytes << mv_rvfi_mtval[1:0]) : 4'b0;")
+P("\tassign rvfi_mem_addr = rvfi_xfault ? (mv_rvfi_mtval & ~32'd3) : mv_rvfi_mem_addr;")
+P('`else')
+P('\tassign rvfi_mem_addr = mv_rvfi_mem_addr;')
+P('`endif')
+
+# ---- RVFI CSR channel: fan the CPU's generic CSRRx slot and its trap / MRET fields out to
+# riscv-formal's per-CSR signals (each under its RISCV_FORMAL_CSR_<NAME>, which genchecks
+# defines for the CSRs the config enables).  Addresses follow riscv-formal's rvfi_macros.py.
+if 'mv_rvfi_csr_kind' in decl:
+    X = {  # name: (machine/user low addresses, high-half addresses for 64-bit counters)
+        'mvendorid': ([0xF11], None), 'marchid': ([0xF12], None), 'mimpid': ([0xF13], None),
+        'mhartid': ([0xF14], None), 'mconfigptr': ([0xF15], None),
+        'mstatus': ([0x300], None), 'mstatush': ([0x310], None), 'misa': ([0x301], None),
+        'medeleg': ([0x302], None), 'mideleg': ([0x303], None), 'mie': ([0x304], None),
+        'mtvec': ([0x305], None), 'mcounteren': ([0x306], None), 'mscratch': ([0x340], None),
+        'mepc': ([0x341], None), 'mcause': ([0x342], None), 'mtval': ([0x343], None),
+        'mip': ([0x344], None), 'mtinst': ([0x34A], None), 'mtval2': ([0x34B], None),
+        'mcountinhibit': ([0x320], None), 'menvcfg': ([0x30A], None), 'menvcfgh': ([0x31A], None),
+        **{f'pmpcfg{i}': ([0x3A0 + i], None) for i in range(16)},
+        **{f'pmpaddr{i}': ([0x3B0 + i], None) for i in range(64)},
+        **{f'mhpmevent{i}': ([0x320 + i], None) for i in range(3, 32)},
+        'mcycle': ([0xB00, 0xC00], [0xB80, 0xC80]), 'minstret': ([0xB02, 0xC02], [0xB82, 0xC82]),
+        **{f'mhpmcounter{i}': ([0xB00 + i, 0xC00 + i], [0xB80 + i, 0xC80 + i]) for i in range(3, 32)},
+        'mseccfg': ([0x747], None),
+        'sstatus': ([0x100], None), 'sie': ([0x104], None), 'stvec': ([0x105], None),
+        'scounteren': ([0x106], None), 'senvcfg': ([0x10A], None), 'sscratch': ([0x140], None),
+        'sepc': ([0x141], None), 'scause': ([0x142], None), 'stval': ([0x143], None),
+        'sip': ([0x144], None), 'satp': ([0x180], None),
+    }
+    # side effects of kind 2 (trap to M), 3 (MRET), 4 (trap to S), 5 (SRET):
+    # name -> (rmask cond, wmask cond, rdata, wdata).  Kinds 4 / 5 reuse the epc / cause / tval /
+    # tvec registers for sepc / scause / stval / stvec.
+    k = lambda *ks: '(' + ' || '.join(f'mv_rvfi_csr_kind == {x}' for x in ks) + ')'
+    SYS = {
+        'mstatus': (k(2, 3, 4, 5), k(2, 3, 4, 5), 'mv_rvfi_mstatus_r', '@mv_rvfi_mstatus_w'),
+        'mepc':    (k(3), k(2), '@mv_rvfi_mepc', '@mv_rvfi_mepc'),
+        'mcause':  ('0', k(2), '0', '@mv_rvfi_mcause'),
+        'mtval':   ('0', k(2), '0', 'mv_rvfi_mtval'),
+        'mtvec':   (k(2), '0', 'mv_rvfi_mtvec', '0'),
+        'medeleg': (k(2, 4), '0', 'mv_rvfi_medeleg', '0'),
+        'sepc':    (k(5), k(4), '@mv_rvfi_mepc', '@mv_rvfi_mepc'),
+        'scause':  ('0', k(4), '0', '@mv_rvfi_mcause'),
+        'stval':   ('0', k(4), '0', 'mv_rvfi_mtval'),
+        'stvec':   (k(4), '0', 'mv_rvfi_mtvec', '0'),
+    }
+    # RVFI_MUTANT (vacuity tests only): corrupt one CSR-channel field so the matching check must FAIL
+    import os
+    mut = os.environ.get('RVFI_MUTANT', '')
+    mx = {'csr_rdata': 'mv_rvfi_csr_rdata', 'mepc': 'mv_rvfi_mepc', 'mcause': 'mv_rvfi_mcause',
+          'mstatus_w': 'mv_rvfi_mstatus_w'}
+    if mut:
+        assert mut in mx, mut
+        P(f'\t// RVFI_MUTANT={mut}: {mx[mut]} has bit 0 flipped -- NOT a valid wrapper')
+        P(f'\twire [31:0] {mx[mut]}_mut = {mx[mut]} ^ 32\'h1;')
+    def f(sig):
+        return f'{sig}_mut' if mut and mx[mut] == sig else sig
+    P('')
+    P('\t// ---- RVFI CSR channel (see gen_wrapper.py) ----')
+    def hit(addrs):
+        return '(mv_rvfi_csr_kind == 1 && (' + ' || '.join(f"mv_rvfi_csr_addr == 12'h{a:03X}" for a in addrs) + '))'
+    for name, (lo, hi) in X.items():
+        P(f'`ifdef RISCV_FORMAL_CSR_{name.upper()}')
+        if hi is None:
+            rm, wm, rd, wd = SYS.get(name, ('0', '0', '0', '0'))
+            h = hit(lo)
+            P(f'\tassign rvfi_csr_{name}_rmask = {h} ? (mv_rvfi_csr_rd  ? ~32\'b0 : 32\'b0) : (({rm}) ? ~32\'b0 : 32\'b0);')
+            P(f'\tassign rvfi_csr_{name}_wmask = {h} ? (mv_rvfi_csr_wen ? ~32\'b0 : 32\'b0) : (({wm}) ? ~32\'b0 : 32\'b0);')
+            rd = f(rd[1:]) if rd.startswith('@') else rd
+            wd = f(wd[1:]) if wd.startswith('@') else wd
+            P(f'\tassign rvfi_csr_{name}_rdata = {h} ? {f("mv_rvfi_csr_rdata")} : {rd};')
+            P(f'\tassign rvfi_csr_{name}_wdata = {h} ? mv_rvfi_csr_wdata : {wd};')
+        else:
+            hl, hh = hit(lo), hit(hi)
+            P(f"\tassign rvfi_csr_{name}_rmask = mv_rvfi_csr_rd  ? ({hl} ? 64'h0000_0000_FFFF_FFFF : {hh} ? 64'hFFFF_FFFF_0000_0000 : 64'b0) : 64'b0;")
+            P(f"\tassign rvfi_csr_{name}_wmask = mv_rvfi_csr_wen ? ({hl} ? 64'h0000_0000_FFFF_FFFF : {hh} ? 64'hFFFF_FFFF_0000_0000 : 64'b0) : 64'b0;")
+            P(f"\tassign rvfi_csr_{name}_rdata = {hh} ? {{{f('mv_rvfi_csr_rdata')}, 32'b0}} : {{32'b0, {f('mv_rvfi_csr_rdata')}}};")
+            P(f"\tassign rvfi_csr_{name}_wdata = {hh} ? {{mv_rvfi_csr_wdata, 32'b0}} : {{32'b0, mv_rvfi_csr_wdata}};")
+        P('`endif')
 P('endmodule')
 print('\n'.join(out))
