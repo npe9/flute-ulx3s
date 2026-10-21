@@ -79,18 +79,37 @@ for f in ('valid', 'order', 'insn', 'trap', 'halt', 'intr', 'mode', 'ixl', 'rs1_
 # RISCV_FORMAL_MEM_FAULT channel: a trap whose cause is 5, 7, 13 or 15 names the faulting access
 # (tval = its address).  The insn checks then require the fault to sit on the model's access
 # (same word, same write bytes); the trap check pins the cause class.
+# memory window: RISCV_FORMAL_MEMLEN = the width of mv_rvfi_mem_rdata (64 with D: FLD/FSD), mask = MEMLEN/8
+MB = decl['mv_rvfi_mem_rmask'][1]
 P('`ifdef RISCV_FORMAL_MEM_FAULT')
 P('\twire rvfi_xfault = mv_rvfi_trap && (mv_rvfi_csr_kind == 2 || mv_rvfi_csr_kind == 4)'
   ' && (mv_rvfi_mcause == 5 || mv_rvfi_mcause == 7 || mv_rvfi_mcause == 13 || mv_rvfi_mcause == 15);')
-P("\twire [1:0] rvfi_st_size = (mv_rvfi_insn[6:0] == 7'b0100011) ? mv_rvfi_insn[13:12] : 2'd2;   // SB/SH/SW; C.SW/C.SWSP/AMO/SC word")
-P("\twire [3:0] rvfi_st_bytes = (rvfi_st_size == 0) ? 4'b0001 : (rvfi_st_size == 1) ? 4'b0011 : 4'b1111;")
+# store size: SB/SH/SW and FSW/FSD (funct3[1:0]); compressed C.FSD/C.FSDSP (funct3 101) 8 bytes; C.SW/C.SWSP/C.FSW/C.FSWSP/AMO/SC word
+P("\twire rvfi_st_32 = mv_rvfi_insn[1:0] == 2'b11;")
+P("\twire [1:0] rvfi_st_size = (rvfi_st_32 && (mv_rvfi_insn[6:0] == 7'b0100011 || mv_rvfi_insn[6:0] == 7'b0100111)) ? mv_rvfi_insn[13:12] :")
+P("\t                          (!rvfi_st_32 && mv_rvfi_insn[15:13] == 3'b101) ? 2'd3 : 2'd2;")
+P(f"\twire [{MB-1}:0] rvfi_st_bytes = (rvfi_st_size == 0) ? 'h1 : (rvfi_st_size == 1) ? 'h3 : (rvfi_st_size == 2) ? 'hF : 'hFF;")
 P('\tassign rvfi_mem_fault = rvfi_xfault;')
-P("\tassign rvfi_mem_fault_rmask = rvfi_xfault ? 4'b1111 : 4'b0;")
-P("\tassign rvfi_mem_fault_wmask = (rvfi_xfault && (mv_rvfi_mcause == 7 || mv_rvfi_mcause == 15)) ? (rvfi_st_bytes << mv_rvfi_mtval[1:0]) : 4'b0;")
-P("\tassign rvfi_mem_addr = rvfi_xfault ? (mv_rvfi_mtval & ~32'd3) : mv_rvfi_mem_addr;")
+P(f"\tassign rvfi_mem_fault_rmask = rvfi_xfault ? {{{MB}{{1'b1}}}} : {MB}'b0;")
+P(f"\tassign rvfi_mem_fault_wmask = (rvfi_xfault && (mv_rvfi_mcause == 7 || mv_rvfi_mcause == 15)) ? (rvfi_st_bytes << mv_rvfi_mtval[{(MB-1).bit_length()-1}:0]) : {MB}'b0;")
+P(f"\tassign rvfi_mem_addr = rvfi_xfault ? (mv_rvfi_mtval & ~32'd{MB-1}) : mv_rvfi_mem_addr;")
 P('`else')
 P('\tassign rvfi_mem_addr = mv_rvfi_mem_addr;')
 P('`endif')
+
+# ---- F/D (riscv-formal-fp): FPR operands / result; fcsr (with the frm / fflags aliases) and the
+# mstatus.FS view of an FP op or an fflags/frm/fcsr CSRRx come from mv_rvfi_fp_* (see CPU.bsv RVFI_FP)
+FP = 'mv_rvfi_frs1_addr' in decl
+if FP:
+    P('`ifdef RISCV_FORMAL_FPU')
+    for f_ in ('frs1_addr', 'frs2_addr', 'frs3_addr', 'frs1_rvalid', 'frs2_rvalid', 'frs3_rvalid',
+               'frs1_rdata', 'frs2_rdata', 'frs3_rdata', 'frd_addr', 'frd_wvalid', 'frd_wdata'):
+        P(f'\tassign rvfi_{f_} = mv_rvfi_{f_};')
+    P('`endif')
+    P('`ifdef RISCV_FORMAL_CSR_FCSR')
+    for f_ in ('rmask', 'wmask', 'rdata', 'wdata'):
+        P(f"\tassign rvfi_csr_fcsr_{f_} = mv_rvfi_fp_valid ? {{24'b0, mv_rvfi_fcsr_{f_}}} : 32'b0;")
+    P('`endif')
 
 # ---- RVFI CSR channel: fan the CPU's generic CSRRx slot and its trap / MRET fields out to
 # riscv-formal's per-CSR signals (each under its RISCV_FORMAL_CSR_<NAME>, which genchecks
@@ -152,10 +171,19 @@ if 'mv_rvfi_csr_kind' in decl:
         if hi is None:
             rm, wm, rd, wd = SYS.get(name, ('0', '0', '0', '0'))
             h = hit(lo)
-            P(f'\tassign rvfi_csr_{name}_rmask = {h} ? (mv_rvfi_csr_rd  ? ~32\'b0 : 32\'b0) : (({rm}) ? ~32\'b0 : 32\'b0);')
-            P(f'\tassign rvfi_csr_{name}_wmask = {h} ? (mv_rvfi_csr_wen ? ~32\'b0 : 32\'b0) : (({wm}) ? ~32\'b0 : 32\'b0);')
             rd = f(rd[1:]) if rd.startswith('@') else rd
             wd = f(wd[1:]) if wd.startswith('@') else wd
+            if FP and name == 'mstatus':
+                # FP op / fcsr CSRRx: mstatus read (FS), FS + SD written when it goes Dirty
+                fpk = f'(mv_rvfi_fp_valid && !({h}) && !({rm}))'
+                P(f'\tassign rvfi_csr_{name}_rmask = {h} ? (mv_rvfi_csr_rd  ? ~32\'b0 : 32\'b0) : (({rm}) ? ~32\'b0 : {fpk} ? ~32\'b0 : 32\'b0);')
+                P(f'\tassign rvfi_csr_{name}_wmask = {h} ? (mv_rvfi_csr_wen ? ~32\'b0 : 32\'b0) : (({wm}) ? ~32\'b0 : ({fpk} && mv_rvfi_fp_mstatus_wen) ? 32\'h8000_6000 : 32\'b0);')
+                P(f'\tassign rvfi_csr_{name}_rdata = {h} ? {f("mv_rvfi_csr_rdata")} : ({rm}) ? {rd} : {fpk} ? mv_rvfi_fp_mstatus_r : 32\'b0;')
+                P(f'\tassign rvfi_csr_{name}_wdata = {h} ? mv_rvfi_csr_wdata : ({wm}) ? {wd} : {fpk} ? mv_rvfi_fp_mstatus_w : 32\'b0;')
+                P('`endif')
+                continue
+            P(f'\tassign rvfi_csr_{name}_rmask = {h} ? (mv_rvfi_csr_rd  ? ~32\'b0 : 32\'b0) : (({rm}) ? ~32\'b0 : 32\'b0);')
+            P(f'\tassign rvfi_csr_{name}_wmask = {h} ? (mv_rvfi_csr_wen ? ~32\'b0 : 32\'b0) : (({wm}) ? ~32\'b0 : 32\'b0);')
             P(f'\tassign rvfi_csr_{name}_rdata = {h} ? {f("mv_rvfi_csr_rdata")} : {rd};')
             P(f'\tassign rvfi_csr_{name}_wdata = {h} ? mv_rvfi_csr_wdata : {wd};')
         else:
