@@ -154,14 +154,20 @@ static bool deadline(vluint64_t cycles) {
 #include "Vsv_tb_top___024root.h"
 // TB_STALL_WATCH=<cycles>: in the post-jump stage, fail with a state snapshot when
 // minstret has not advanced for that many cycles (locates a hang without a VCD).
+#define TOP_SIG(x) (top->rootp->sv_tb_top__DOT__board__DOT__top__DOT__top__DOT__##x)
 #define CPU_SIG(x) (top->rootp->sv_tb_top__DOT__board__DOT__top__DOT__top__DOT__soc_top__DOT__core__DOT__cpu__DOT__##x)
 // TB_PERF: ICache_Pipe IState (10) and MMU_Cache Module_State (RV32, 19) histograms, event counts.
 struct Perf {
     unsigned long long cyc, ist[16], dst[32], priv[4], s1_empty;
     unsigned long long i_refill, i_walk, d_refill, d_walk, i_lat, i_beat;
     unsigned last_ist, last_dst;
+    // Memory side: Mem_Controller (1 raw-word cache) and Sdram_Controller state accounting.
+    unsigned long long mc_reload, mc_reload_busy, mc_wb, mc_reloading, sd_st[32], sd_rd, sd_wr, sd_busy_rd, sd_busy_wr;
+    unsigned last_mc, last_mc_clean, last_sd;
 };
 static Perf perf_cur, perf_tot;
+static const char* sd_name[] = {"PWR_WAIT","PRE_ALL","PRE_ALL_WAIT","INIT_REF1","INIT_REF1_WAIT","INIT_REF2","INIT_REF2_WAIT",
+    "MRS","MRS_WAIT","IDLE","ACT","RCD_WAIT","RD","RD_CAP","GAP","WR","WR_DATA","WR_END","REF","REF_WAIT"};
 static const char* ist_name[] = {"RUN","REFILL_REQ","REFILL","IO_REQ","IO_RSP","FLUSH","PTW1_REQ","PTW1_RSP","PTW0_REQ","PTW0_RSP"};
 static const char* dst_name[] = {"PRERESET","RESETTING","READY","RUNNING","EXC_RSP","PTW_START","PTW_L1","PTW_L0","START_REFILL",
     "SNAPSHOT","REFILL","REREQ","AMO_EXEC","ST_AMO_RSP","IO_REQ","IO_AWAIT_W","IO_AWAIT_R","IO_READ_RSP","IO_AWAIT_AMO"};
@@ -177,6 +183,16 @@ static void perf_sample(Vsv_tb_top* top) {
     if (dst == 8 && p.last_dst != 8) p.d_refill++;
     if (dst == 5 && p.last_dst != 5) p.d_walk++;
     p.last_ist = ist; p.last_dst = dst;
+    unsigned mc = TOP_SIG(soc_top__DOT__mem0_controller__DOT__rg_state) & 7;     // 3 RELOADING, 4 READY
+    unsigned clean = TOP_SIG(soc_top__DOT__mem0_controller__DOT__rg_cached_clean) & 1;
+    unsigned sd = TOP_SIG(mem_rg_state) & 31, sdw = TOP_SIG(mem_rg_req_write) & 1;
+    p.sd_st[sd]++;
+    if (sd != 9 && sd >= 10 && sd <= 17) { if (sdw) p.sd_busy_wr++; else p.sd_busy_rd++; }
+    if (sd == 10 && p.last_sd != 10) { if (sdw) p.sd_wr++; else p.sd_rd++; }
+    if (mc == 3) p.mc_reloading++;
+    if (mc == 3 && p.last_mc != 3) { p.mc_reload++; if (p.last_sd != 9) p.mc_reload_busy++; }
+    if (clean && !p.last_mc_clean && p.last_mc != 3) p.mc_wb++;
+    p.last_mc = mc; p.last_mc_clean = clean; p.last_sd = sd;
 }
 static void perf_print(const char* tag, const Perf& p, unsigned long long inst) {
     if (!p.cyc) return;
@@ -189,6 +205,10 @@ static void perf_print(const char* tag, const Perf& p, unsigned long long inst) 
     for (int i = 0; i < 10; i++) if (p.ist[i]) printf(" %s %.1f%%", ist_name[i], 100 * p.ist[i] / c);
     printf("\n[perf]   D: refills %llu walks %llu |", p.d_refill, p.d_walk);
     for (int i = 0; i < 19; i++) if (p.dst[i] && i != 3) printf(" %s %.1f%%", dst_name[i], 100 * p.dst[i] / c);
+    printf("\n[perf]   M: reloads %llu (%.1f cyc each, %.1f%% issued while SDRAM busy) writebacks %llu | SDRAM rd %llu wr %llu busy rd %.1f%% wr %.1f%% |",
+           p.mc_reload, p.mc_reload ? (double)p.mc_reloading / p.mc_reload : 0.0, p.mc_reload ? 100.0 * p.mc_reload_busy / p.mc_reload : 0.0,
+           p.mc_wb, p.sd_rd, p.sd_wr, 100 * p.sd_busy_rd / c, 100 * p.sd_busy_wr / c);
+    for (int i = 9; i < 20; i++) if (p.sd_st[i]) printf(" %s %.1f%%", sd_name[i], 100 * p.sd_st[i] / c);
     printf("\n");
 }
 static void perf_roll(unsigned long long minstret) {
@@ -197,11 +217,15 @@ static void perf_roll(unsigned long long minstret) {
     Perf& t = perf_tot; const Perf& p = perf_cur;
     t.cyc += p.cyc; t.s1_empty += p.s1_empty; t.i_refill += p.i_refill; t.i_walk += p.i_walk; t.d_refill += p.d_refill;
     t.d_walk += p.d_walk; t.i_lat += p.i_lat; t.i_beat += p.i_beat;
+    t.mc_reload += p.mc_reload; t.mc_reload_busy += p.mc_reload_busy; t.mc_wb += p.mc_wb; t.mc_reloading += p.mc_reloading;
+    t.sd_rd += p.sd_rd; t.sd_wr += p.sd_wr; t.sd_busy_rd += p.sd_busy_rd; t.sd_busy_wr += p.sd_busy_wr;
+    for (int i = 0; i < 32; i++) t.sd_st[i] += p.sd_st[i];
     for (int i = 0; i < 16; i++) t.ist[i] += p.ist[i];
     for (int i = 0; i < 32; i++) t.dst[i] += p.dst[i];
     for (int i = 0; i < 4; i++) t.priv[i] += p.priv[i];
-    unsigned li = p.last_ist, ld = p.last_dst;
+    unsigned li = p.last_ist, ld = p.last_dst, lm = p.last_mc, lc = p.last_mc_clean, ls = p.last_sd;
     perf_cur = Perf(); perf_cur.last_ist = li; perf_cur.last_dst = ld;
+    perf_cur.last_mc = lm; perf_cur.last_mc_clean = lc; perf_cur.last_sd = ls;
     last_inst = minstret;
 }
 static void stall_snapshot(Vsv_tb_top* top, vluint64_t g_cycle) {
