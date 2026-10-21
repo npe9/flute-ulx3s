@@ -164,6 +164,10 @@ struct Perf {
     // Memory side: Mem_Controller (1 raw-word cache) and Sdram_Controller state accounting.
     unsigned long long mc_reload, mc_reload_busy, mc_wb, mc_reloading, sd_st[32], sd_rd, sd_wr, sd_busy_rd, sd_busy_wr;
     unsigned last_mc, last_mc_clean, last_sd;
+    // Reload cause (head of Mem_Controller f_reqs = last merged request) and I-refill timeline:
+    // t0 REFILL_REQ entry -> AR at Mem_Controller -> reload start -> reload end -> first beat at I$.
+    unsigned long long mc_rl_rd, mc_rl_wr, mc_ar, mc_aw, ir_n, ir_arr, ir_rl, ir_rld, ir_b1, ir_hit;
+    unsigned last_merge_wr, ir_phase, last_ibeat; unsigned long long ir_t0, ir_t1, ir_t2, ir_t3;
 };
 static Perf perf_cur, perf_tot;
 static const char* sd_name[] = {"PWR_WAIT","PRE_ALL","PRE_ALL_WAIT","INIT_REF1","INIT_REF1_WAIT","INIT_REF2","INIT_REF2_WAIT",
@@ -182,6 +186,7 @@ static void perf_sample(Vsv_tb_top* top) {
     if (ist == 6 && p.last_ist != 6) p.i_walk++;
     if (dst == 8 && p.last_dst != 8) p.d_refill++;
     if (dst == 5 && p.last_dst != 5) p.d_walk++;
+    unsigned prev_ist = p.last_ist;
     p.last_ist = ist; p.last_dst = dst;
     unsigned mc = TOP_SIG(soc_top__DOT__mem0_controller__DOT__rg_state) & 7;     // 3 RELOADING, 4 READY
     unsigned clean = TOP_SIG(soc_top__DOT__mem0_controller__DOT__rg_cached_clean) & 1;
@@ -192,6 +197,27 @@ static void perf_sample(Vsv_tb_top* top) {
     if (mc == 3) p.mc_reloading++;
     if (mc == 3 && p.last_mc != 3) { p.mc_reload++; if (p.last_sd != 9) p.mc_reload_busy++; }
     if (clean && !p.last_mc_clean && p.last_mc != 3) p.mc_wb++;
+    unsigned ar_enq = TOP_SIG(soc_top__DOT__mem0_controller__DOT__slave_xactor_f_rd_addr__DOT__ENQ) & 1;
+    unsigned aw_enq = TOP_SIG(soc_top__DOT__mem0_controller__DOT__slave_xactor_f_wr_addr__DOT__ENQ) & 1;
+    unsigned ar_deq = TOP_SIG(soc_top__DOT__mem0_controller__DOT__slave_xactor_f_rd_addr__DOT__DEQ) & 1;
+    unsigned aw_deq = TOP_SIG(soc_top__DOT__mem0_controller__DOT__slave_xactor_f_wr_addr__DOT__DEQ) & 1;
+    p.mc_ar += ar_enq; p.mc_aw += aw_enq;
+    if (mc == 3 && p.last_mc != 3) { if (p.last_merge_wr) p.mc_rl_wr++; else p.mc_rl_rd++; }
+    if (ar_deq) p.last_merge_wr = 0; else if (aw_deq) p.last_merge_wr = 1;   // rd has priority at merge
+    // I-refill timeline (only while the D side is not refilling or walking, so the path is the I side's)
+    unsigned ibeat = CPU_SIG(near_mem__DOT__icache__DOT__rg_beat);
+    bool d_quiet = !(dst >= 5 && dst <= 11);
+    if (ist == 1 && prev_ist != 1) { p.ir_phase = d_quiet ? 1 : 0; p.ir_t0 = p.cyc; }
+    if (p.ir_phase && !d_quiet) p.ir_phase = 0;
+    if (p.ir_phase == 1 && ar_enq) { p.ir_t1 = p.cyc; p.ir_phase = 2; }
+    if (p.ir_phase == 2 && mc == 3 && p.last_mc != 3) { p.ir_t2 = p.cyc; p.ir_phase = 3; }
+    if (p.ir_phase == 2 && ist == 2 && ibeat != 0 && p.last_ibeat == 0) { p.ir_hit++; p.ir_phase = 0; }  // served by the cached raw word
+    if (p.ir_phase == 3 && mc == 4 && p.last_mc == 3) { p.ir_t3 = p.cyc; p.ir_phase = 4; }
+    if (p.ir_phase == 4 && ist == 2 && ibeat != 0 && p.last_ibeat == 0) {
+        p.ir_n++; p.ir_arr += p.ir_t1 - p.ir_t0; p.ir_rl += p.ir_t2 - p.ir_t1; p.ir_rld += p.ir_t3 - p.ir_t2; p.ir_b1 += p.cyc - p.ir_t3;
+        p.ir_phase = 0;
+    }
+    p.last_ibeat = ibeat;
     p.last_mc = mc; p.last_mc_clean = clean; p.last_sd = sd;
 }
 static void perf_print(const char* tag, const Perf& p, unsigned long long inst) {
@@ -209,6 +235,9 @@ static void perf_print(const char* tag, const Perf& p, unsigned long long inst) 
            p.mc_reload, p.mc_reload ? (double)p.mc_reloading / p.mc_reload : 0.0, p.mc_reload ? 100.0 * p.mc_reload_busy / p.mc_reload : 0.0,
            p.mc_wb, p.sd_rd, p.sd_wr, 100 * p.sd_busy_rd / c, 100 * p.sd_busy_wr / c);
     for (int i = 9; i < 20; i++) if (p.sd_st[i]) printf(" %s %.1f%%", sd_name[i], 100 * p.sd_st[i] / c);
+    printf("\n[perf]   M: AR beats %llu AW beats %llu | reloads for rd %llu wr %llu", p.mc_ar, p.mc_aw, p.mc_rl_rd, p.mc_rl_wr);
+    if (p.ir_n || p.ir_hit) printf(" | I-refill timeline (%llu clean samples, %llu raw-word hits): req->AR@MC %.1f AR->reload %.1f reload %.1f reload->beat1 %.1f",
+                       p.ir_n, p.ir_hit, p.ir_n ? (double)p.ir_arr / p.ir_n : 0.0, p.ir_n ? (double)p.ir_rl / p.ir_n : 0.0, p.ir_n ? (double)p.ir_rld / p.ir_n : 0.0, p.ir_n ? (double)p.ir_b1 / p.ir_n : 0.0);
     printf("\n");
 }
 static void perf_roll(unsigned long long minstret) {
@@ -220,12 +249,15 @@ static void perf_roll(unsigned long long minstret) {
     t.mc_reload += p.mc_reload; t.mc_reload_busy += p.mc_reload_busy; t.mc_wb += p.mc_wb; t.mc_reloading += p.mc_reloading;
     t.sd_rd += p.sd_rd; t.sd_wr += p.sd_wr; t.sd_busy_rd += p.sd_busy_rd; t.sd_busy_wr += p.sd_busy_wr;
     for (int i = 0; i < 32; i++) t.sd_st[i] += p.sd_st[i];
+    t.mc_rl_rd += p.mc_rl_rd; t.mc_rl_wr += p.mc_rl_wr; t.mc_ar += p.mc_ar; t.mc_aw += p.mc_aw; t.ir_n += p.ir_n; t.ir_hit += p.ir_hit;
+    t.ir_arr += p.ir_arr; t.ir_rl += p.ir_rl; t.ir_rld += p.ir_rld; t.ir_b1 += p.ir_b1;
     for (int i = 0; i < 16; i++) t.ist[i] += p.ist[i];
     for (int i = 0; i < 32; i++) t.dst[i] += p.dst[i];
     for (int i = 0; i < 4; i++) t.priv[i] += p.priv[i];
     unsigned li = p.last_ist, ld = p.last_dst, lm = p.last_mc, lc = p.last_mc_clean, ls = p.last_sd;
     perf_cur = Perf(); perf_cur.last_ist = li; perf_cur.last_dst = ld;
     perf_cur.last_mc = lm; perf_cur.last_mc_clean = lc; perf_cur.last_sd = ls;
+    perf_cur.last_merge_wr = p.last_merge_wr; perf_cur.last_ibeat = p.last_ibeat;   // timeline phase restarts per window
     last_inst = minstret;
 }
 static void stall_snapshot(Vsv_tb_top* top, vluint64_t g_cycle) {
