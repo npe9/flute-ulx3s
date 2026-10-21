@@ -88,8 +88,15 @@ Zkn/Zkr/Zkt, S-mode, Sv32 and PMP.
    - Pattern: test/zkr/run.sh.
    - This is the standard method for FMA/div/sqrt. Bounded model checking those against IEEE is not practical.
 2. **ISA.** rv32uf/rv32ud from the Flute and Sail riscv-tests through `sim/isa_bram/isa_run.py`, with Sail (`riscv_sim_RV32`) as the reference.
-3. **Formal (riscv-formal fork, non-arithmetic).**
-   - Add an FPR write channel to RVFI.
+3. **Formal (riscv-formal fork).** Upstream riscv-formal has no FP verification. `docs/rvfi.md` has
+   only a *proposed* FP interface (last touched in d2fd4d0, 2017): no checks, no insn models, and the
+   FP ALTOPS it promises were never defined. Sail delegates FP arithmetic to SoftFloat externs, so
+   it gives no formal spec for the math either. Build the proposal out:
+   - Implement the proposed signals with their exact names (`rvfi_frs1..3_*`, `rvfi_frd_*`,
+     `rvfi_csr_fcsr_*`) in Flute's RVFI wrapper, so the work stays upstreamable.
+   - Define FP ALTOPS: simple stand-in functions used by both the DUT and the model for
+     add/mul/FMA/div/sqrt/cvt. They prove operand, rm, flag and writeback plumbing; TestFloat (1)
+     proves the math.
    - Sail-derived models for FL*/FS*, FSGNJ*, FCLASS, FMIN/FMAX, FEQ/FLT/FLE, FCVT int↔fp and FMV.X.W/W.X.
    - CSR checks for fcsr/frm/fflags.
    - Trap and legal checks for FS=Off → illegal and the invalid-rm cases.
