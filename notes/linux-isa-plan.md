@@ -40,7 +40,7 @@ Zkn/Zkr/Zkt, S-mode, Sv32 and PMP.
 
 ## Order
 
-1. **Memory latency** (in progress). The I-refill costs 109 cycles against a floor of about 40.
+1. **Memory latency** (in progress; first bring up the SDRAM device model, Verification roadmap item 4). The I-refill costs 109 cycles against a floor of about 40.
    - Mem_Controller does eager 32 B writebacks.
    - Each line is two serialized 32 B reloads.
    - Contained to Mem_Controller/SDRAM, so it costs no core LUTs.
@@ -110,6 +110,71 @@ Zkn/Zkr/Zkt, S-mode, Sv32 and PMP.
 - DT: `riscv,isa` / `riscv,isa-extensions` gain `f`, `d`.
 - OpenSBI: `PLATFORM_RISCV_ISA=rv32imafdc_zicsr_zifencei`. Check that misaligned emulation covers FLD/FSD/FLW/FSW.
 - Toolchain: the docker image already has `riscv64-linux-gnu-` with ilp32d multilib? Check this; it may need an rv32 glibc/musl build if userspace is more than freestanding.
+
+## Verification roadmap
+
+These are additions to the per-feature verification above. Status is as of 2026-10-21. TestRIG / RVFI-DII is **not started**: nothing in the tree uses it yet.
+
+### High priority
+1. **riscv-arch-test under RISCOF, with Sail as the reference model.**
+   - This is the official architectural compliance suite, separate from riscv-tests. It covers privileged behaviour, PMP, Zb*, Zk*, F/D and C at the encoding level.
+   - It is required before claiming compliance, and would likely have caught the c.addi HINT bug earlier.
+   - Status: not started. Sail (`~/src/sail-riscv`) and Spike (`~/src/spike`) are present locally.
+2. **Lockstep co-simulation against Sail or Spike on random instruction streams.**
+   - Options:
+     - **TestRIG** (Cambridge). It needs an RVFI-DII port: instruction injection plus an RVFI trace back. Flute's RVFI wrapper is the starting point.
+     - A Spike step-and-compare harness on RVFI traces from the Verilator TB.
+   - Why: riscv-formal BMC is only about 20–30 cycles deep. Long-sequence bugs slip past it: a TLB refill racing a page-table write, PMP changes mid-pipeline, interrupts during misaligned-access traps.
+   - Status: **not started**.
+3. **Random instruction generator: riscv-dv (CHIPS Alliance) or FORCE-RISCV.**
+   - Stresses privilege-mode switches, Sv32 page-table configurations (megapages, A/D bits, permission combinations), PMP regions and interrupt injection.
+   - Feeds item 2. TestRIG brings its own QuickCheck generators (VEngine).
+   - Status: not started.
+4. **SDRAM device model.**
+   - The vendor's (e.g. Micron) behavioural Verilog model of the ULX3S SDRAM chip, which checks tRCD/tRP/tRFC and refresh.
+   - **Prerequisite for the Mem_Controller/Sdram_Controller latency rewrite (Order step 1).** The current TB memory would not flag a timing-parameter violation that fails only on silicon.
+   - Status: not started. It is next, before any controller change.
+
+### Medium priority
+5. **Memory-model litmus tests (riscv-litmus / herd, RVWMO).**
+   - Single-hart issues: I/D and MMIO ordering, fence.i with the write-through D$, sfence.vma, AMO and LR/SC ordering, fences around non-posted MMIO.
+   - Small and cheap to run.
+6. **Debug spec compliance.**
+   - The riscv-tests debug suite (gdbserver.py through OpenOCD) covers the Debug Module and JTAG: abstract commands, halt/resume, single-step over traps, DM system bus.
+   - Nothing else checks these today.
+7. **CDC and reset checks.**
+   - The ring-oscillator TRNG crosses an async boundary into the core clock; candidate tool is `run_cdc.py` in the sv-yosys battery.
+   - UART RX, buttons and other async inputs go through the same pass.
+8. **Raw-sample entropy assessment.**
+   - Run NIST SP 800-90B `ea_non_iid` on raw ring-oscillator samples captured from the board.
+   - RCT/APT only detect failures; Zkr needs a justified min-entropy claim.
+
+### Campaign workflow
+9. **Equivalence checking with YosysHQ EQY**, between pre- and post-change netlists, for behaviour-preserving E-series changes (retiming, FIFO insertion, ConfigReg swaps). Today equivalence is inferred from formal + J1 + bench.
+10. **Functional coverage.** riscv-dv covergroups or OpenHW riscvISACOV, to show which instruction × privilege × trap combinations have actually run. Pass/fail is the only signal today.
+11. **Formal liveness and deadlock.**
+    - Run riscv-formal's liveness check routinely; there were hangs in E8a/E8b.
+    - Add the FVIP MAXWAIT checks with properly composed bounds.
+    - From the crossbar oracle: equal MAXWAIT on both sides does not compose through register slices. The far side needs a smaller bound, reduced by the pipeline latency.
+12. **FVIP on the remaining ports.**
+
+    Done (`formal/axi4_fvip`, vendored @250f1ff, see its README):
+
+    | Port | Result |
+    |---|---|
+    | Mem_Controller slave | 15 asserts. Response witnesses reachable. Protocol checks pass to the reached depth. A mid-traffic `server_reset` drops BVALID/RVALID, but reset is boot-only in the SoC. |
+    | AXI4_Deburster, both sides | 74 asserts. **Finding:** its B path matches slave responses by position (`f_w_awlen`), so a downstream slave that reorders across IDs makes it return wrong or duplicate BIDs. This is latent in this SoC: Boot_ROM and Mem_Controller answer in order. |
+
+    Remaining:
+    - Fabric_AXI4.
+    - The core's master ports, in the riscv-formal wrapper: assert master compliance, assume memory compliance.
+    - MMIO slaves: UART, CLINT, PLIC, SoC_Info, GPIO. Use the FVIP's AXI4LITE mode if they are AXI4-Lite.
+
+    Rules: `MAX_*_BURSTS` ≥ 2 (avoids the write-path vacuity), explicit reachability witnesses (covers are not checked yet), and a constant-assert guard in every run.
+
+### Tool notes
+- **SVA yosys:** fork npe9/yosys `sva-frontend-ic3`, owned by peer session sv-yosys-e3.
+  - Use ≥ `eab0ee5c5`. Earlier builds had false proofs: zeroed struct parameter overrides, and asserts folded to constant true by a later non-`-formal` read.
 
 ## Open decisions (user)
 
