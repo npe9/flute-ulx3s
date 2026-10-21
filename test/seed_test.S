@@ -3,7 +3,8 @@
 #          CSRRS/CSRRC with rs1 != x0, CSRRSI/CSRRCI with uimm != 0);
 #   illegal (mcause 2) for read-only access (CSRRS/CSRRC rs1 = x0, CSRRSI/CSRRCI uimm = 0)
 #          and for any access from S or U (no mseccfg: SSEED = USEED = 0).
-# A legal read must have reserved/custom bits [29:16] = 0 and OPST WAIT (01) or ES16 (10).
+# A legal read (after BIST) must have reserved/custom bits [29:16] = 0 and OPST WAIT (01) or ES16 (10);
+# an ES16 sample must arrive within a bounded poll, and the next ES16 sample must differ.
 # Sail run: riscv_sim_RV32 --pmp-count 16 --pmp-grain 10 test/seed_test.elf
 # Reports via tohost only (no UART), so the same ELF runs on Sail and Flute:
 #   tohost = 1 pass, else (last failing id << 7) | (failures << 1) | 1  (failures < 64).
@@ -43,10 +44,15 @@ _start:
 
 # value format of a legal read
     li   s4, 20
-    la   s5, 1f              # a trap (no seed CSR) resumes here with a0 = 0xFFFFFFFF
+    li   s3, 100000          # poll past BIST (startup health window) -- bounded
+0:  la   s5, 1f              # a trap (no seed CSR) resumes here with a0 = 0xFFFFFFFF
     li   a0, -1
     csrrw a0, 0x015, x0
-1:
+1:  srli t0, a0, 30
+    bnez t0, 2f
+    addi s3, s3, -1
+    bnez s3, 0b
+2:
     li   t0, 0x3FFF0000
     and  a2, a0, t0
     li   t0, 0
@@ -55,6 +61,20 @@ _start:
     srli a2, a0, 30
     addi a2, a2, -1          # WAIT (1) -> 0, ES16 (2) -> 1
     sltiu a2, a2, 2
+    li   t0, 1
+    jal  ra, chk
+
+# an ES16 sample arrives within a bounded poll (check 22), and the next one differs (check 23)
+    li   s4, 22
+    jal  ra, get_es16
+    mv   s2, a0
+    srli a2, a0, 30
+    li   t0, 2
+    jal  ra, chk
+    li   s4, 23
+    jal  ra, get_es16
+    xor  a2, a0, s2
+    snez a2, a2
     li   t0, 1
     jal  ra, chk
 
@@ -87,6 +107,19 @@ _start:
 8:  la   t1, tohost
     sw   t0, 0(t1)
 9:  j    9b
+
+# get_es16: poll seed (M-mode) until OPST = ES16 or 200000 tries; returns the last value in a0
+get_es16:
+    li   s3, 200000
+    la   s5, 1f
+0:  li   a0, -1
+    csrrw a0, 0x015, x0
+1:  srli t0, a0, 30
+    li   t1, 2
+    beq  t0, t1, 2f
+    addi s3, s3, -1
+    bnez s3, 0b
+2:  ret
 
 # chk: ACC/LOWER compare s6 against t0; value checks call it with a2 preloaded (s6 unused)
 chk:

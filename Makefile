@@ -170,9 +170,9 @@ manifest: $(MANIFEST)
 # Strip simulation-only constructs Yosys rejects: drop synopsys
 # translate_off regions (as in bluespec-ulx3s) and neutralize
 # $fflush/$finish calls left dangling by -check-assert removal.
-$(SYNTH_VERILOG): $(VERILOG)
+$(SYNTH_VERILOG): $(VERILOG) src/RO_TRNG.v
 	mkdir -p $(BUILD)
-	for f in $(VDIR)/*.v; do \
+	for f in $(VDIR)/*.v src/RO_TRNG.v; do \
 	    perl -0pe 's/\$$display[ \t]*\((?:"[^"]*"|[^";])*;/;/gs;  \
 	               s/\$$write[ \t]*\((?:"[^"]*"|[^";])*;/;/gs;    \
 	               s/\$$fwrite[ \t]*\((?:"[^"]*"|[^";])*;/;/gs;   \
@@ -187,8 +187,9 @@ $(JSON): $(SYNTH_VERILOG) src/Top.v src/ASSIGN1.v
 
 synth: $(JSON)
 
+# --ignore-loops: the Zkr ring oscillators (src/RO_TRNG.v) are intentional combinational loops
 $(CONFIG): $(JSON) $(LPF)
-	$(NEXTPNR) --$(DEVICE) --package CABGA381 --json $(JSON) --lpf $(LPF) --textcfg $@ --seed $(SEED)
+	$(NEXTPNR) --$(DEVICE) --package CABGA381 --json $(JSON) --lpf $(LPF) --textcfg $@ --seed $(SEED) --ignore-loops
 
 $(BITSTREAM): $(CONFIG)
 	$(ECPPACK) --compress $< $@

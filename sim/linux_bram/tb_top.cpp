@@ -78,6 +78,7 @@ static int tx_trace = 0;             // TB_TX_TRACE=1: print every TX byte with 
 static int tx_echo = 0;              // TB_ECHO=1: copy TX bytes to stdout as they arrive (Linux console)
 static const char* isa_pass_str = nullptr;   // TB_PASS_STR: in TB_ISA mode, pass when TX contains this
 static unsigned long long progress_every = 0; // TB_PROGRESS=N: print cycle + wall time every N cycles
+static int perf_on = 0;              // TB_PERF=1 (trace builds): per-phase I/D-side cycle accounting at each progress tick
 static void poll_tx() {
     int avail = sv_tx_avail();
     while ((int)tx_polled < avail) {
@@ -154,6 +155,55 @@ static bool deadline(vluint64_t cycles) {
 // TB_STALL_WATCH=<cycles>: in the post-jump stage, fail with a state snapshot when
 // minstret has not advanced for that many cycles (locates a hang without a VCD).
 #define CPU_SIG(x) (top->rootp->sv_tb_top__DOT__board__DOT__top__DOT__top__DOT__soc_top__DOT__core__DOT__cpu__DOT__##x)
+// TB_PERF: ICache_Pipe IState (10) and MMU_Cache Module_State (RV32, 19) histograms, event counts.
+struct Perf {
+    unsigned long long cyc, ist[16], dst[32], priv[4], s1_empty;
+    unsigned long long i_refill, i_walk, d_refill, d_walk, i_lat, i_beat;
+    unsigned last_ist, last_dst;
+};
+static Perf perf_cur, perf_tot;
+static const char* ist_name[] = {"RUN","REFILL_REQ","REFILL","IO_REQ","IO_RSP","FLUSH","PTW1_REQ","PTW1_RSP","PTW0_REQ","PTW0_RSP"};
+static const char* dst_name[] = {"PRERESET","RESETTING","READY","RUNNING","EXC_RSP","PTW_START","PTW_L1","PTW_L0","START_REFILL",
+    "SNAPSHOT","REFILL","REREQ","AMO_EXEC","ST_AMO_RSP","IO_REQ","IO_AWAIT_W","IO_AWAIT_R","IO_READ_RSP","IO_AWAIT_AMO"};
+static void perf_sample(Vsv_tb_top* top) {
+    Perf& p = perf_cur;
+    unsigned ist = CPU_SIG(near_mem__DOT__icache__DOT__rg_st) & 15;
+    unsigned dst = CPU_SIG(near_mem__DOT__dcache__DOT__rg_state) & 31;
+    p.cyc++; p.ist[ist]++; p.dst[dst]++; p.priv[CPU_SIG(rg_cur_priv) & 3]++;
+    if (!CPU_SIG(stage1_rg_full)) p.s1_empty++;
+    if (ist == 2) { if (CPU_SIG(near_mem__DOT__icache__DOT__rg_beat) == 0) p.i_lat++; else p.i_beat++; }
+    if (ist == 1 && p.last_ist != 1) p.i_refill++;
+    if (ist == 6 && p.last_ist != 6) p.i_walk++;
+    if (dst == 8 && p.last_dst != 8) p.d_refill++;
+    if (dst == 5 && p.last_dst != 5) p.d_walk++;
+    p.last_ist = ist; p.last_dst = dst;
+}
+static void perf_print(const char* tag, const Perf& p, unsigned long long inst) {
+    if (!p.cyc) return;
+    double c = (double)p.cyc;
+    printf("[perf] %s cycles %llu instret %llu IPC %.3f | priv M %.1f%% S %.1f%% U %.1f%% | stage1 empty %.1f%%\n", tag, p.cyc, inst,
+           inst / c, 100 * p.priv[3] / c, 100 * p.priv[1] / c, 100 * p.priv[0] / c, 100 * p.s1_empty / c);
+    printf("[perf]   I: refills %llu (%.1f cyc each: lat %.1f beats %.1f) walks %llu |", p.i_refill,
+           p.i_refill ? (double)(p.ist[1] + p.ist[2]) / p.i_refill : 0.0, p.i_refill ? (double)p.i_lat / p.i_refill : 0.0,
+           p.i_refill ? (double)p.i_beat / p.i_refill : 0.0, p.i_walk);
+    for (int i = 0; i < 10; i++) if (p.ist[i]) printf(" %s %.1f%%", ist_name[i], 100 * p.ist[i] / c);
+    printf("\n[perf]   D: refills %llu walks %llu |", p.d_refill, p.d_walk);
+    for (int i = 0; i < 19; i++) if (p.dst[i] && i != 3) printf(" %s %.1f%%", dst_name[i], 100 * p.dst[i] / c);
+    printf("\n");
+}
+static void perf_roll(unsigned long long minstret) {
+    static unsigned long long last_inst = 0;
+    perf_print("window", perf_cur, minstret - last_inst);
+    Perf& t = perf_tot; const Perf& p = perf_cur;
+    t.cyc += p.cyc; t.s1_empty += p.s1_empty; t.i_refill += p.i_refill; t.i_walk += p.i_walk; t.d_refill += p.d_refill;
+    t.d_walk += p.d_walk; t.i_lat += p.i_lat; t.i_beat += p.i_beat;
+    for (int i = 0; i < 16; i++) t.ist[i] += p.ist[i];
+    for (int i = 0; i < 32; i++) t.dst[i] += p.dst[i];
+    for (int i = 0; i < 4; i++) t.priv[i] += p.priv[i];
+    unsigned li = p.last_ist, ld = p.last_dst;
+    perf_cur = Perf(); perf_cur.last_ist = li; perf_cur.last_dst = ld;
+    last_inst = minstret;
+}
 static void stall_snapshot(Vsv_tb_top* top, vluint64_t g_cycle) {
     printf("[tb] STALL SNAPSHOT at cycle %llu: minstret=%llu cpu.rg_state=%u next_pc=%08x full F/D/1/2/3=%u%u%u%u%u dreq_pending empty=%u full=%u near_mem.rg_state=%u\n",
            (unsigned long long)g_cycle, (unsigned long long)CPU_SIG(csr_regfile__DOT__rg_minstret), CPU_SIG(rg_state), CPU_SIG(rg_next_pc),
@@ -199,6 +249,7 @@ int main(int argc, char** argv) {
     tx_echo = getenv("TB_ECHO") != nullptr;
     isa_pass_str = getenv("TB_PASS_STR");
     if (const char* pe = getenv("TB_PROGRESS")) progress_every = strtoull(pe, nullptr, 10);
+    if (const char* pf = getenv("TB_PERF")) perf_on = atoi(pf);
 
     printf("[tb] image: %s\n", image_path);
     if (env_strict) printf("[tb] STRICT_BRAM=%s\n", env_strict);
@@ -395,6 +446,9 @@ int main(int argc, char** argv) {
             break;
 
           case ST_ISA:
+#if VM_TRACE_VCD
+            if (perf_on) perf_sample(top);
+#endif
             if (progress_every && (g_cycle % progress_every) == 0) {
                 static time_t t0 = time(nullptr);
                 printf("\n[tb] cycle %llu, %ld s wall\n", (unsigned long long)g_cycle, (long)(time(nullptr) - t0));
@@ -404,11 +458,15 @@ int main(int argc, char** argv) {
                        CPU_SIG(csr_regfile__DOT__rg_mcause), CPU_SIG(csr_regfile__DOT__rg_mepc), CPU_SIG(csr_regfile__DOT__rg_mtval),
                        CPU_SIG(csr_regfile__DOT__rg_scause), CPU_SIG(csr_regfile__DOT__rg_sepc), CPU_SIG(csr_regfile__DOT__rg_stval),
                        CPU_SIG(csr_regfile__DOT__rg_satp));
+                if (perf_on) perf_roll(CPU_SIG(csr_regfile__DOT__rg_minstret));
 #endif
                 fflush(stdout);
             }
             if (isa_pass_str && tx_log.find(isa_pass_str) != std::string::npos) {
                 printf("\n[tb] ISA PASS (TX saw \"%s\") at cycle %llu\n", isa_pass_str, (unsigned long long)g_cycle);
+#if VM_TRACE_VCD
+                if (perf_on) { perf_roll(CPU_SIG(csr_regfile__DOT__rg_minstret)); perf_print("TOTAL", perf_tot, CPU_SIG(csr_regfile__DOT__rg_minstret)); }
+#endif
                 new_stage(ST_PASS);
                 break;
             }
