@@ -1,0 +1,28 @@
+diff --git a/c_emulator/riscv_sim.c b/c_emulator/riscv_sim.c
+index 3a9bfc0..4958fe8 100644
+--- a/c_emulator/riscv_sim.c
++++ b/c_emulator/riscv_sim.c
+@@ -620,6 +620,12 @@ void init_sail(uint64_t elf_entry)
+     zext_rvfi_init(UNIT);
+     rv_ram_base = UINT64_C(0x80000000);
+     rv_ram_size = UINT64_C(0x800000);
++    /* ULX3S Flute TestRIG harness: optional RAM override (e.g. all of the
++       32-bit space, so that no address is vacant), see flute-linux testrig/. */
++    if (getenv("SAIL_RVFI_RAM_BASE"))
++      rv_ram_base = strtoull(getenv("SAIL_RVFI_RAM_BASE"), NULL, 0);
++    if (getenv("SAIL_RVFI_RAM_SIZE"))
++      rv_ram_size = strtoull(getenv("SAIL_RVFI_RAM_SIZE"), NULL, 0);
+     rv_rom_base = UINT64_C(0);
+     rv_rom_size = UINT64_C(0);
+     rv_clint_base = UINT64_C(0);
+@@ -641,6 +647,10 @@ void reinit_sail(uint64_t elf_entry)
+   model_fini();
+   model_init();
+   init_sail(elf_entry);
++  /* ULX3S Flute TestRIG harness: the LR/SC reservation lives in the C
++     platform (riscv_platform.c), not in the model, so it survived the
++     per-test reset and let a test's first SC succeed. */
++  cancel_reservation(UNIT);
+ }
+ 
+ int init_check(struct tv_spike_t *s)
