@@ -87,6 +87,7 @@ FILES+=("$ROOT/src/ASSIGN1.v"
         ./BRAM2.v
         ./ecp5_cells.v
         ./sdram_model.v
+        ./sdram_timing_check.v
         ./tb_board.v
         ./board_pins_if.sv
         ./uart_agent.sv
@@ -119,6 +120,9 @@ if [[ "${VERILATOR_TRACE:-0}" == "1" ]]; then COMMON_FLAGS+=(--trace --trace-dep
 # UART_CPB=<n>: UART agent bit period in clocks for a netlist built at another clock
 # (clk_hz / 625000 rounded down: 51 for the SYS_PLL=1 netlist).  Part of the build too.
 if [[ -n "${UART_CPB:-}" ]]; then COMMON_FLAGS+=(-DUART_CPB=$UART_CPB); fi
+# SDRAM_TCK_PS=<ps>: clock period the SDRAM timing checker assumes (default 40000 = 25 MHz;
+# 31111 for the SYS_PLL=1 netlist).  Part of the build.
+if [[ -n "${SDRAM_TCK_PS:-}" ]]; then COMMON_FLAGS+=(-DSDRAM_TCK_PS=$SDRAM_TCK_PS); fi
 
 if [[ "$LINT_ONLY" == "1" ]]; then
     verilator --lint-only "${COMMON_FLAGS[@]}" "${FILES[@]}"
