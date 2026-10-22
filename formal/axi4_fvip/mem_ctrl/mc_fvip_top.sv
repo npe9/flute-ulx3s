@@ -67,7 +67,7 @@ module mc_fvip_top (
         VERIFY_AGENT_TYPE: amba_axi4_protocol_checker_pkg::DESTINATION,
         PROTOCOL_TYPE:     amba_axi4_protocol_checker_pkg::AXI4FULL,
         INTERFACE_REQS:    1,
-        ENABLE_COVER:      0,
+        ENABLE_COVER:      1,
         ENABLE_XPROP:      0,
         ARM_RECOMMENDED:   0,
         CHECK_PARAMETERS:  1,

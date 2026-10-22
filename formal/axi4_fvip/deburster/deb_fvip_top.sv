@@ -132,7 +132,7 @@ module deb_fvip_top (
         MAXWAIT: 15,
         VERIFY_AGENT_TYPE: amba_axi4_protocol_checker_pkg::DESTINATION,
         PROTOCOL_TYPE: amba_axi4_protocol_checker_pkg::AXI4FULL,
-        INTERFACE_REQS: 1, ENABLE_COVER: 0, ENABLE_XPROP: 0, ARM_RECOMMENDED: 0, CHECK_PARAMETERS: 1,
+        INTERFACE_REQS: 1, ENABLE_COVER: 1, ENABLE_XPROP: 0, ARM_RECOMMENDED: 0, CHECK_PARAMETERS: 1,
         OPTIONAL_WSTRB: 1, FULL_WR_STRB: 0, OPTIONAL_RESET: 0, EXCLUSIVE_ACCESS: 0, OPTIONAL_LP: 0})
   m_chk (.ACLK(CLK), .ARESETn(RST_N),
     .AWID(from_master_awid),
@@ -187,7 +187,7 @@ module deb_fvip_top (
         MAXWAIT: 15,
         VERIFY_AGENT_TYPE: amba_axi4_protocol_checker_pkg::SOURCE,
         PROTOCOL_TYPE: amba_axi4_protocol_checker_pkg::AXI4FULL,
-        INTERFACE_REQS: 1, ENABLE_COVER: 0, ENABLE_XPROP: 0, ARM_RECOMMENDED: 0, CHECK_PARAMETERS: 1,
+        INTERFACE_REQS: 1, ENABLE_COVER: 1, ENABLE_XPROP: 0, ARM_RECOMMENDED: 0, CHECK_PARAMETERS: 1,
         OPTIONAL_WSTRB: 1, FULL_WR_STRB: 0, OPTIONAL_RESET: 0, EXCLUSIVE_ACCESS: 0, OPTIONAL_LP: 0})
   s_chk (.ACLK(CLK), .ARESETn(RST_N),
     .AWID(to_slave_awid),

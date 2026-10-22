@@ -23,7 +23,7 @@ def chk(name, pre, agent, maxlen, bursts):
         MAXWAIT: 15,
         VERIFY_AGENT_TYPE: amba_axi4_protocol_checker_pkg::{agent},
         PROTOCOL_TYPE: amba_axi4_protocol_checker_pkg::AXI4FULL,
-        INTERFACE_REQS: 1, ENABLE_COVER: 0, ENABLE_XPROP: 0, ARM_RECOMMENDED: 0, CHECK_PARAMETERS: 1,
+        INTERFACE_REQS: 1, ENABLE_COVER: 1, ENABLE_XPROP: 0, ARM_RECOMMENDED: 0, CHECK_PARAMETERS: 1,
         OPTIONAL_WSTRB: 1, FULL_WR_STRB: 0, OPTIONAL_RESET: 0, EXCLUSIVE_ACCESS: 0, OPTIONAL_LP: 0}})
   {name} (.ACLK(CLK), .ARESETn(RST_N),
     """ + ",\n    ".join(conn) + ");\n")
