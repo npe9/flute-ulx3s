@@ -152,6 +152,13 @@ module sv_tb_top (
     sb.note_chunk_txn();
   endfunction
 
+  // Compliance signature readout (tb_top.cpp TB_SIG): one SDRAM model
+  // halfword by model index (isa_run.py model_idx layout).
+  export "DPI-C" function sv_sdram_peek;
+  function int sv_sdram_peek(input int idx);
+    return {16'h0, board.mem.mem[idx[23:0]]};
+  endfunction
+
   // End-of-run verdict + one-shot coverage sampling.  Returns 0 on
   // success; assertion failures (the gate) abort before the return.
   export "DPI-C" function sv_final_checks;

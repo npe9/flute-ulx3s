@@ -32,7 +32,7 @@ FILES+=("$ROOT/src/ASSIGN1.v"
         ./coverage.sv
         ./sv_tb_top.sv)
 
-verilator --cc --exe --build -j "$(sysctl -n hw.ncpu 2>/dev/null || echo 4)" \
+verilator --cc --exe --build -j "${JOBS:-$(sysctl -n hw.ncpu 2>/dev/null || echo 4)}" \
     --top-module sv_tb_top \
     -DJTAG_TAP \
     --no-timing \

@@ -1,0 +1,11 @@
+# Flute SoC (Flute/src_Testbench/SoC/SoC_Map.bsv): CLINT at 0x0200_0000.
+mtime:
+  implemented: true
+  address: 0x0200bff8
+mtimecmp:
+  implemented: true
+  address: 0x02004000
+nmi:
+  label: nmi_vector
+reset:
+  label: reset_vector

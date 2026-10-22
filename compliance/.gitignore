@@ -1,0 +1,6 @@
+riscof_work*/
+riscof_work*.suite/
+riscof_work*.run.log
+riscof_work*.du.log
+riscof_run.log
+__pycache__/

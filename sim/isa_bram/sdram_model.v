@@ -83,7 +83,7 @@ module w9825g6 (
    //   +TOHOST=<hex>    model index of tohost's low halfword: the first nonzero
    //                    write there is reported to the TB (tb_tohost)
    import "DPI-C" function void tb_tohost (input int v);
-   reg [1023:0] preload_file;
+   reg [8*1024-1:0] preload_file;   // 1 KiB of path: RISCOF work dirs are deep (was 128 chars)
    reg [23:0]   tohost_idx;
    reg          tohost_en;
    reg          tohost_done;

@@ -123,6 +123,28 @@ static bool   isa_mode = false;
 static int    g_tohost = 0;
 extern "C" void tb_tohost(int v) { if (!g_tohost) g_tohost = v; }
 
+// TB_SIG=<file> TB_SIG_BEGIN=<hex> TB_SIG_END=<hex> (byte addresses): at end of run, dump
+// [begin,end) as one 32-bit word per line, MS byte first (Sail --test-signature format).
+// The run keeps clocking TB_SIG_DRAIN (default 4096) cycles after tohost so the last
+// signature stores have left the write path.
+static const char* sig_file = nullptr;
+static vluint64_t  sig_drain = 0, tohost_cycle = 0;
+static uint32_t sig_idx(uint32_t addr) {   // = isa_run.py model_idx()
+    uint32_t b = addr - 0x80000000u, r = b >> 5, hw = (b >> 1) & 15;
+    return ((r >> 5) & 3) << 22 | ((r >> 7) & 0x1FFF) << 9 | (r & 0x1F) << 4 | hw;
+}
+static void sig_dump() {
+    uint32_t a0 = (uint32_t)strtoul(getenv("TB_SIG_BEGIN"), nullptr, 16);
+    uint32_t a1 = (uint32_t)strtoul(getenv("TB_SIG_END"), nullptr, 16);
+    FILE* f = fopen(sig_file, "w");
+    if (!f) { fprintf(stderr, "[tb] cannot write %s\n", sig_file); return; }
+    svSetScope(svGetScopeFromName("TOP.sv_tb_top"));
+    for (uint32_t a = a0; a < a1; a += 4)
+        fprintf(f, "%04x%04x\n", sv_sdram_peek((int)sig_idx(a + 2)) & 0xFFFF, sv_sdram_peek((int)sig_idx(a)) & 0xFFFF);
+    fclose(f);
+    printf("[tb] signature %08x..%08x -> %s\n", a0, a1, sig_file);
+}
+
 static void fail(const char* what) {
     printf("[tb] FAIL at cycle %llu: %s (stage %d, %llu cycles in stage)\n",
            (unsigned long long)g_cycle, what, (int)stage,
@@ -240,6 +262,9 @@ int main(int argc, char** argv) {
     vluint64_t hello_deadline    = 600000000;  // repair window is ~10 s+
     if (const char* hd = getenv("TB_HELLO_DEADLINE")) hello_deadline = strtoull(hd, nullptr, 10);  // override for short diagnostic runs
     if (const char* ia = getenv("TB_ISA")) isa_mode = (atoi(ia) != 0);
+    if ((sig_file = getenv("TB_SIG")) && getenv("TB_SIG_BEGIN") && getenv("TB_SIG_END"))
+        sig_drain = getenv("TB_SIG_DRAIN") ? strtoull(getenv("TB_SIG_DRAIN"), nullptr, 10) : 4096;
+    else sig_file = nullptr;
     vluint64_t overall_deadline  = 900000000;
 
     int dpi_ready = 0;
@@ -388,7 +413,8 @@ int main(int argc, char** argv) {
 
           case ST_ISA:
             if (deadline(hello_deadline)) { fail("no tohost write"); break; }
-            if (g_tohost) {
+            if (g_tohost && !tohost_cycle) tohost_cycle = g_cycle;
+            if (g_tohost && g_cycle - tohost_cycle >= sig_drain) {
                 if (g_tohost == 1) {
                     printf("[tb] ISA PASS at cycle %llu\n", (unsigned long long)g_cycle);
                     new_stage(ST_PASS);
@@ -421,6 +447,7 @@ int main(int argc, char** argv) {
 #if VM_TRACE_VCD
     if (tfp) tfp->close();
 #endif
+    if (sig_file) sig_dump();   // on every exit: pass, fail or deadline
     // ---- SV-side verdict + coverage sampling (the gate) -------------
     int sb_rc = sv_final_checks();
     if (isa_mode) sb_rc = 0;    // the scoreboard checks the hello transcript only
