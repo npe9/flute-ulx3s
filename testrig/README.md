@@ -203,7 +203,12 @@ D2? and rerun-ok are heuristic (see the class descriptions).
     correct data on the fabric.
   * Suspected cause: `MMU_Cache.req` takes the `MODULE_EXCEPTION_RSP` path
     without `fa_req_ram_B`, and the registered BRAM output
-    (`rg_tag_ram_q`/`rg_data_ram_q`) is then consumed stale.
+    (`rg_tag_ram_q`/`rg_data_ram_q`, a +1-cycle timing change; first in
+    Flute 4c2bdc5 per `git log -S rg_tag_ram_q`) is then consumed stale.
+  * No D2-classified failure was triggered by an access fault on the vacant
+    line. Sail reports mem_addr for those, and none of the 178 triggers
+    carries one, so the triggers are the misaligned traps.
+  * It also reproduces with `RAM8M=1` (Sail's default 8 MiB map).
   * The D-side RTL has no RVFI-conditional code. The only `RVFI` ifdef in
     `Near_Mem_VM_WT_L1` selects the formal-only tiny cache geometry, which
     the DII build does not use.

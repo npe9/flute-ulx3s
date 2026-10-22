@@ -26,3 +26,52 @@ index 3a9bfc0..4958fe8 100644
  }
  
  int init_check(struct tv_spike_t *s)
+diff --git a/model/riscv_fetch_rvfi.sail b/model/riscv_fetch_rvfi.sail
+index d252375..3aaa706 100644
+--- a/model/riscv_fetch_rvfi.sail
++++ b/model/riscv_fetch_rvfi.sail
+@@ -6,6 +6,9 @@
+ /*  SPDX-License-Identifier: BSD-2-Clause                                                */
+ /*=======================================================================================*/
+ 
++function fetch_pmp_rvfi(paddr : xlenbits) -> option(ExceptionType) =
++  if sys_pmp_count() == 0 then None() else pmpCheck(paddr, 2, Execute(), cur_privilege)
++
+ function fetch() -> FetchResult = {
+   rvfi_inst_data[rvfi_order] = minstret;
+   rvfi_pc_data[rvfi_pc_rdata] = zero_extend(get_arch_pc());
+@@ -21,9 +24,16 @@ function fetch() -> FetchResult = {
+       then F_Error(E_Fetch_Addr_Align(), PC)
+       else match translateAddr(use_pc, Execute()) {
+         TR_Failure(e, _) => F_Error(e, PC),
+-        TR_Address(_, _) => {
++        TR_Address(ppclo, _) => match fetch_pmp_rvfi(ppclo) {
++         /* ULX3S Flute TestRIG harness: the RVFI-DII fetch skipped the PMP
++            check that the normal fetch (mem_read) does; see flute-linux testrig/. */
++         Some(e) => F_Error(e, PC),
++         None()  => {
+           let i = rvfi_instruction[rvfi_insn];
+-          rvfi_inst_data->rvfi_insn()   = zero_extend(i);
++          /* ULX3S Flute TestRIG harness: RVFI convention, a 16-bit instruction
++             is reported with the upper half zero (riscv-formal rvfi_insn). */
++          let insn_rep : bits(32) = if i[1 .. 0] != 0b11 then zero_extend(i[15 .. 0]) else i;
++          rvfi_inst_data->rvfi_insn()   = zero_extend(insn_rep);
+           if   (i[1 .. 0] != 0b11)
+           then F_RVC(i[15 .. 0])
+           else {
+@@ -34,10 +44,14 @@ function fetch() -> FetchResult = {
+               Ext_FetchAddr_OK(use_pc_hi) =>
+                 match translateAddr(use_pc_hi, Execute()) {
+                   TR_Failure(e, _) => F_Error(e, PC),
+-                  TR_Address(_, _) => F_Base(i)
++                  TR_Address(ppchi, _) => match fetch_pmp_rvfi(ppchi) {
++                    Some(e) => F_Error(e, PC_hi),
++                    None()  => F_Base(i)
++                  }
+               }
+             }
+           }
++         }
+         }
+       }
+     }
