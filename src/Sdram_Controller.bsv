@@ -108,6 +108,7 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
    Reg #(Bit #(16)) rg_wait      <- mkReg (0);
    Reg #(Bit #(16)) rg_pwrcnt    <- mkReg (fromInteger (t_powerup));
    Reg #(Bit #(16)) rg_ref_cnt   <- mkReg (fromInteger (refresh_div));
+   Reg #(Bit #(2))  rg_init_pairs <- mkReg (0);   // init REF1/REF2 pairs done
 
    // Latched current request
    Reg #(Bool)      rg_req_write  <- mkReg (False);
@@ -145,8 +146,8 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
    endrule
 
    // ----------------------------------------------------------------
-   // Power-up initialization: 200 us stable clock with CKE low,
-   // PRECHARGE ALL, 2x AUTO REFRESH, LOAD MODE REGISTER (CL2, BL8).
+   // Power-up initialization: 200 us stable clock with CKE and DQM high,
+   // PRECHARGE ALL, 8x AUTO REFRESH, LOAD MODE REGISTER (CL2, BL8).
 
    rule rl_pwr_wait (rg_state == ST_PWR_WAIT);
       if (rg_pwrcnt == 1)
@@ -195,9 +196,17 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
       rg_state    <= ST_INIT_REF2_WAIT;
    endrule
 
+   // The W9825G6KH datasheet (7.1) requires 8 AUTO REFRESH cycles at
+   // init; the REF1/REF2 pair runs 4 times.
    rule rl_init_ref2_wait (rg_state == ST_INIT_REF2_WAIT);
-      if (rg_wait == 0)
-         rg_state <= ST_MRS;
+      if (rg_wait == 0) begin
+         if (rg_init_pairs == 3)
+            rg_state <= ST_MRS;
+         else begin
+            rg_init_pairs <= rg_init_pairs + 1;
+            rg_state      <= ST_INIT_REF1;
+         end
+      end
       else
          rg_wait <= rg_wait - 1;
    endrule
@@ -222,18 +231,20 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
    endrule
 
    // ----------------------------------------------------------------
-   // Refresh countdown.  When it expires the IDLE rule issues a
-   // refresh before starting any new request, and the counter has
-   // already restarted, so refreshes stay tREFI apart.
+   // Refresh countdown.  When it expires it HOLDS at 1 (a pending
+   // refresh) until the IDLE rule has issued the refresh, which reloads
+   // it.  It used to reload itself the cycle after expiring, so a refresh
+   // that fell due while a request was in flight was dropped: up to 17 in
+   // a row (1666 clocks, 66 us) in the hello boot -- found by
+   // sim/linux_bram/sdram_timing_check.v.  Now REF-to-REF is refresh_div
+   // plus at most one request (~45 clocks), well under tREFI (7.8 us).
 
-   rule rl_refresh_tick;
-      if (rg_ref_cnt <= 1)
-         rg_ref_cnt <= fromInteger (refresh_div);
-      else
-         rg_ref_cnt <= rg_ref_cnt - 1;
+   rule rl_refresh_tick (rg_ref_cnt > 1);
+      rg_ref_cnt <= rg_ref_cnt - 1;
    endrule
 
-   rule rl_ref (rg_state == ST_REF);
+   rule rl_ref (rg_state == ST_REF && rg_ref_cnt <= 1);
+      rg_ref_cnt  <= fromInteger (refresh_div);
       rg_cmd      <= cmd_ref;
       rg_cmd_valid <= True;
       rg_clear_cmd <= True;
@@ -423,7 +434,10 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
 
    method Bool init_done = rg_inited;
 
-   method Bit #(1) sdram_cke   = pack (rg_state != ST_PWR_WAIT);
+   // CKE is held high from reset, through the 200 us pause, onward: the
+   // W9825G6KH datasheet (7.1) asks for CKE and DQM high during the pause,
+   // and the controller never uses power-down or self refresh.
+   method Bit #(1) sdram_cke   = 1'b1;
    method Bit #(1) sdram_cs_n  = fn_cmd_out () [3];
    method Bit #(1) sdram_ras_n = fn_cmd_out () [2];
    method Bit #(1) sdram_cas_n = fn_cmd_out () [1];

@@ -72,6 +72,22 @@ module sim_board (
         .dq    (sdram_dq)
     );
 
+`ifndef SDRAM_TCK_PS
+`define SDRAM_TCK_PS 40000
+`endif
+    // JEDEC protocol/timing checker for the W9825G6KH-6 (passive).
+    sdram_timing_check #(.TCK_PS(`SDRAM_TCK_PS)) mem_chk (
+        .clk   (clk),
+        .cke   (sdram_cke),
+        .cs_n  (sdram_cs_n),
+        .ras_n (sdram_ras_n),
+        .cas_n (sdram_cas_n),
+        .we_n  (sdram_we_n),
+        .ba    (sdram_ba),
+        .a     (sdram_a),
+        .dqm   (sdram_dqm)
+    );
+
     assign sdram_dq_pin = sdram_dq;
 
 endmodule
