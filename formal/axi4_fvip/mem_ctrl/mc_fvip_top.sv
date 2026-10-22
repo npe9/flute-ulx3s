@@ -23,9 +23,9 @@ module mc_fvip_top (
   input wire [255:0] to_raw_mem_response_put, input wire EN_to_raw_mem_response_put
 );
   // Reset: low in cycle 0, high afterwards.
-  reg init = 1'b1;
-  always @(posedge CLK) init <= 1'b0;
-  wire RST_N = !init;
+  reg rst_done = 1'b0;  // zero init: ic3 -init-zero zeroes every register
+  always @(posedge CLK) rst_done <= 1'b1;
+  wire RST_N = rst_done;
 
   wire slave_awready, slave_wready, slave_bvalid, slave_arready, slave_rvalid, slave_rlast;
   wire [3:0] slave_bid, slave_rid;

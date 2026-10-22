@@ -37,9 +37,9 @@ out = f"""// AXI4 protocol check of AXI4_Deburster with the YosysHQ FVIP (genera
 module deb_fvip_top (
   input wire CLK,
 """ + ",\n".join(f"  input wire {w(b)}{n}" for n, b in ins) + "\n);\n"
-out += """  reg init = 1'b1;
-  always @(posedge CLK) init <= 1'b0;
-  wire RST_N = !init;
+out += """  reg rst_done = 1'b0;  // zero init: ic3 -init-zero zeroes every register
+  always @(posedge CLK) rst_done <= 1'b1;
+  wire RST_N = rst_done;
 """
 out += "".join(f"  wire {w(b)}{n};\n" for n, b in outs)
 out += """  // BSV method protocol; the Deburster's reset method is boot-time only.

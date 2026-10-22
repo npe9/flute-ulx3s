@@ -39,11 +39,12 @@ Findings:
 - **FVIP DESTINATION scoreboard:** `ap_no_overflow` asserts over AWVALID, which the environment drives. A standalone destination check therefore needs the source-side bound added explicitly.
 
 ### Unbounded results (2026-10-22, sv-yosys 5a2fc7b93, `ic3 -init-zero -bmc N -timeout T`)
-- **Mem_Controller** (`-bmc 20 -timeout 300`, 31 min): 9 of 15 asserts proved for all depths, namely the STABLE checks on B/R and `ap_making_progress_bounded`. 6 are undecided because they ran out of budget, with no counterexample: B/R `UNSUPPORTED_RESPONSE`, `BVALID_until_BREADY`, `RVALID_until_RREADY`, AW `ap_no_overflow` and `ap_data_integrity_out_of_order`. These remain bounded-only, to step 13. The 256-bit SDRAM line is the likely cost.
+- **Mem_Controller: RETRACTED.** That run used `ic3 -init-zero`, which zeroes every register, including the harness's `reg init = 1'b1` reset generator. The DUT therefore never saw reset, and the run was not a proof of the harness as written. The harnesses now use a zero-init `rst_done` register; the run is being redone. Original (invalid) text: (`-bmc 20 -timeout 300`, 31 min): 9 of 15 asserts proved for all depths, namely the STABLE checks on B/R and `ap_making_progress_bounded`. 6 are undecided because they ran out of budget, with no counterexample: B/R `UNSUPPORTED_RESPONSE`, `BVALID_until_BREADY`, `RVALID_until_RREADY`, AW `ap_no_overflow` and `ap_data_integrity_out_of_order`. These remain bounded-only, to step 13. The 256-bit SDRAM line is the likely cost.
 - **Crossbar oracle** (Forencich axi_crossbar 1S:1D, `-bmc 30 -timeout 120`; scratchpad only):
   - With `MAX_WR_BURSTS 1`, 102/145 covers are reached. The whole source write path (22 AW/W/B covers) never fires, so write-side asserts in that configuration are vacuous.
   - With `MAX_WR_BURSTS 4`, 130/151 covers are reached and all 22 of those write-path covers fire.
   - Every unreachable cover matches the YosysHQ crossbar write-up or the crossbar config.
   - `yosys-smtbmc -c -t 10` reaches the same 130 covers at identical steps.
   - smtbmc's cover mode stops at the first failing assert, so with a known-failing assert it only cross-checks up to that step.
+- **Rule:** with `ic3 -init-zero`, every harness register must have a zero init (write reset generators as `reg rst_done = 0`).
 - **Rule:** a FVIP harness counts only if its covers are run and every write/read handshake, response and last-beat cover is reached. Use `MAX_*_BURSTS >= 2`.

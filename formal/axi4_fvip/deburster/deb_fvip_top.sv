@@ -47,9 +47,9 @@ module deb_fvip_top (
   input wire [1:0] to_slave_rresp,
   input wire to_slave_rlast
 );
-  reg init = 1'b1;
-  always @(posedge CLK) init <= 1'b0;
-  wire RST_N = !init;
+  reg rst_done = 1'b0;  // zero init: ic3 -init-zero zeroes every register
+  always @(posedge CLK) rst_done <= 1'b1;
+  wire RST_N = rst_done;
   wire RDY_reset;
   wire from_master_awready;
   wire from_master_wready;
