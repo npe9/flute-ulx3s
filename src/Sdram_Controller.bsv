@@ -109,6 +109,7 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
    Reg #(Bit #(16)) rg_pwrcnt    <- mkReg (fromInteger (t_powerup));
    Reg #(Bit #(16)) rg_ref_cnt   <- mkReg (fromInteger (refresh_div));
    Reg #(Bit #(2))  rg_init_pairs <- mkReg (0);   // init REF1/REF2 pairs done
+   Reg #(Bool)      rg_rsp_pend   <- mkReg (False); // read word in rg_rdata awaiting f_rsps space
 
    // Latched current request
    Reg #(Bool)      rg_req_write  <- mkReg (False);
@@ -267,6 +268,15 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
       rg_dqm       <= 2'b11;
       if (rg_ref_cnt <= 1)
          rg_state <= ST_REF;
+      else if (rg_rsp_pend) begin
+         // Stalled read response: the word is complete in rg_rdata and
+         // leaves as soon as f_rsps has space.  Refresh is still served
+         // above; no new request is taken (a read would overwrite rg_rdata).
+         if (f_rsps.notFull) begin
+            f_rsps.enq (MemoryResponse {data: pack (readVReg (rg_rdata))});
+            rg_rsp_pend <= False;
+         end
+      end
       else if (f_reqs.notEmpty) begin
          let req = f_reqs.first;
          f_reqs.deq;
@@ -327,15 +337,23 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
       if (rg_wait != 0)
          rg_wait <= rg_wait - 1;
       else if ((rg_beat == 7) && rg_phase) begin
-         // Final beat of the request: assemble and return the word
+         // Final beat of the request: assemble and return the word.  The
+         // beat is captured unconditionally; if f_rsps is full the word is
+         // left in rg_rdata with rg_rsp_pend set and returned from IDLE,
+         // where refresh can still run.  (This rule used to block on a
+         // full f_rsps at this beat while rg_dq_in kept sampling the bus,
+         // so the returned beat 15 was whatever was on DQ when it fired.)
          Vector #(16, Bit #(16)) v = readVReg (rg_rdata);
          v [15] = rg_dq_in;
-         f_rsps.enq (MemoryResponse {data: pack (v)});
+         rg_rdata [15] <= rg_dq_in;
+         if (f_rsps.notFull)
+            f_rsps.enq (MemoryResponse {data: pack (v)});
          // SIM PROBE: log returned read data (granule 0 only)
 `ifdef SDCAP_PROBES
          if (rg_req_addr == 0)
             $display ("%0d SDRSP addr=%0h data=%0h", 0, rg_req_addr, pack (v));
 `endif
+         if (! f_rsps.notFull) rg_rsp_pend <= True;
          rg_state <= ST_IDLE;
       end
       else begin
@@ -356,6 +374,7 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
    endrule
 
    // One idle cycle between the two bursts of a request (tCCD)
+
    rule rl_gap_rd (rg_state == ST_GAP && ! rg_req_write);
       rg_state    <= ST_RD;
    endrule
