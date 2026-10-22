@@ -133,7 +133,15 @@ These are additions to the per-feature verification above. Status is as of 2026-
 4. **SDRAM device model.**
    - The vendor's (e.g. Micron) behavioural Verilog model of the ULX3S SDRAM chip, which checks tRCD/tRP/tRFC and refresh.
    - **Prerequisite for the Mem_Controller/Sdram_Controller latency rewrite (Order step 1).** The current TB memory would not flag a timing-parameter violation that fails only on silicon.
-   - Status: not started. It is next, before any controller change.
+   - Status: **checker done (e20dc9e).** `sim/linux_bram/sdram_timing_check.v` is a passive pin-level checker for the actual part, the Winbond W9825G6KH-6 (datasheet A04), sitting beside `sdram_model.v`. The model already checks data integrity; the checker covers timing, init and refresh. No vendor Verilog model exists for this part (Micron's is for a different chip).
+   - It found three bugs, all present on main too:
+     - Refreshes were dropped while a request was in flight. The hello boot saw a 1666-clock (66 us) REF gap, close to the 9 x tREFI limit; under Linux traffic it is unbounded.
+     - Init issued 2 refreshes instead of 8.
+     - CKE was low during the 200 us pause.
+     - All three are fixed on linux-isa. The V8 hello boot is clean: max REF gap 124 clocks.
+   - Not covered: setup/hold (P&R covers these). The tRCD/tRAS/tRRD/tCCD/auto-precharge rules have not yet been shown to fire on a violation.
+   - Port to main: pending the user's decision (it changes the promoted E20 controller).
+   - Latent: `rl_rd_cap` stalls on the final beat when `f_rsps` is full while `rg_dq_in` keeps sampling, so beat 15 would be wrong. It is unreachable today, because Mem_Controller has at most one read outstanding.
 
 ### Medium priority
 5. **Memory-model litmus tests (riscv-litmus / herd, RVWMO).**
