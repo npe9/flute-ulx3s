@@ -45,6 +45,10 @@ Findings:
     - Unreached, as expected: EXOKAY (EXCLUSIVE_ACCESS 0), DECERR (the controller only returns SLVERR), and AR WRAP (proved unreachable, since AxLEN = 0).
   - **Cross-check:** smtbmc -c (asserts deleted) reaches the same 29 at identical steps.
   - An earlier run with a `reg init = 1` reset generator never applied reset under `-init-zero`. It was retracted and replaced by this one.
+- **AXI4_Deburster** (`rst_done = 0` harness, `ic3 -check-cells -init-zero -bmc 12 -timeout 60`, sv-yosys e318a3f48 gated build, 50 min):
+  - **Covers:** 130 of 152 reached, 3 unreachable, 19 undecided. The unreachable ones are the exclusive-access covers (upstream ARLOCK EXCLUSIVE, downstream B/R EXOKAY); the harness has EXCLUSIVE_ACCESS 0. Downstream INCR/WRAP covers are absent by design: the Deburster issues every downstream beat as FIXED (AXI4_Deburster.bsv:199, :314).
+  - **Asserts:** 42 of 68 proved, 0 disproved, 26 undecided (budget), bounded-only for those.
+  - Identical verdict for every property to the earlier ungated-build run (221 lines, no diff).
 - **Crossbar oracle** (Forencich axi_crossbar 1S:1D, `-bmc 30 -timeout 120`; scratchpad only):
   - With `MAX_WR_BURSTS 1`, 102/145 covers are reached. The whole source write path (22 AW/W/B covers) never fires, so write-side asserts in that configuration are vacuous.
   - With `MAX_WR_BURSTS 4`, 130/151 covers are reached and all 22 of those write-path covers fire.
