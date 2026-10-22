@@ -84,10 +84,54 @@ endinterface
 
 // ================================================================
 
-function Bit #(2)  fn_bank (Bit #(64) a); return a [6:5];   endfunction
-function Bit #(13) fn_row  (Bit #(64) a); return a [19:7];  endfunction
-function Bit #(9)  fn_col  (Bit #(64) a, Bool second_burst);
-   return { a [4:0], 4'b0 } + (second_burst ? 9'd8 : 9'd0);
+// Option A (mem-optA): one raw_mem_word = NBursts BL8 bursts of 16-bit
+// halfwords from one open row (4 bursts = 64 bytes at 512 bits).
+// Raw address a (in raw_mem_words): col = a[CB-1:0] * HWords, then
+// bank = next 2 bits, row = next 13.  CB = log2 (512 / HWords).
+typedef TDiv #(Bits_per_Raw_Mem_Word, 16)  HWords;          // 32
+typedef TDiv #(HWords, 8)                  NBursts;         // 4
+typedef TLog #(NBursts)                    BurstIdxW;       // 2
+typedef TLog #(TDiv #(512, HWords))        ColBits;         // 4
+typedef Bit #(BurstIdxW)                   BurstIdx;
+typedef TDiv #(Bits_per_Raw_Mem_Word, 8)   BytesPerWord;    // 64
+
+Integer col_bits = valueOf (ColBits);
+Integer last_burst = valueOf (NBursts) - 1;
+
+function Bit #(2)  fn_bank (Bit #(64) a); return a [col_bits + 1 : col_bits];   endfunction
+function Bit #(13) fn_row  (Bit #(64) a); return a [col_bits + 14 : col_bits + 2];  endfunction
+function Bit #(9)  fn_col  (Bit #(64) a, BurstIdx b);
+   Bit #(ColBits) c = truncate (a);
+   Bit #(9) base = zeroExtend (c) << log2 (valueOf (HWords));
+   return base + (zeroExtend (b) << 3);
+endfunction
+
+// Which bursts carry at least one enabled byte (16 bytes per burst).
+function Bit #(NBursts) fn_burst_mask (Bit #(BytesPerWord) be);
+   Vector #(NBursts, Bit #(16)) chunk = unpack (be);
+   Bit #(NBursts) m = 0;
+   for (Integer b = 0; b < valueOf (NBursts); b = b + 1)
+      m [b] = pack (chunk [b] != 0);
+   return m;
+endfunction
+function BurstIdx fn_first_set (Bit #(NBursts) m);
+   BurstIdx r = 0;
+   for (Integer b = valueOf (NBursts) - 1; b >= 0; b = b - 1)
+      if (m [b] == 1) r = fromInteger (b);
+   return r;
+endfunction
+function BurstIdx fn_last_set (Bit #(NBursts) m);
+   BurstIdx r = 0;
+   for (Integer b = 0; b < valueOf (NBursts); b = b + 1)
+      if (m [b] == 1) r = fromInteger (b);
+   return r;
+endfunction
+// Next set burst strictly above b (b itself if none: caller checks last).
+function BurstIdx fn_next_set (Bit #(NBursts) m, BurstIdx b);
+   BurstIdx r = b;
+   for (Integer k = valueOf (NBursts) - 1; k >= 0; k = k - 1)
+      if (m [k] == 1 && fromInteger (k) > b) r = fromInteger (k);
+   return r;
 endfunction
 
 // ================================================================
@@ -114,13 +158,15 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
    // Latched current request
    Reg #(Bool)      rg_req_write  <- mkReg (False);
    Reg #(Bit #(64)) rg_req_addr   <- mkReg (0);
-   Reg #(Bit #(256)) rg_req_data  <- mkReg (0);
-   Reg #(Bit #(32)) rg_req_byteen <- mkReg (0);
-   Reg #(Bool)      rg_phase      <- mkReg (False);    // second burst
+   Reg #(Bit #(Bits_per_Raw_Mem_Word)) rg_req_data  <- mkReg (0);
+   Reg #(Bit #(BytesPerWord)) rg_req_byteen <- mkReg (0);
+   Reg #(BurstIdx)  rg_burst      <- mkReg (0);        // current burst
+   Reg #(BurstIdx)  rg_burst_last <- mkReg (0);        // last burst of this request
+   Reg #(Bit #(NBursts)) rg_bmask <- mkReg (0);        // write: bursts with enabled bytes
    Reg #(Bit #(4))  rg_beat       <- mkReg (0);
 
-   // Read-data assembly (16 halfword beats)
-   Vector #(16, Reg #(Bit #(16))) rg_rdata <- replicateM (mkReg (16'h0));
+   // Read-data assembly (HWords halfword beats)
+   Vector #(HWords, Reg #(Bit #(16))) rg_rdata <- replicateM (mkReg (16'h0));
 
    // Pin registers
    Reg #(Bit #(4))  rg_cmd      <- mkReg (cmd_nop);    // command output (updated by state rules)
@@ -280,12 +326,18 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
       else if (f_reqs.notEmpty) begin
          let req = f_reqs.first;
          f_reqs.deq;
+         let bm = fn_burst_mask (req.byteen);
          rg_req_write  <= req.write;
          rg_req_addr   <= req.address;
          rg_req_data   <= req.data;
          rg_req_byteen <= req.byteen;
-         rg_phase      <= False;
-         rg_state      <= ST_ACT;
+         rg_bmask      <= bm;
+         // Reads fetch every burst; writes only bursts with enabled bytes
+         // (a write with no enabled byte is dropped without an ACTIVE).
+         rg_burst      <= req.write ? fn_first_set (bm) : 0;
+         rg_burst_last <= req.write ? fn_last_set (bm) : fromInteger (last_burst);
+         if (! (req.write && bm == 0))
+            rg_state      <= ST_ACT;
 `ifdef SDCAP_PROBES
          // granule 0 only (req.address == 0): keeps REPL-boot logs small
          if (req.address == 0)
@@ -323,9 +375,9 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
       rg_cmd      <= cmd_read;
       rg_cmd_valid <= True;
       rg_clear_cmd <= True;
-      // Auto-precharge only on the second burst, so the row stays open
-      // across the two bursts of one raw-memory request.
-      rg_a        <= { 4'b0, fn_col (rg_req_addr, rg_phase) } | (rg_phase ? 13'h0400 : 13'h0);
+      // Auto-precharge only on the last burst, so the row stays open
+      // across the bursts of one raw-memory request.
+      rg_a        <= { 4'b0, fn_col (rg_req_addr, rg_burst) } | ((rg_burst == rg_burst_last) ? 13'h0400 : 13'h0);
       rg_ba       <= fn_bank (rg_req_addr);
       rg_dqm      <= 2'b00;    // unmask read data for the entire burst
       rg_beat     <= 0;
@@ -336,16 +388,16 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
    rule rl_rd_cap (rg_state == ST_RD_CAP);
       if (rg_wait != 0)
          rg_wait <= rg_wait - 1;
-      else if ((rg_beat == 7) && rg_phase) begin
+      else if ((rg_beat == 7) && (rg_burst == rg_burst_last)) begin
          // Final beat of the request: assemble and return the word.  The
          // beat is captured unconditionally; if f_rsps is full the word is
          // left in rg_rdata with rg_rsp_pend set and returned from IDLE,
          // where refresh can still run.  (This rule used to block on a
          // full f_rsps at this beat while rg_dq_in kept sampling the bus,
          // so the returned beat 15 was whatever was on DQ when it fired.)
-         Vector #(16, Bit #(16)) v = readVReg (rg_rdata);
-         v [15] = rg_dq_in;
-         rg_rdata [15] <= rg_dq_in;
+         Vector #(HWords, Bit #(16)) v = readVReg (rg_rdata);
+         v [valueOf (HWords) - 1] = rg_dq_in;
+         rg_rdata [valueOf (HWords) - 1] <= rg_dq_in;
          if (f_rsps.notFull)
             f_rsps.enq (MemoryResponse {data: pack (v)});
          // SIM PROBE: log returned read data (granule 0 only)
@@ -357,15 +409,15 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
          rg_state <= ST_IDLE;
       end
       else begin
-         Bit #(4) idx = (rg_phase ? 4'd8 : 4'd0) + rg_beat;
+         Bit #(TLog #(HWords)) idx = { rg_burst, rg_beat [2:0] };
          rg_rdata [idx] <= rg_dq_in;
 `ifdef SDCAP_PROBES
          if (rg_req_addr == 0)
-            $display ("%0d SDCAP phase=%0d beat=%0d idx=%0d dq_in=%0h",
-                      0, rg_phase, rg_beat, idx, rg_dq_in);
+            $display ("%0d SDCAP burst=%0d beat=%0d idx=%0d dq_in=%0h",
+                      0, rg_burst, rg_beat, idx, rg_dq_in);
 `endif
-         if (rg_beat == 7) begin    // first burst complete
-            rg_phase <= True;
+         if (rg_beat == 7) begin    // a non-final burst complete
+            rg_burst <= rg_burst + 1;
             rg_state <= ST_GAP;
          end
          else
@@ -388,16 +440,15 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
    // with the WRITE command), per-byte DQM masking.
 
    rule rl_wr (rg_state == ST_WR);
-      Vector #(16, Bit #(16)) v_wdata = unpack (rg_req_data);
-      Vector #(32, Bit #(1))  v_be    = unpack (rg_req_byteen);
-      Bit #(4) idx     = rg_phase ? 4'd8 : 4'd0;
-      Bit #(5) be_idx  = { idx, 1'b0 };
+      Vector #(HWords, Bit #(16))      v_wdata = unpack (rg_req_data);
+      Vector #(BytesPerWord, Bit #(1)) v_be    = unpack (rg_req_byteen);
+      Bit #(TLog #(HWords)) idx = { rg_burst, 3'b0 };
+      Bit #(TLog #(BytesPerWord)) be_idx = { idx, 1'b0 };
       rg_cmd      <= cmd_write;
       rg_cmd_valid <= True;
       rg_clear_cmd <= True;
-      // Auto-precharge only on the second burst, so the row stays open
-      // across the two bursts of one raw-memory request.
-      rg_a        <= { 4'b0, fn_col (rg_req_addr, rg_phase) } | (rg_phase ? 13'h0400 : 13'h0);
+      // Auto-precharge only on the last written burst.
+      rg_a        <= { 4'b0, fn_col (rg_req_addr, rg_burst) } | ((rg_burst == rg_burst_last) ? 13'h0400 : 13'h0);
       rg_ba       <= fn_bank (rg_req_addr);
       rg_dq_oe    <= 1'b1;
       rg_dq_out   <= v_wdata [idx];
@@ -412,10 +463,10 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
    endrule
 
    rule rl_wr_data (rg_state == ST_WR_DATA);
-      Vector #(16, Bit #(16)) v_wdata = unpack (rg_req_data);
-      Vector #(32, Bit #(1))  v_be    = unpack (rg_req_byteen);
-      Bit #(4) idx     = (rg_phase ? 4'd8 : 4'd0) + rg_beat;
-      Bit #(5) be_idx  = { idx, 1'b0 };
+      Vector #(HWords, Bit #(16))      v_wdata = unpack (rg_req_data);
+      Vector #(BytesPerWord, Bit #(1)) v_be    = unpack (rg_req_byteen);
+      Bit #(TLog #(HWords)) idx = { rg_burst, rg_beat [2:0] };
+      Bit #(TLog #(BytesPerWord)) be_idx = { idx, 1'b0 };
       rg_dq_out <= v_wdata [idx];
       rg_dqm    <= { ~ v_be [be_idx + 1], ~ v_be [be_idx] };
 `ifdef SDCAP_PROBES
@@ -432,8 +483,8 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
    rule rl_wr_end (rg_state == ST_WR_END);
       rg_dq_oe    <= 1'b0;
       rg_dqm      <= 2'b11;
-      if (! rg_phase) begin
-         rg_phase <= True;
+      if (rg_burst != rg_burst_last) begin
+         rg_burst <= fn_next_set (rg_bmask, rg_burst);
          rg_state <= ST_GAP;
       end
       else

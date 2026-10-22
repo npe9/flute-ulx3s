@@ -13,7 +13,7 @@ mkdir -p ${OBJ:-build}/bsc ${OBJ:-build}/v
 "$BSC" -u -verilog -g mkSdram_UT -aggressive-conditions -no-warn-action-shadowing \
    -D RV32 -D FABRIC64 -D ISA_PRIV_S -D SV32 -p "$P" -bdir ${OBJ:-build}/bsc -vdir ${OBJ:-build}/v Sdram_UT.bsv > build/bsc.log 2>&1 \
    || { cat build/bsc.log; exit 1; }
-verilator --binary --timing -Wno-fatal -Wno-lint -Wno-style -Wno-STMTDLY -Wno-TIMESCALEMOD --top-module tb \
+verilator --binary --timing ${RAWW:+-DRAWW=$RAWW} -Wno-fatal -Wno-lint -Wno-style -Wno-STMTDLY -Wno-TIMESCALEMOD --top-module tb \
    -Mdir ${OBJ:-build/obj} -y "$BSVLIB" +libext+.v \
    tb.sv dpi_stub.cpp ${OBJ:-build}/v/mkSdram_UT.v ../linux_bram/sdram_model.v ../linux_bram/sdram_timing_check.v > build/verilator.log 2>&1 \
    || { tail -30 build/verilator.log; exit 1; }
