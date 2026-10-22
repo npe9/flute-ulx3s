@@ -18,8 +18,12 @@ Labels (heuristics; anything 'other' needs a manual look):
            (pmpcfg4-15 / pmpaddr8-63, trigger + debug CSRs, Sail's V
            extension, priv-1.12 envcfg, counters, mip): see README.
   SC-allowed SC succeeds in Sail and fails in Flute after an intervening
-           store/AMO, FENCE.I or SFENCE.VMA by the same hart: outside a
+           load/store/AMO, FENCE(.I), SYSTEM or SFENCE.VMA by the same hart: outside a
            constrained LR/SC loop the ISA lets an SC fail (not a bug).
+  SC-trap  SC fails in Sail and succeeds in Flute with a trap between the LR
+           and the SC: Sail cancels the reservation on every trap, the ISA
+           does not require it (not a bug).
+  SC-bug   SC fails in Sail and succeeds in Flute with no trap in between.
   D1       Sail traps on a store/AMO to the vacant line 0xFFFFFFC0-0xFFFFFFFF,
            Flute does not (store access fault to a vacant address is lost).
   D1?      same, other address (e.g. RAM8M=1 runs).
@@ -108,6 +112,35 @@ def classify(path):
             continue
         fields = ','.join(f'{f}:{a}!={b}' for f, a, b in sig)
         names = {f for f, _, _ in sig}
+        # SC: Sail succeeds, Flute fails, with a store/AMO/FENCE.I by this hart between
+        # the LR and the SC.  The ISA lets an SC fail there (only constrained
+        # LR/SC loops, with no other memory access inside, must succeed).
+        if names == {'rd_wdata'} and r['word'] & 0x7f == 0x2f and (r['word'] >> 27) == 0x03 \
+           and sig[0][1] == '0x0':
+            between = []
+            for p in reversed(tr[:i]):
+                if p['word'] & 0x7f == 0x2f and (p['word'] >> 27) == 0x02:   # lr.w
+                    break
+                between.append(p)
+            # Constrained LR/SC loops (unpriv 'Eventual Success') admit no loads,
+            # stores, FENCEs or SYSTEM instructions, so any of these lets the SC fail.
+            if any((p['word'] & 0x7f in (0x03, 0x23, 0x2f, 0x0f, 0x73)) or is_mem(p['word']) or
+                   (p['word'] & 0x707f == 0x100f) or                               # fence.i
+                   (p['word'] & 0xfe007fff == 0x12000073) or                       # sfence.vma
+                   (p['word'] & 3 != 3 and p['word'] & 3 in (0, 2) and (p['word'] >> 13) & 7 == 6)
+                   for p in between if not trapped(p['a'])):
+                return 'SC-allowed', r['text'], fields
+        # SC: Sail fails, Flute succeeds, with a trap between the LR and the SC.
+        # Sail cancels the reservation on every trap; the ISA does not require
+        # it (only another SC, or a store by another hart/device, must clear it).
+        if names == {'rd_wdata'} and r['word'] & 0x7f == 0x2f and (r['word'] >> 27) == 0x03 \
+           and sig[0][1] == '0x1':
+            between = []
+            for p in reversed(tr[:i]):
+                if p['word'] & 0x7f == 0x2f and (p['word'] >> 27) == 0x02:   # lr.w
+                    break
+                between.append(p)
+            return ('SC-trap' if any(trapped(p['a']) for p in between) else 'SC-bug'), r['text'], fields
         if names == {'rd_wdata'} and r['a'] and 'MRM: 0b0' in (r['a'] + (r['b'] or '')) and is_mem(r['word']):
             for p in reversed(tr[:i]):
                 if is_mem(p['word']):
@@ -120,22 +153,6 @@ def classify(path):
             lab = csr_label(r['word'] >> 20, names, r)
             if lab:
                 return lab, r['text'], fields
-        # SC: Sail succeeds, Flute fails, with a store/AMO/FENCE.I by this hart between
-        # the LR and the SC.  The ISA lets an SC fail there (only constrained
-        # LR/SC loops, with no other memory access inside, must succeed).
-        if names == {'rd_wdata'} and r['word'] & 0x7f == 0x2f and (r['word'] >> 27) == 0x03 \
-           and sig[0][1] == '0x0':
-            between = []
-            for p in reversed(tr[:i]):
-                if p['word'] & 0x7f == 0x2f and (p['word'] >> 27) == 0x02:   # lr.w
-                    break
-                between.append(p)
-            if any((p['word'] & 0x7f == 0x23) or (p['word'] & 0x7f == 0x2f) or
-                   (p['word'] & 0x707f == 0x100f) or                               # fence.i
-                   (p['word'] & 0xfe007fff == 0x12000073) or                       # sfence.vma
-                   (p['word'] & 3 != 3 and p['word'] & 3 in (0, 2) and (p['word'] >> 13) & 7 == 6)
-                   for p in between if not trapped(p['a'])):
-                return 'SC-allowed', r['text'], fields
         if 'trap' in names and trapped(r['a']) and not trapped(r['b']) and is_mem(r['word']) \
            and ((r['word'] & 0x7f) in (0x23, 0x2f) or r['word'] & 3 != 3):
             m = re.search(r'MA: 0x([0-9a-f]+)', r['a'])

@@ -182,7 +182,7 @@ was classified by `classify_failures.py` from its re-run.
 Every saved failure falls into one of the classes below; none is unexplained.
 D2? and rerun-ok are heuristic (see the class descriptions).
 
-### Real DUT bugs (not fixed; minimal counterexamples in `testrig/divergences/`)
+### Real DUT bugs (fixed in Flute d9cc5c4; minimal counterexamples in `testrig/divergences/`)
 
 * **D1, store access fault lost**: `d1_vacant_store_no_fault.S`, `sw x0, -16(x0)`.
   * A store or AMO to a vacant physical address completes with no exception
@@ -224,6 +224,32 @@ D2? and rerun-ok are heuristic (see the class descriptions).
     raising illegal-instruction.
   * `PMP.bsv` `fv_is_pmp_csr` matches `a[11:6] == 6'b00111x`, i.e.
     0x380-0x3FF.
+
+### After the fixes (campaign `build/testrig-runs/campaign4`, Flute d9cc5c4)
+
+All four counterexamples (d1, d2, d2b, d3) pass.  12 generators x 200
+sequences (arith control muldiv mem cache fencei atomic memAmo compressed csr
+random all):
+
+| generator | failing | classification |
+|---|---|---|
+| arith, control, muldiv, mem, cache, fencei, compressed, random | 0 | |
+| atomic | 72 | SC-allowed 68, SC-trap 1, rerun-ok 3 |
+| memAmo | 4 | SC-allowed 3, SC-trap 1 |
+| csr | 67 | cfg-pmp 48, cfg-csr 13, cfg-debug 6 |
+| all | 20 | SC-allowed 9, SC-trap 3, cfg-pmp 3, cfg-csr 3, rerun-ok 2 |
+
+No D1/D2/D3 remain.  The classifier now checks SC outcomes before the D2
+stale-load rule (SCs were being labelled D2), and:
+
+* `SC-allowed` covers any load/store/AMO/FENCE/SYSTEM between the LR and the
+  SC (the constrained-loop rules of unpriv "Eventual Success"), e.g. a load
+  that evicts the reserved line in the direct-mapped D-cache.
+* `SC-trap`: Sail fails the SC, Flute succeeds, with a trap in between.  Sail
+  cancels the reservation on every trap; the ISA does not require that.
+  Matching Sail would need a trap signal from the CPU into MMU_Cache.
+* The 5 `rerun-ok` all contain LR/SC and did not reproduce on the
+  per-failure re-run; not explained yet.
 
 ### Configuration / reference differences (not DUT bugs)
 
