@@ -135,9 +135,11 @@ def classify(path):
         # it (only another SC, or a store by another hart/device, must clear it).
         if names == {'rd_wdata'} and r['word'] & 0x7f == 0x2f and (r['word'] >> 27) == 0x03 \
            and sig[0][1] == '0x1':
+            # A trapping LR sets no reservation (and is itself a trap): look
+            # back to the last LR that executed.
             between = []
             for p in reversed(tr[:i]):
-                if p['word'] & 0x7f == 0x2f and (p['word'] >> 27) == 0x02:   # lr.w
+                if p['word'] & 0x7f == 0x2f and (p['word'] >> 27) == 0x02 and not trapped(p['a']):
                     break
                 between.append(p)
             return ('SC-trap' if any(trapped(p['a']) for p in between) else 'SC-bug'), r['text'], fields
