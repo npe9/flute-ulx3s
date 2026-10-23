@@ -57,7 +57,6 @@ typedef enum {ST_PWR_WAIT,
               ST_IDLE,
               ST_ACT, ST_RCD_WAIT,
               ST_RD, ST_RD_CAP,
-              ST_GAP,
               ST_WR, ST_WR_DATA, ST_WR_END,
               ST_REF, ST_REF_WAIT } State
 deriving (Bits, Eq, FShow);
@@ -416,23 +415,22 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
             $display ("%0d SDCAP burst=%0d beat=%0d idx=%0d dq_in=%0h",
                       0, rg_burst, rg_beat, idx, rg_dq_in);
 `endif
-         if (rg_beat == 7) begin    // a non-final burst complete
+         // Gapless bursts: the next READ goes out with beat 4 (8 cycles after
+         // this burst's READ), so its first beat follows this burst's beat 7.
+         if ((rg_beat == 4) && (rg_burst != rg_burst_last)) begin
+            BurstIdx nb = rg_burst + 1;
+            rg_cmd       <= cmd_read;
+            rg_cmd_valid <= True;
+            rg_clear_cmd <= True;
+            rg_a         <= { 4'b0, fn_col (rg_req_addr, nb) } | ((nb == rg_burst_last) ? 13'h0400 : 13'h0);
+         end
+         if (rg_beat == 7) begin    // a non-final burst complete: the next one's beat 0 follows
             rg_burst <= rg_burst + 1;
-            rg_state <= ST_GAP;
+            rg_beat  <= 0;
          end
          else
             rg_beat <= rg_beat + 1;
       end
-   endrule
-
-   // One idle cycle between the two bursts of a request (tCCD)
-
-   rule rl_gap_rd (rg_state == ST_GAP && ! rg_req_write);
-      rg_state    <= ST_RD;
-   endrule
-
-   rule rl_gap_wr (rg_state == ST_GAP && rg_req_write);
-      rg_state    <= ST_WR;
    endrule
 
    // ----------------------------------------------------------------
@@ -474,8 +472,15 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
          $display ("%0d SDWRB%0d addr=%0h idx=%0d dq=%0h dqm=%0b",
                    0, rg_beat, rg_req_addr, idx, v_wdata [idx], { ~ v_be [be_idx + 1], ~ v_be [be_idx] });
 `endif
-      if (rg_beat == 7)
-         rg_state <= ST_WR_END;
+      // The next burst's WRITE (with its beat 0) follows beat 7 directly (tCCD 1)
+      if (rg_beat == 7) begin
+         if (rg_burst != rg_burst_last) begin
+            rg_burst <= fn_next_set (rg_bmask, rg_burst);
+            rg_state <= ST_WR;
+         end
+         else
+            rg_state <= ST_WR_END;
+      end
       else
          rg_beat <= rg_beat + 1;
    endrule
@@ -483,12 +488,7 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
    rule rl_wr_end (rg_state == ST_WR_END);
       rg_dq_oe    <= 1'b0;
       rg_dqm      <= 2'b11;
-      if (rg_burst != rg_burst_last) begin
-         rg_burst <= fn_next_set (rg_bmask, rg_burst);
-         rg_state <= ST_GAP;
-      end
-      else
-         rg_state <= ST_IDLE;
+      rg_state <= ST_IDLE;
    endrule
 
    // ----------------------------------------------------------------
