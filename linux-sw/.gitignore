@@ -1,3 +1,5 @@
 opensbi/
 out/
 init/init
+out-fp/
+init-fp/init
