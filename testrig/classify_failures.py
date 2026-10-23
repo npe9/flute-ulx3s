@@ -27,6 +27,12 @@ Labels (heuristics; anything 'other' needs a manual look):
   D1       Sail traps on a store/AMO to the vacant line 0xFFFFFFC0-0xFFFFFFFF,
            Flute does not (store access fault to a vacant address is lost).
   D1?      same, other address (e.g. RAM8M=1 runs).
+  SC-trap-hidden / SC-allowed-hidden
+           an earlier SC with rd = x0 stored in only one of the two (only the
+           unchecked mem fields show it); the later divergence is that store.
+           -trap: Flute stored, Sail cancelled on a trap; -allowed: Sail stored,
+           Flute failed after an intervening memory op / FENCE / SYSTEM.
+           Benign for the same reasons as SC-trap / SC-allowed.
   rerun-ok the saved re-run of the failing test did not diverge (failure
            depends on state left by an earlier test, e.g. D2's stale BRAM
            output register, which is not reset between tests).
@@ -104,6 +110,37 @@ def compared(field, a):
 def trapped(rec):
     return rec is not None and 'Trap:  True' in rec
 
+def sc_wrote(rec):
+    m = re.search(r'MWM: 0b([01]+)', rec or '')
+    return bool(m and int(m.group(1), 2))
+
+def is_sc(word):
+    return word & 0x7f == 0x2f and (word >> 27) == 0x03
+
+def hidden_sc(tr, i):
+    """An earlier SC whose outcome QCVEngine could not see (rd = x0, so only the
+    unchecked mem fields differ): Flute stored, Sail did not.  The later
+    divergence is that SC's store.  -> 'SC-trap-hidden' / 'SC-allowed-hidden' /
+    None (benign classes only; anything else falls through)."""
+    for j in range(i - 1, -1, -1):
+        p = tr[j]
+        if not (is_sc(p['word']) and p['a'] and p['b'] and not trapped(p['b'])
+                and sc_wrote(p['b']) != sc_wrote(p['a'])):
+            continue
+        flute_stored = sc_wrote(p['b'])
+        between = []
+        for q in reversed(tr[:j]):
+            if q['word'] & 0x7f == 0x2f and (q['word'] >> 27) == 0x02 and not trapped(q['a']):
+                break
+            between.append(q)
+        if flute_stored:
+            return 'SC-trap-hidden' if any(trapped(q['a']) for q in between) else None
+        if any(is_mem(q['word']) or (q['word'] & 0x7f in (0x03, 0x23, 0x2f, 0x0f, 0x73))
+               for q in between if not trapped(q['a'])):
+            return 'SC-allowed-hidden'
+        return None
+    return None
+
 def classify(path):
     tr = parse(path)
     for i, r in enumerate(tr):
@@ -112,6 +149,9 @@ def classify(path):
             continue
         fields = ','.join(f'{f}:{a}!={b}' for f, a, b in sig)
         names = {f for f, _, _ in sig}
+        hidden = hidden_sc(tr, i)
+        if hidden:
+            return hidden, r['text'], fields
         # SC: Sail succeeds, Flute fails, with a store/AMO/FENCE.I by this hart between
         # the LR and the SC.  The ISA lets an SC fail there (only constrained
         # LR/SC loops, with no other memory access inside, must succeed).
