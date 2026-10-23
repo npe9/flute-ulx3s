@@ -6,6 +6,7 @@
 #   EXCLUDE='pmp-NAPOT-R*' ./run.sh pmp32   # a subset minus some tests
 #   SUITE_ONLY=1 ./run.sh         # just list the selected tests (riscof testlist)
 #
+# CONFIG=config-fd.ini: the F/D build (FP=1 FPU_TRIM=1 netlist, Sail with F/D).
 # Env: ARCH_TEST (default ~/src/riscv-arch-test, checked out at 3.10.0),
 #      RISCOF (default ~/src/riscof-venv/bin/riscof), WORK (default riscof_work).
 # The DUT plugin builds sim/isa_bram/obj_dir_riscof from build/timing-exp/verilog_all.v.v8
@@ -31,6 +32,6 @@ else
 fi
 
 if [[ "${SUITE_ONLY:-0}" == "1" ]]; then
-    exec "$RISCOF" testlist --config=config.ini --suite="$SUITE" --env="$ENV" --work-dir="$WORK"
+    exec "$RISCOF" testlist --config="${CONFIG:-config.ini}" --suite="$SUITE" --env="$ENV" --work-dir="$WORK"
 fi
-"$RISCOF" run --config=config.ini --suite="$SUITE" --env="$ENV" --work-dir="$WORK" --no-browser
+"$RISCOF" run --config="${CONFIG:-config.ini}" --suite="$SUITE" --env="$ENV" --work-dir="$WORK" --no-browser

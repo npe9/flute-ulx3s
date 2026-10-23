@@ -1,0 +1,53 @@
+# Flute RV32 + F/D (fpu-trim: FP=1 FPU_TRIM=1) -- what the RTL implements, for riscv-config/RISCOF.
+#   Makefile DEFINES: RV32 ISA_I ISA_M ISA_A ISA_C ISA_B ISA_ZKN ISA_ZKR ISA_PRIV_M/S/U SV32
+#   B is spelled out as Zba_Zbb_Zbc_Zbs and Zkn as Zbkb_Zbkc_Zbkx_Zknd_Zkne_Zknh, because
+#   RISCOF selects tests by regex/subset on the literal string (plain "B"/"Zkn" select less).
+#   misa: read-only (CSR_RegFile_MSU.bsv: writes ignored). The RTL value is 0x40141107
+#   (MXL=1 | U S M I F D C B A; F/D add 0x28); riscv-config 3.x has no single-letter B and insists reset-val
+#   match the ISA string, so the yaml says 0x40141105. Test selection does not use it.
+#   mtvec: BASE[31:2] any, MODE bit 0 only (Direct/Vectored), ISA_Decls_Priv_M.bsv word_to_mtvec.
+#   PMP: 16 visible, 8 implemented (0-7), G=10 (4 KiB) -- RegFiles/PMP.bsv.
+#   Misaligned loads/stores trap (no hardware misaligned support).
+hart_ids: [0]
+hart0:
+  ISA: RV32IMAFDCSUZicsr_Zifencei_Zba_Zbb_Zbc_Zbkb_Zbkc_Zbkx_Zbs_Zknd_Zkne_Zknh_Zkr
+  physical_addr_sz: 32
+  supported_xlen: [32]
+  hw_data_misaligned_support: false
+  pmp_granularity: 10
+  misa:
+    reset-val: 0x4014112D
+    rv32:
+      accessible: true
+      mxl:
+        implemented: true
+        type:
+          ro_constant: 0x1
+      extensions:
+        implemented: true
+        type:
+          ro_constant: 0x14112D
+    rv64:
+      accessible: false
+  mtvec:
+    reset-val: 0x1000
+    rv32:
+      accessible: true
+      base:
+        implemented: true
+        type:
+          warl:
+            dependency_fields: []
+            legal:
+            - base[29:0] in [0x00000000:0x3FFFFFFF]
+            wr_illegal:
+            - Unchanged
+      mode:
+        implemented: true
+        type:
+          warl:
+            dependency_fields: []
+            legal:
+            - mode[1:0] in [0x0:0x1]
+            wr_illegal:
+            - Unchanged
