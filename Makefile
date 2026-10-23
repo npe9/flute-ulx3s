@@ -64,6 +64,13 @@ FP ?= 0
 ifeq ($(FP),1)
 DEFINES += -D ISA_F -D ISA_D -D INCLUDE_FDIV -D INCLUDE_FSQRT
 endif
+# FPU_TRIM=1 (with FP=1): the area-trimmed F/D unit (Flute/src_Core/CPU/FPU_Trim.bsv) instead of
+# the stock FBox, which stays the default and the functional reference.  Use a separate BUILD dir:
+# bsc -u does not see -D changes.
+FPU_TRIM ?= 0
+ifeq ($(FP)$(FPU_TRIM),11)
+DEFINES += -D FPU_TRIM
+endif
 # Extra defines for the RVFI build only (formal/run.sh sets FORMAL_DEFINES=-D RVFI_ALTOPS with FP=1)
 FORMAL_DEFINES ?=
 
