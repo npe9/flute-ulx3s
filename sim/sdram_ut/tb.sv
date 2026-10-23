@@ -4,7 +4,12 @@
 // consumer, so f_rsps fills and the final-beat response stall path runs.
 // PASS needs every read to match the shadow memory and 0 checker errors.
 `timescale 1ns/1ps
+`ifndef RAWW
+`define RAWW 256
+`endif
 module tb;
+   localparam int RW = `RAWW;          // raw_mem_word bits
+   localparam int BE = RW/8;
    localparam int NREQ   = 4000;
    localparam int MAXOUT = 4;
 
@@ -20,8 +25,8 @@ module tb;
    assign dq = dq_oe ? dq_out : 16'hzzzz;
    always @(posedge clk) dq_iob <= dq;           // src/Top.v useioff register
 
-   reg  [352:0] req;  reg req_en = 0;  wire req_rdy;
-   wire [255:0] rsp;  reg rsp_en = 0;  wire rsp_rdy;
+   reg  [RW+BE+64:0] req;  reg req_en = 0;  wire req_rdy;
+   wire [RW-1:0] rsp;  reg rsp_en = 0;  wire rsp_rdy;
    wire init_done;
 
    mkSdram_UT dut (.CLK(clk), .RST_N(rst_n),
@@ -42,14 +47,14 @@ module tb;
       sel2addr = {44'b0, 7'b0, s[5:3], 2'b0, s[1:0], 4'b0, s[2]};   // row[9:7] bank[6:5] col[0]
    endfunction
 
-   reg [255:0] shadow [0:63];
-   reg [255:0] expq [$];
+   reg [RW-1:0] shadow [0:63];
+   reg [RW-1:0] expq [$];
    int n_req = 0, n_rd = 0, n_chk = 0, n_err = 0, outst = 0, n_stall = 0;
    int phase_throttle;
    initial for (int i = 0; i < 64; i++) shadow[i] = '0;
 
-   function automatic [255:0] be2mask (input [31:0] be);
-      for (int i = 0; i < 32; i++) be2mask[i*8 +: 8] = {8{be[i]}};
+   function automatic [RW-1:0] be2mask (input [BE-1:0] be);
+      for (int i = 0; i < BE; i++) be2mask[i*8 +: 8] = {8{be[i]}};
    endfunction
 
    // Drive at negedge from RDY values that are stable mid-cycle; the DUT
@@ -78,8 +83,16 @@ module tb;
             automatic int r = $urandom;
             automatic logic [5:0] s = r[5:0];
             automatic logic wr = r[6] | r[7];
-            automatic logic [31:0] be = r[8] ? 32'hFFFF_FFFF : $urandom;
-            automatic logic [255:0] d = {$urandom,$urandom,$urandom,$urandom,$urandom,$urandom,$urandom,$urandom};
+            automatic logic [BE-1:0] be;
+            automatic logic [RW-1:0] d;
+            for (int k = 0; k < RW/32; k++) d[k*32 +: 32] = $urandom;
+            for (int k = 0; k < BE/32; k++) be[k*32 +: 32] = $urandom;
+            // full lines, sparse masks (some 16-byte bursts empty), random masks
+            case (r[10:9])
+               2'd0, 2'd1: be = '1;
+               2'd2: for (int k = 0; k < BE/16; k++) if ($urandom % 2) be[k*16 +: 16] = '0;
+               default: ;
+            endcase
             req    = {wr, be, sel2addr(s), d};
             req_en = 1;
             n_req++;
