@@ -307,3 +307,17 @@ stale-load rule (SCs were being labelled D2), and:
 * The I-side RAM returns zeros (the bits come from the trace), so the
   PC = 2 mod 4 straddle approximation (see Harness) is not exercised
   against real memory contents.
+
+## F/D (FP=1 builds)
+
+    make -C testrig OUT=$PWD/build/testrig-dii-fpt \
+        EXTRA_DEFINES="-D ISA_F -D ISA_D -D INCLUDE_FDIV -D INCLUDE_FSQRT -D FPU_TRIM"
+    ARCH=rv32imafdcs_zicsr_zifencei DUT=$PWD/build/testrig-dii-fpt/Flute_RVFI_DII \
+        SAIL_FLAGS="-I -i --pmp-count 16 --pmp-grain 10" \
+        testrig/run_campaign.sh build/testrig-runs/camp-fp 200 float double all
+
+Sail runs with F/D (no `-F`).  QCVEngine needs `qcv-rv32d-prologue.patch`: its
+FP prologue clears f16-f20 with `fmv.d.x`, which is RV64-only and traps on
+RV32, so those registers carry the previous test's values on the DUT (Sail
+resets them per test) and every later use of them diverges.  The patch uses
+`fcvt.d.w fN, x0` on RV32.  With it: float 200/200, double 200/200 (2026-10-23).
