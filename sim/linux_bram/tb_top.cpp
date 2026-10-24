@@ -173,7 +173,7 @@ static Perf perf_cur, perf_tot;
 static const char* sd_name[] = {"PWR_WAIT","PRE_ALL","PRE_ALL_WAIT","INIT_REF1","INIT_REF1_WAIT","INIT_REF2","INIT_REF2_WAIT",
     "MRS","MRS_WAIT","IDLE","ACT","RCD_WAIT","RD","RD_CAP","WR","WR_DATA","WR_END","REF","REF_WAIT"};
 static const char* ist_name[] = {"RUN","REFILL_REQ","REFILL","IO_REQ","IO_RSP","FLUSH","PTW1_REQ","PTW1_RSP","PTW0_REQ","PTW0_RSP"};
-static const char* dst_name[] = {"PRERESET","RESETTING","READY","RUNNING","EXC_RSP","PTW_START","PTW_L1","PTW_L0","START_REFILL",
+static const char* dst_name[] = {"PRERESET","RESETTING","READY","RUNNING","EXC_RSP","UDTLB_FILL","PTW_START","PTW_L1","PTW_L0","START_REFILL",
     "SNAPSHOT","REFILL","REREQ","AMO_EXEC","ST_AMO_RSP","IO_REQ","IO_AWAIT_W","IO_AWAIT_R","IO_READ_RSP","IO_AWAIT_AMO"};
 static void perf_sample(Vsv_tb_top* top) {
     Perf& p = perf_cur;
@@ -237,7 +237,7 @@ static void perf_print(const char* tag, const Perf& p, unsigned long long inst) 
            p.i_refill ? (double)p.i_beat / p.i_refill : 0.0, p.i_walk);
     for (int i = 0; i < 10; i++) if (p.ist[i]) printf(" %s %.1f%%", ist_name[i], 100 * p.ist[i] / c);
     printf("\n[perf]   D: refills %llu walks %llu |", p.d_refill, p.d_walk);
-    for (int i = 0; i < 19; i++) if (p.dst[i] && i != 3) printf(" %s %.1f%%", dst_name[i], 100 * p.dst[i] / c);
+    for (int i = 0; i < 20; i++) if (p.dst[i] && i != 3) printf(" %s %.1f%%", dst_name[i], 100 * p.dst[i] / c);
     printf("\n[perf]   M: reloads %llu (%.1f cyc each, %.1f%% issued while SDRAM busy) writebacks %llu | SDRAM rd %llu wr %llu busy rd %.1f%% wr %.1f%% |",
            p.mc_reload, p.mc_reload ? (double)p.mc_reloading / p.mc_reload : 0.0, p.mc_reload ? 100.0 * p.mc_reload_busy / p.mc_reload : 0.0,
            p.mc_wb, p.sd_rd, p.sd_wr, 100 * p.sd_busy_rd / c, 100 * p.sd_busy_wr / c);
