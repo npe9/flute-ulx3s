@@ -171,7 +171,7 @@ struct Perf {
 };
 static Perf perf_cur, perf_tot;
 static const char* sd_name[] = {"PWR_WAIT","PRE_ALL","PRE_ALL_WAIT","INIT_REF1","INIT_REF1_WAIT","INIT_REF2","INIT_REF2_WAIT",
-    "MRS","MRS_WAIT","IDLE","ACT","RCD_WAIT","RD","RD_CAP","GAP","WR","WR_DATA","WR_END","REF","REF_WAIT"};
+    "MRS","MRS_WAIT","IDLE","ACT","RCD_WAIT","RD","RD_CAP","WR","WR_DATA","WR_END","REF","REF_WAIT"};
 static const char* ist_name[] = {"RUN","REFILL_REQ","REFILL","IO_REQ","IO_RSP","FLUSH","PTW1_REQ","PTW1_RSP","PTW0_REQ","PTW0_RSP"};
 static const char* dst_name[] = {"PRERESET","RESETTING","READY","RUNNING","EXC_RSP","PTW_START","PTW_L1","PTW_L0","START_REFILL",
     "SNAPSHOT","REFILL","REREQ","AMO_EXEC","ST_AMO_RSP","IO_REQ","IO_AWAIT_W","IO_AWAIT_R","IO_READ_RSP","IO_AWAIT_AMO"};
@@ -189,10 +189,10 @@ static void perf_sample(Vsv_tb_top* top) {
     unsigned prev_ist = p.last_ist;
     p.last_ist = ist; p.last_dst = dst;
     unsigned mc = TOP_SIG(soc_top__DOT__mem0_controller__DOT__rg_state) & 3;     // 2 RELOADING, 3 READY (no INCLUDE_INITIAL_MEMZERO)
-    unsigned clean = TOP_SIG(soc_top__DOT__mem0_controller__DOT__rg_cached_clean) & 1;
+    unsigned clean = TOP_SIG(soc_top__DOT__mem0_controller__DOT__rg_dirty_be) == 0;   // per-byte dirty mask
     unsigned sd = TOP_SIG(mem_rg_state) & 31, sdw = TOP_SIG(mem_rg_req_write) & 1;
     p.sd_st[sd]++;
-    if (sd != 9 && sd >= 10 && sd <= 17) { if (sdw) p.sd_busy_wr++; else p.sd_busy_rd++; }
+    if (sd >= 10 && sd <= 16) { if (sdw) p.sd_busy_wr++; else p.sd_busy_rd++; }
     if (sd == 10 && p.last_sd != 10) { if (sdw) p.sd_wr++; else p.sd_rd++; }
     if (mc == 2) p.mc_reloading++;
     if (mc == 2 && p.last_mc != 2) { p.mc_reload++; if (p.last_sd != 9) p.mc_reload_busy++; }
@@ -241,7 +241,7 @@ static void perf_print(const char* tag, const Perf& p, unsigned long long inst) 
     printf("\n[perf]   M: reloads %llu (%.1f cyc each, %.1f%% issued while SDRAM busy) writebacks %llu | SDRAM rd %llu wr %llu busy rd %.1f%% wr %.1f%% |",
            p.mc_reload, p.mc_reload ? (double)p.mc_reloading / p.mc_reload : 0.0, p.mc_reload ? 100.0 * p.mc_reload_busy / p.mc_reload : 0.0,
            p.mc_wb, p.sd_rd, p.sd_wr, 100 * p.sd_busy_rd / c, 100 * p.sd_busy_wr / c);
-    for (int i = 9; i < 20; i++) if (p.sd_st[i]) printf(" %s %.1f%%", sd_name[i], 100 * p.sd_st[i] / c);
+    for (int i = 9; i < 19; i++) if (p.sd_st[i]) printf(" %s %.1f%%", sd_name[i], 100 * p.sd_st[i] / c);
     printf("\n[perf]   M: AR beats %llu AW beats %llu | reloads for rd %llu wr %llu", p.mc_ar, p.mc_aw, p.mc_rl_rd, p.mc_rl_wr);
     if (p.ir_n || p.ir_hit) printf(" | I-refill timeline (%llu clean samples, %llu raw-word hits): req->AR@MC %.1f AR->reload %.1f reload %.1f reload->beat1 %.1f",
                        p.ir_n, p.ir_hit, p.ir_n ? (double)p.ir_arr / p.ir_n : 0.0, p.ir_n ? (double)p.ir_rl / p.ir_n : 0.0, p.ir_n ? (double)p.ir_rld / p.ir_n : 0.0, p.ir_n ? (double)p.ir_b1 / p.ir_n : 0.0);
