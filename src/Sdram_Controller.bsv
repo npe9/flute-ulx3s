@@ -12,8 +12,7 @@
 // for all of its chunks (SDRAM data cannot be stalled).  Writes carry one
 // 32-byte half of the line and skip bursts with no enabled byte.
 //
-// mem_server: Flute's 256-bit "raw memory" port (32-byte granule r = line
-// half: line = r >> 1, half = r[0]) on top of the streaming core.
+// The request and chunk types are Mem_Controller's raw memory port.
 //
 // Timing constants are in system clock cycles (25 MHz = 40 ns; the PLL
 // build runs at 32.14 MHz = 31.1 ns): tRCD 1 (>=18 ns), CL 2, tRFC and the
@@ -29,9 +28,8 @@ import Vector      :: *;
 import FIFOF       :: *;
 import GetPut      :: *;
 import ClientServer :: *;
-import Memory      :: *;    // MemoryRequest, MemoryResponse, MemoryServer
 
-import Mem_Controller :: *;    // Bits_per_Raw_Mem_Addr/WWord
+import Mem_Controller :: *;    // Raw_Mem_Req, Raw_Mem_Chunk
 
 // ================================================================
 
@@ -68,7 +66,7 @@ deriving (Bits, Eq, FShow);
 // ================================================================
 
 interface Sdram_Controller_IFC;
-   interface MemoryServer #(Bits_per_Raw_Mem_Addr, Bits_per_Raw_Mem_Word)  mem_server;
+   interface Server #(Raw_Mem_Req, Raw_Mem_Chunk)  mem_server;
 
    (* always_ready *) method Bool     init_done;
 
@@ -87,18 +85,8 @@ endinterface
 
 // ================================================================
 
-typedef Bit #(19) Sdram_Line;     // 32 MB / 64 B
-typedef Bit #(2)  BurstIdx;       // burst within a line
-
-typedef struct {
-   Bool        write;
-   Sdram_Line  line;
-   BurstIdx    b_first;   // read: bursts b_first .. b_last
-   BurstIdx    b_last;
-   Bit #(256)  wdata;     // write: half b_first[1] of the line
-   Bit #(32)   wbe;
-} Sdram_Req
-deriving (Bits, FShow);
+typedef Raw_Mem_Line Sdram_Line;
+typedef Bit #(2)     BurstIdx;       // burst within a line
 
 function Bit #(2)  fn_bank (Sdram_Line l); return l [1:0];   endfunction
 function Bit #(13) fn_row  (Sdram_Line l); return l [18:6];  endfunction
@@ -151,7 +139,7 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
    Reg #(Bit #(2))  rg_init_pairs <- mkReg (0);   // init REF1/REF2 pairs done
 
    // Latched current request
-   Reg #(Sdram_Req) rg_req        <- mkRegU;
+   Reg #(Raw_Mem_Req) rg_req        <- mkRegU;
    Reg #(BurstIdx)  rg_burst      <- mkReg (0);        // current burst
    Reg #(BurstIdx)  rg_burst_last <- mkReg (0);        // last burst of this request
    Reg #(Bit #(4))  rg_bmask      <- mkReg (0);        // write: bursts with enabled bytes
@@ -173,7 +161,7 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
    Reg #(Bool) rg_cmd_valid  <- mkReg (False);
    Reg #(Bool) rg_clear_cmd  <- mkReg (False);
 
-   FIFOF #(Sdram_Req)  f_reqs <- mkSizedFIFOF (4);
+   FIFOF #(Raw_Mem_Req)  f_reqs <- mkSizedFIFOF (4);
    // Read chunks.  Credits: rg_chunks_issued - rg_chunks_taken chunks are
    // promised to f_rsps (each counter has one writer); a read starts only
    // if all of its chunks fit.
@@ -181,10 +169,6 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
    Reg #(Bit #(4))     rg_chunks_issued <- mkReg (0);
    Reg #(Bit #(4))     rg_chunks_taken  <- mkReg (0);
 
-   // mem_server (256-bit raw word) response assembly
-   Vector #(3, Reg #(Bit #(64))) rg_w256   <- replicateM (mkRegU);
-   Reg #(Bit #(2))               rg_w256_n <- mkReg (0);
-   FIFOF #(MemoryResponse #(Bits_per_Raw_Mem_Word)) f_rsp256 <- mkFIFOF;
 
    // Issue rules assert rg_cmd_valid for exactly one cycle; this rule
    // clears it the following cycle.  Kept separate from data-burst rules
@@ -472,19 +456,6 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
    endrule
 
    // ----------------------------------------------------------------
-   // mem_server: 256-bit raw words = line halves (4 read chunks each)
-
-   rule rl_assemble_256;
-      let c = f_rsps.first;  f_rsps.deq;
-      rg_chunks_taken <= rg_chunks_taken + 1;
-      if (rg_w256_n == 3)
-         f_rsp256.enq (MemoryResponse {data: { c, rg_w256 [2], rg_w256 [1], rg_w256 [0] }});
-      else
-         rg_w256 [rg_w256_n] <= c;
-      rg_w256_n <= rg_w256_n + 1;
-   endrule
-
-   // ----------------------------------------------------------------
    // INTERFACE
 
    // The command is driven only during the single-cycle issue states.
@@ -493,15 +464,15 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
       return rg_cmd_valid ? rg_cmd : cmd_nop;
    endfunction
 
-   interface MemoryServer mem_server;
-      interface Put request;
-         method Action put (MemoryRequest #(Bits_per_Raw_Mem_Addr, Bits_per_Raw_Mem_Word) r);
-            BurstIdx b0 = { r.address [0], 1'b0 };
-            f_reqs.enq (Sdram_Req {write: r.write, line: truncate (r.address >> 1),
-                                   b_first: b0, b_last: b0 + 1, wdata: r.data, wbe: r.byteen});
+   interface Server mem_server;
+      interface Put request = toPut (f_reqs);
+      interface Get response;
+         method ActionValue #(Raw_Mem_Chunk) get;
+            f_rsps.deq;
+            rg_chunks_taken <= rg_chunks_taken + 1;
+            return f_rsps.first;
          endmethod
       endinterface
-      interface Get response = toGet (f_rsp256);
    endinterface
 
    method Bool init_done = rg_inited;
