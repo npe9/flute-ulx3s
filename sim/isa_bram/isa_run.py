@@ -11,8 +11,9 @@ OBJCOPY = "riscv64-unknown-elf-objcopy"; NM = "riscv64-unknown-elf-nm"
 
 def model_idx(addr):
     b = addr - 0x80000000
-    r, hw = b >> 5, (b >> 1) & 15
-    return ((r >> 5) & 3) << 22 | ((r >> 7) & 0x1FFF) << 9 | (r & 0x1F) << 4 | hw
+    # Sdram_Controller: line l = b >> 6 in bank l[1:0], row l[18:6], col {l[5:2], halfword}
+    l, hw = b >> 6, (b >> 1) & 31
+    return (l & 3) << 22 | ((l >> 6) & 0x1FFF) << 9 | ((l >> 2) & 15) << 5 | hw
 
 def prep(elf, work):
     base = os.path.join(work, os.path.basename(elf))
