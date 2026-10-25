@@ -67,6 +67,11 @@ module mkMC_UT (Empty);
    Reg #(UInt #(32)) rg_errs   <- mkReg (0);
    Reg #(UInt #(32)) rg_raw_rd <- mkReg (0);
    Reg #(UInt #(32)) rg_raw_wr <- mkReg (0);
+   // Liveness: after the random traffic, back-to-back stores to one dword
+   // (no idle gap); the raw memory must see one of them (the buffer ages out).
+   Reg #(Bool)       rg_spin      <- mkReg (False);
+   Reg #(UInt #(16)) rg_spin_cyc  <- mkReg (0);
+   Reg #(Bool)       rg_spin_seen <- mkReg (False);
 
    rule rl_seed (! rg_seeded);
       lfsr.seed ('h1234_5679);
@@ -201,7 +206,38 @@ module mkMC_UT (Empty);
       rg_ops  <= rg_ops + 1;
    endrule
 
-   (* descending_urgency = "rl_b, rl_r, rl_issue_wbeat, rl_issue_wr, rl_issue_rd" *)
+   // Watchdog: a hang reports its state instead of running forever
+   Reg #(UInt #(32)) rg_cyc <- mkReg (0);
+   rule rl_watchdog;
+      rg_cyc <= rg_cyc + 1;
+      if (rg_cyc == 20000000) begin
+         $display ("[mc_ut] HANG: ops %0d out %0d rd_out %0d wleft %0d spin %0d spin_cyc %0d raw rd %0d wr %0d",
+                   rg_ops, rg_out, rg_rd_out, rg_wleft, rg_spin, rg_spin_cyc, rg_raw_rd, rg_raw_wr);
+         $display ("[mc_ut] FAIL");
+         $finish (1);
+      end
+   endrule
+
+   rule rl_spin_start (! rg_spin && rg_ops >= fromInteger (n_ops) && rg_out == 0 && rg_wleft == 0);
+      rg_spin <= True;
+   endrule
+
+   rule rl_spin_wr (rg_spin && rg_spin_cyc < 1000 && rg_out < 4);
+      mx.i_wr_addr.enq (AXI4_Wr_Addr {awid: 0, awaddr: base, awlen: 0, awsize: axsize_8,
+                                      awburst: axburst_incr, awlock: 0, awcache: 0, awprot: 0,
+                                      awqos: 0, awregion: 0, awuser: 0});
+      mx.i_wr_data.enq (AXI4_Wr_Data {wdata: { 32'h5A5A_5A5A, 16'h0, pack (rg_spin_cyc) }, wstrb: '1, wlast: True, wuser: 0});
+      pend_wr [0] <= pend_wr [0] + 1;
+      f_wspan.enq (Span {slot: 0, n: 1});
+      rg_out <= rg_out + 1;
+   endrule
+
+   rule rl_spin_tick (rg_spin);
+      if (rg_spin_cyc < 1100) rg_spin_cyc <= rg_spin_cyc + 1;
+      if (mem [0][63:32] == 32'h5A5A_5A5A) rg_spin_seen <= True;
+   endrule
+
+   (* descending_urgency = "rl_b, rl_r, rl_issue_wbeat, rl_issue_wr, rl_issue_rd, rl_spin_wr" *)
    rule rl_b;
       let b <- pop_o (mx.o_wr_resp);
       let sp = f_wspan.first; f_wspan.deq;
@@ -237,10 +273,11 @@ module mkMC_UT (Empty);
          rg_rbeat <= rg_rbeat + 1;
    endrule
 
-   rule rl_done (rg_ops >= fromInteger (n_ops) && rg_out == 0 && rg_wleft == 0);
+   rule rl_done (rg_spin && rg_spin_cyc >= 1000 && rg_out == 0);
       $display ("[mc_ut] %0d ops (%0d read bursts, %0d write bursts), %0d R beats checked, %0d errors; raw reads %0d, raw writes %0d",
                 rg_ops, rg_bursts, rg_wbursts, rg_rbeats, rg_errs, rg_raw_rd, rg_raw_wr);
-      $display ((rg_errs == 0 && rg_rbeats > 0) ? "[mc_ut] PASS" : "[mc_ut] FAIL");
+      $display ("[mc_ut] store spin (1000 cycles, no idle gap) reached memory: %s", rg_spin_seen ? "yes" : "NO");
+      $display ((rg_errs == 0 && rg_rbeats > 0 && rg_spin_seen) ? "[mc_ut] PASS" : "[mc_ut] FAIL");
       $finish (0);
    endrule
 endmodule

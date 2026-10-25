@@ -316,7 +316,7 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
             if (bm != 0)
                rg_state <= ST_ACT;
          end
-         else if (chunks_in_flight + n_chunks <= 8) begin
+         else if (zeroExtend (chunks_in_flight) + zeroExtend (n_chunks) <= 5'd8) begin   // 5 bits: 8 + 8 must not wrap
             f_reqs.deq;
             rg_req           <= req;
             rg_burst         <= req.b_first;
