@@ -7,6 +7,11 @@
 //   - INCR read bursts of 1..8 beats at any dword, crossing a line,
 //   - INCR write bursts of 2..4 beats.
 // Up to 15 requests in flight, with random quiet periods (idle writebacks).
+// Every request carries a random ID, which R and B must echo.  About 1 in 8
+// bursts that would cross the top of the window is issued unclipped: every
+// R beat must be SLVERR (rlast on the last), a write gets one SLVERR B and
+// changes no memory.  Half the raw reads use the SDRAM cadence (a fixed
+// first-chunk delay, then one chunk every 4 cycles), the rest random gaps.
 // A dword is only read with no write to it in flight and written with no
 // read of it in flight (AXI does not order the read and write channels), so
 // the shadow is exact at issue.  Every R beat is checked (data, rlast).
@@ -29,7 +34,7 @@ typedef 64 NSlots;                       // dwords
 Integer n_ops = 300000;
 Bit #(64) base = 'h8000_0000;
 
-typedef struct { Bit #(6) slot; Bit #(4) n; } Span deriving (Bits);
+typedef struct { Bit #(6) slot; Bit #(4) n; Fabric_Id id; Bool err; } Span deriving (Bits);
 
 (* synthesize *)
 module mkMC_UT (Empty);
@@ -46,6 +51,8 @@ module mkMC_UT (Empty);
    Reg #(Bit #(3)) rg_mdelay <- mkReg (0);
    Reg #(Bit #(6)) rg_mslot  <- mkRegU;     // next dword to return
    Reg #(Bit #(4)) rg_mleft  <- mkReg (0);  // chunks left
+   Reg #(Bool)     rg_mcad   <- mkReg (False);   // SDRAM cadence for this read
+   Reg #(Bit #(2)) rg_mphase <- mkReg (0);
 
    Vector #(NSlots, Reg #(Bit #(64))) shadow  <- replicateM (mkReg (0));
    Vector #(NSlots, Reg #(Bit #(4)))  pend_wr <- replicateM (mkReg (0));
@@ -67,6 +74,8 @@ module mkMC_UT (Empty);
    Reg #(UInt #(32)) rg_errs   <- mkReg (0);
    Reg #(UInt #(32)) rg_raw_rd <- mkReg (0);
    Reg #(UInt #(32)) rg_raw_wr <- mkReg (0);
+   Reg #(UInt #(32)) rg_err_r  <- mkReg (0);   // SLVERR R beats seen (expected)
+   Reg #(UInt #(32)) rg_err_b  <- mkReg (0);   // SLVERR B seen (expected)
    // Liveness: after the random traffic, back-to-back stores to one dword
    // (no idle gap); the raw memory must see one of them (the buffer ages out).
    Reg #(Bool)       rg_spin      <- mkReg (False);
@@ -100,7 +109,10 @@ module mkMC_UT (Empty);
       else begin
          rg_mslot  <= { l, r.b_first, 1'b0 };
          rg_mleft  <= (zeroExtend (r.b_last - r.b_first) + 1) << 1;
-         rg_mdelay <= lfsr.value [10:8];
+         Bool cad = (lfsr.value [13] == 1);
+         rg_mcad   <= cad;
+         rg_mphase <= 0;
+         rg_mdelay <= cad ? 7 : lfsr.value [10:8];
          rg_mbusy  <= True;
          rg_raw_rd <= rg_raw_rd + 1;
       end
@@ -108,7 +120,9 @@ module mkMC_UT (Empty);
 
    rule rl_mem_rsp (rg_mbusy);
       if (rg_mdelay != 0) rg_mdelay <= rg_mdelay - 1;
-      else if (lfsr.value [12:11] != 0) begin       // ~25% gap cycles between chunks
+      else if (rg_mcad && rg_mphase != 3) rg_mphase <= rg_mphase + 1;
+      else if (rg_mcad || lfsr.value [12:11] != 0) begin   // cadence, or ~25% random gaps
+         rg_mphase <= 0;
          mc.to_raw_mem.response.put (mem [rg_mslot]);
          rg_mslot <= rg_mslot + 1;
          if (rg_mleft == 1) rg_mbusy <= False;
@@ -137,12 +151,15 @@ module mkMC_UT (Empty);
    Bit #(6) rslot = (bsel == 0) ? { slot [5:3], 3'b0 } : slot;
    Bit #(7) rend  = zeroExtend (rslot) + zeroExtend (rlen0);
    Bit #(7) rroom = 64 - zeroExtend (rslot);
-   Bit #(4) rlen  = (rend > 64) ? truncate (rroom) : rlen0;
+   Bool     rerr  = (rend > 64) && (lfsr.value [21:19] == 0);    // issued unclipped: SLVERR
+   Bit #(4) rlen  = ((rend > 64) && ! rerr) ? truncate (rroom) : rlen0;
    // write span: single, or a 2..4 beat burst (clipped)
    Bit #(4) wlen0 = (bsel == 3) ? zeroExtend (lfsr.value [16:15]) + 1 : 1;
    Bit #(7) wend  = zeroExtend (slot) + zeroExtend (wlen0);
    Bit #(7) wroom = 64 - zeroExtend (slot);
-   Bit #(4) wlen  = (wend > 64) ? truncate (wroom) : wlen0;
+   Bool     werr  = (wend > 64) && (lfsr.value [21:19] == 0);
+   Bit #(4) wlen  = ((wend > 64) && ! werr) ? truncate (wroom) : wlen0;
+   Fabric_Id tid  = truncate (lfsr.value [25:22]);
 
    function Bool in_span (Integer i, Bit #(6) s, Bit #(4) n);
       Bit #(7) ii = fromInteger (i);
@@ -157,7 +174,9 @@ module mkMC_UT (Empty);
 
    Bool do_wr = kind != 0;    // 3:1 writes (reads get through more often)
 
-   function Action fa_wbeat (Bit #(6) s, Bool last);
+   Reg #(Bool) rg_werr <- mkReg (False);    // the write burst being sent is out of range
+
+   function Action fa_wbeat (Bit #(6) s, Bool last, Bool err);
       action
          Bit #(64) d  = { lfsr.value, ~ lfsr.value [31:16], lfsr.value [15:0] };
          Bit #(8) st  = lfsr.value [27:20];
@@ -166,19 +185,21 @@ module mkMC_UT (Empty);
          Vector #(8, Bit #(8)) o = unpack (shadow [s]);
          Vector #(8, Bit #(8)) n = unpack (d);
          for (Integer j = 0; j < 8; j = j + 1) if (st [j] == 1) o [j] = n [j];
-         shadow [s] <= pack (o);
+         if (! err) shadow [s] <= pack (o);
       endaction
    endfunction
 
-   rule rl_issue_wr (go && do_wr && span_free (pend_rd, slot, wlen));
+   rule rl_issue_wr (go && do_wr && (werr || span_free (pend_rd, slot, wlen)));
       Bit #(64) a  = base + (zeroExtend (slot) << 3);
-      mx.i_wr_addr.enq (AXI4_Wr_Addr {awid: 0, awaddr: a, awlen: zeroExtend (wlen - 1), awsize: axsize_8,
+      mx.i_wr_addr.enq (AXI4_Wr_Addr {awid: tid, awaddr: a, awlen: zeroExtend (wlen - 1), awsize: axsize_8,
                                       awburst: axburst_incr, awlock: 0, awcache: 0, awprot: 0,
                                       awqos: 0, awregion: 0, awuser: 0});
-      fa_wbeat (slot, wlen == 1);
-      for (Integer i = 0; i < valueOf (NSlots); i = i + 1)
-         if (in_span (i, slot, wlen)) pend_wr [i] <= pend_wr [i] + 1;
-      f_wspan.enq (Span {slot: slot, n: wlen});
+      fa_wbeat (slot, wlen == 1, werr);
+      if (! werr)
+         for (Integer i = 0; i < valueOf (NSlots); i = i + 1)
+            if (in_span (i, slot, wlen)) pend_wr [i] <= pend_wr [i] + 1;
+      f_wspan.enq (Span {slot: slot, n: wlen, id: tid, err: werr});
+      rg_werr  <= werr;
       rg_wleft <= truncate (wlen - 1);
       rg_wslot <= slot + 1;
       if (wlen > 1) rg_wbursts <= rg_wbursts + 1;
@@ -187,19 +208,20 @@ module mkMC_UT (Empty);
    endrule
 
    rule rl_issue_wbeat (rg_wleft != 0);
-      fa_wbeat (rg_wslot, rg_wleft == 1);
+      fa_wbeat (rg_wslot, rg_wleft == 1, rg_werr);
       rg_wslot <= rg_wslot + 1;
       rg_wleft <= rg_wleft - 1;
    endrule
 
-   rule rl_issue_rd (go && ! do_wr && span_free (pend_wr, rslot, rlen) && rg_rd_out < 4);
+   rule rl_issue_rd (go && ! do_wr && (rerr || span_free (pend_wr, rslot, rlen)) && rg_rd_out < 4);
       Bit #(64) a  = base + (zeroExtend (rslot) << 3);
-      mx.i_rd_addr.enq (AXI4_Rd_Addr {arid: 0, araddr: a, arlen: zeroExtend (rlen - 1), arsize: axsize_8,
+      mx.i_rd_addr.enq (AXI4_Rd_Addr {arid: tid, araddr: a, arlen: zeroExtend (rlen - 1), arsize: axsize_8,
                                       arburst: axburst_incr, arlock: 0, arcache: 0, arprot: 0,
                                       arqos: 0, arregion: 0, aruser: 0});
-      f_rexp.enq (Span {slot: rslot, n: rlen});
-      for (Integer i = 0; i < valueOf (NSlots); i = i + 1)
-         if (in_span (i, rslot, rlen)) pend_rd [i] <= pend_rd [i] + 1;
+      f_rexp.enq (Span {slot: rslot, n: rlen, id: tid, err: rerr});
+      if (! rerr)
+         for (Integer i = 0; i < valueOf (NSlots); i = i + 1)
+            if (in_span (i, rslot, rlen)) pend_rd [i] <= pend_rd [i] + 1;
       if (rlen > 1) rg_bursts <= rg_bursts + 1;
       rg_rd_out <= rg_rd_out + 1;
       rg_out  <= rg_out + 1;
@@ -228,7 +250,7 @@ module mkMC_UT (Empty);
                                       awqos: 0, awregion: 0, awuser: 0});
       mx.i_wr_data.enq (AXI4_Wr_Data {wdata: { 32'h5A5A_5A5A, 16'h0, pack (rg_spin_cyc) }, wstrb: '1, wlast: True, wuser: 0});
       pend_wr [0] <= pend_wr [0] + 1;
-      f_wspan.enq (Span {slot: 0, n: 1});
+      f_wspan.enq (Span {slot: 0, n: 1, id: 0, err: False});
       rg_out <= rg_out + 1;
    endrule
 
@@ -241,12 +263,14 @@ module mkMC_UT (Empty);
    rule rl_b;
       let b <- pop_o (mx.o_wr_resp);
       let sp = f_wspan.first; f_wspan.deq;
-      if (b.bresp != axi4_resp_okay) begin
-         $display ("ERROR: bresp %0d", b.bresp);
+      if (b.bresp != (sp.err ? axi4_resp_slverr : axi4_resp_okay) || b.bid != sp.id) begin
+         $display ("ERROR: bresp %0d bid %0d (exp err %0d id %0d)", b.bresp, b.bid, sp.err, sp.id);
          rg_errs <= rg_errs + 1;
       end
-      for (Integer i = 0; i < valueOf (NSlots); i = i + 1)
-         if (in_span (i, sp.slot, sp.n)) pend_wr [i] <= pend_wr [i] - 1;
+      if (! sp.err)
+         for (Integer i = 0; i < valueOf (NSlots); i = i + 1)
+            if (in_span (i, sp.slot, sp.n)) pend_wr [i] <= pend_wr [i] - 1;
+      if (sp.err) rg_err_b <= rg_err_b + 1;
       rg_out <= rg_out - 1;
    endrule
 
@@ -255,13 +279,17 @@ module mkMC_UT (Empty);
       let sp = f_rexp.first;
       Bit #(6) s = sp.slot + zeroExtend (rg_rbeat);
       Bool last = (rg_rbeat + 1 == sp.n);
-      if (r.rresp != axi4_resp_okay || r.rdata != shadow [s] || r.rlast != last) begin
+      Bool bad = sp.err ? (r.rresp != axi4_resp_slverr)
+                        : (r.rresp != axi4_resp_okay || r.rdata != shadow [s]);
+      if (bad || r.rlast != last || r.rid != sp.id) begin
          if (rg_errs < 10)
             $display ("ERROR: op %0d slot %0d (burst %0d+%0d) got %h exp %h resp %0d rlast %0d",
                       rg_ops, s, sp.slot, rg_rbeat, r.rdata, shadow [s], r.rresp, r.rlast);
+         if (rg_errs < 10 && r.rid != sp.id) $display ("ERROR: rid %0d exp %0d", r.rid, sp.id);
          rg_errs <= rg_errs + 1;
       end
-      pend_rd [s] <= pend_rd [s] - 1;
+      if (! sp.err) pend_rd [s] <= pend_rd [s] - 1;
+      else rg_err_r <= rg_err_r + 1;
       rg_rbeats <= rg_rbeats + 1;
       if (last) begin
          f_rexp.deq;
@@ -276,8 +304,9 @@ module mkMC_UT (Empty);
    rule rl_done (rg_spin && rg_spin_cyc >= 1000 && rg_out == 0);
       $display ("[mc_ut] %0d ops (%0d read bursts, %0d write bursts), %0d R beats checked, %0d errors; raw reads %0d, raw writes %0d",
                 rg_ops, rg_bursts, rg_wbursts, rg_rbeats, rg_errs, rg_raw_rd, rg_raw_wr);
+      $display ("[mc_ut] out-of-range: %0d SLVERR R beats, %0d SLVERR B", rg_err_r, rg_err_b);
       $display ("[mc_ut] store spin (1000 cycles, no idle gap) reached memory: %s", rg_spin_seen ? "yes" : "NO");
-      $display ((rg_errs == 0 && rg_rbeats > 0 && rg_spin_seen) ? "[mc_ut] PASS" : "[mc_ut] FAIL");
+      $display ((rg_errs == 0 && rg_rbeats > 0 && rg_spin_seen && rg_err_r > 0 && rg_err_b > 0) ? "[mc_ut] PASS" : "[mc_ut] FAIL");
       $finish (0);
    endrule
 endmodule
