@@ -1,7 +1,8 @@
 // AXI4 protocol check of Mem_Controller's slave port with the YosysHQ FVIP (DESTINATION agent).
 // Environment: free AXI4 source (constrained by the FVIP's cp_* assumes), free raw memory
-// (any data, any latency), BSV method protocol (EN only when RDY). Single-beat traffic only:
-// the AXI4_Deburster in front of Mem_Controller guarantees AxLEN == 0, so MAX_*_LENGTH = 1.
+// (any data, any latency, but only the chunks it owes for the reads it was given), BSV method
+// protocol (EN only when RDY). Bursts of up to 8 beats (Flute's masters issue AxLEN <= 7; the
+// controller takes bursts directly, no AXI4_Deburster in front).
 // Define REACH to turn the reachability witnesses into asserts that must FAIL.
 `default_nettype none
 module mc_fvip_top (
@@ -20,7 +21,7 @@ module mc_fvip_top (
   input wire EN_server_reset_request_put, input wire EN_server_reset_response_get,
   input wire [63:0] set_addr_map_addr_base, input wire [63:0] set_addr_map_addr_lim, input wire EN_set_addr_map,
   input wire EN_to_raw_mem_request_get,
-  input wire [255:0] to_raw_mem_response_put, input wire EN_to_raw_mem_response_put
+  input wire [63:0] to_raw_mem_response_put, input wire EN_to_raw_mem_response_put
 );
   // Reset: low in cycle 0, high afterwards.
   reg rst_done = 1'b0;  // zero init: ic3 -init-zero zeroes every register
@@ -33,8 +34,18 @@ module mc_fvip_top (
   wire [63:0] slave_rdata;
   wire RDY_server_reset_request_put, RDY_server_reset_response_get, RDY_set_addr_map;
   wire RDY_to_raw_mem_request_get, RDY_to_raw_mem_response_put;
-  wire [352:0] to_raw_mem_request_get;
+  wire [311:0] to_raw_mem_request_get;   // {write, line[18:0], b_first[1:0], b_last[1:0], wdata[255:0], wbe[31:0]}
   wire [7:0] status;
+
+  wire       raw_rd     = EN_to_raw_mem_request_get && !to_raw_mem_request_get[311];
+  wire [1:0] raw_bfirst = to_raw_mem_request_get[291:290];
+  wire [1:0] raw_blast  = to_raw_mem_request_get[289:288];
+  wire [2:0] raw_bursts = {1'b0, raw_blast} - {1'b0, raw_bfirst} + 3'd1;   // 3 bits: 4 bursts must not wrap
+  wire [4:0] raw_chunks = {1'b0, raw_bursts, 1'b0};
+  reg  [5:0] owed = 0;
+  always @(posedge CLK)
+    if (!RST_N) owed <= 0;
+    else owed <= owed + (raw_rd ? raw_chunks : 5'd0) - (EN_to_raw_mem_response_put ? 6'd1 : 6'd0);
 
   // BSV method protocol.
   always @* begin
@@ -46,7 +57,12 @@ module mc_fvip_top (
     assume (!EN_set_addr_map              || RDY_set_addr_map);
     assume (!EN_to_raw_mem_request_get    || RDY_to_raw_mem_request_get);
     assume (!EN_to_raw_mem_response_put   || RDY_to_raw_mem_response_put);
+    // Raw memory returns exactly the chunks of the reads it took, in order (2 per burst)
+    assume (!EN_to_raw_mem_response_put   || (owed != 0));
+    assume (slave_arlen <= 8'd7);
+    assume (slave_awlen <= 8'd7);
   end
+
 
   mkMem_Controller dut (.*);
 
@@ -61,8 +77,8 @@ module mc_fvip_top (
         RUSER_WIDTH:       1,
         MAX_WR_BURSTS:     4,
         MAX_RD_BURSTS:     4,
-        MAX_WR_LENGTH:     1,
-        MAX_RD_LENGTH:     1,
+        MAX_WR_LENGTH:     8,
+        MAX_RD_LENGTH:     8,
         MAXWAIT:           15,
         VERIFY_AGENT_TYPE: amba_axi4_protocol_checker_pkg::DESTINATION,
         PROTOCOL_TYPE:     amba_axi4_protocol_checker_pkg::AXI4FULL,
@@ -112,6 +128,9 @@ module mc_fvip_top (
     reach_wr_out3: assert (wr_out < 3);
     reach_wr_out4: assert (wr_out < 4);
     reach_rd_out2: assert (rd_out < 2);
+    reach_r_burst: assert (!(slave_rvalid && slave_rready && !slave_rlast));    // a multi-beat read
+    reach_w_burst: assert (!(slave_wvalid && slave_wready && !slave_wlast));    // a multi-beat write
+    reach_raw_wb:  assert (!(EN_to_raw_mem_request_get && to_raw_mem_request_get[311]));  // a writeback
   end
 `endif
 endmodule
