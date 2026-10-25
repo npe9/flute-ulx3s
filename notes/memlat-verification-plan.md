@@ -1,0 +1,84 @@
+# Memory path (memlat): verification plan for the open gaps
+
+Scope: the streaming Mem_Controller + Sdram_Controller (m4b / m5). The core is unchanged, so
+riscv-formal, RISCOF and TestRIG do not apply (they model memory themselves). Ordered by
+cost-to-value; items 1-3 are one file each.
+
+## 1. mc_ut extensions (gaps 2, 6; part of 1)
+- Random `arid/awid` (Wd_Id bits); assert `rid/bid` echo the request's ID.
+- `NLines` 8 -> 32, so evictions and line-crossing segments hit more distinct lines.
+- Raw-memory mode with the real cadence: first chunk after ~10 cycles, then one chunk every 4.
+- Error bursts: `set_addr_map` window ends inside the traffic range, and some bursts cross it.
+  In the SoC the fabric and Mem_Controller share SoC_Map, so a burst crossing the end of the
+  window is the only realistic error. Expect SLVERR on every R beat with `rlast` on beat
+  `arlen`, and one SLVERR B per write burst after all its W beats are consumed.
+- Pass: 0 errors; mutants (no ID echo, rlast early, B before last W) fail. Effort: small.
+
+## 2. sdram_ut on the streaming request shapes (gap 6, gap 7)
+- Second UT top driving `mkSdram_Controller`'s raw port directly: random `b_first..b_last`
+  (single bursts, odd first burst, all 4), partial `wbe` (empty bursts skipped), same-bank
+  back-to-back (tDAL hold), credit-limited reads (consumer stalls). Mirror model + checker.
+- Parametrize tb.sv `TCK_PS`; run 40000 and 31100 (PLL clock). Counts round the same today;
+  the run guards future constants.
+- Pass: 0 mismatches, `[sdram_chk] 0 error(s)` at both clocks. Effort: small.
+
+## 3. Soft reset with traffic in flight (gap 3) -- probable real bug
+- `SoC_Top.fa_reset_start_actions` (debug-module ndmreset, e.g. GDB `monitor reset`) resets
+  the core, Mem_Controller and fabric, not Sdram_Controller. A raw read in flight keeps
+  returning chunks into the cleared Mem_Controller: later reads get shifted data. The write
+  buffer is also dropped (acceptable on reset).
+- Reproduce first: mc_ut (or the FVIP harness with the reset assume lifted) issues reset with
+  reads outstanding, then checks the next read.
+- Fix options (USER DECISION): (a) Mem_Controller drains owed chunks (counter, like the FVIP
+  `owed`) before answering the reset; (b) reset Sdram_Controller with the SoC (refresh must
+  continue; keep its init); (c) document reset as boot-only. Recommended: (a).
+- Then lift the FVIP `!EN_server_reset_request_put` assume, so B/R handshakes in flight are
+  covered (the fabric is reset too, so the harness may need the slave side to drop them).
+
+## 4. Formal depth and data (gap 5)
+- (a) `max_dirty_cycles` and `idle_wb_cycles` behind a `define`; a formal-only bsc build of
+  mkMem_Controller with 4 / 2, so depth 12 reaches age-out. New witness `reach_age_wb`.
+- (b) Unbounded: rerun the ic3 flow (sv-yosys fork) that proved 9/15 on the old controller,
+  on m5. Pass: every protocol assert proved or a counterexample explained.
+- (c) Data integrity in the harness: one free address X; assert any R beat for X returns the
+  last W data accepted for X (shadow register, byte strobes). Needs the raw memory modelled
+  as storage for X only.
+- (d) Last: Sdram_Controller raw-port formal (credit never exceeds 8, chunks in order,
+  command spacing). Effort: large; only if (a)-(c) are clean.
+
+## 5. Liveness (gap 8)
+- Bounded liveness as safety in the FVIP harness: assume raw memory returns owed chunks within
+  M cycles and RREADY/BREADY within MAXWAIT; assert `rd_out > 0` -> an R handshake within K
+  cycles, `wr_out > 0` -> a B within K (K < depth). Assert `owed <= 8`.
+- System level: mc_ut watchdog, Linux boots, board soaks (already running).
+
+## 6. Other masters (gap 1)
+- accel0 (`src/AXI4_GPIO.bsv`) never issues on its master port: nothing to test.
+- Debug-module system bus: on the board, GDB/JTAG reads and writes to SDRAM while Linux runs
+  (word, byte, 64 B block), compared with a CPU-side readback. Pass: data matches, Linux keeps
+  ticking. In sim: a DMI-driven sysbus test in strict_bram if the JTAG TB supports it (check).
+- Interleaved masters: I$ + D$ interleave in every Linux boot already.
+
+## 7. Vendor SDRAM model (gap 4) -- USER DECISION: which model
+- W9825G6KH-6: 256 Mb x16, 4 banks x 8192 rows x 512 cols. Candidate: Micron MT48LC16M16A2
+  Verilog model (same organization, has its own timing checks; -75 grade ~ -6 here). Verify
+  the organization and timing parameters before use. Download into its own empty directory.
+- Build variant of sdram_ut and linux_bram with the vendor model. Pass: 0 model warnings,
+  0 checker errors, 0 mismatches, Linux boot.
+- Validates `t_cas_first = 3` (IOB + input register pipeline) only as far as the model is
+  cycle-accurate at the pins; the board remains the final word.
+
+## 8. Board-level timing (gap 7)
+- m5 board boot + 30-min soak (first board run of consecutive ACT -> READ).
+- PLL build (`make SYS_PLL=1`, 32.14 MHz) of m5: seeds, boot, soak. Only place the real
+  tRCD / CAS margins are exercised. Bitstreams named *.bit; restore the custody bit after.
+- Board cache / AMO tests and ipc_bench on the chosen candidate.
+
+## Gate table to finish (existing gates)
+| | m4b | m5 |
+|---|---|---|
+| sim cache/AMO/CSR | cache pass, AMO/CSR running | to run |
+| J1 strict | pass | queued (strict_bram busy) |
+| Linux sim + sdram_chk | pass | running |
+| FVIP BMC + reach | pass | running |
+| board boot + soak | pass | to run (item 8) |

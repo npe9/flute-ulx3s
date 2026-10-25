@@ -1,6 +1,7 @@
 # YosysHQ SVA AXI4 FVIP (vendored)
 
 - **Upstream:** https://github.com/YosysHQ-GmbH/SVA-AXI4-FVIP, commit `250f1ff`. The `AXI4/src` tree is flattened here and **unmodified**. ISC license, see `COPYING`.
+- **Fork:** https://github.com/npe9/SVA-AXI4-FVIP branch `flute-ulx3s` carries these harnesses as `AXI4/examples/flute_ulx3s` (run with `RTL=build/<variant>/verilog`).
 - **Tool:** the SVA yosys at `~/src/sv-yosys/third_party/yosys/build/yosys`, fork `npe9/yosys` branch `sva-frontend-ic3`, at `03cc3a9f4` or later. Builds before that zero struct parameter overrides, which gives false proofs. Stock yosys silently drops `bind`.
 
 ## Flow
