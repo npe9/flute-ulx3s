@@ -62,11 +62,13 @@ module mc_fvip_top (
     assume (!EN_to_raw_mem_response_put   || RDY_to_raw_mem_response_put);
     // Raw memory returns exactly the chunks of the reads it took, in order (2 per burst)
     assume (!EN_to_raw_mem_response_put   || (owed != 0));
-    // Masters wait for the controller to leave power-on reset (RDY_set_addr_map = rg_ready): the
-    // reset cycle clears the slave transactor FIFOs while AWREADY/WREADY/ARREADY are high, so a
-    // handshake in that one cycle is dropped (found by ap_live_r). In the SoC the masters are
-    // still in reset then.
+    // Masters wait for the controller to leave power-on reset (RDY_set_addr_map = rg_ready).
+    // Up to Flute 112c371 the reset cycle cleared the slave transactor FIFOs while
+    // AWREADY/WREADY/ARREADY were high, dropping a handshake (found by ap_live_r); fixed in the
+    // drain change. NO_RDY_WAIT drops this assume to check that.
+`ifndef NO_RDY_WAIT
     assume (RDY_set_addr_map || !(slave_arvalid || slave_awvalid || slave_wvalid));
+`endif
     assume (slave_arlen <= 8'd7);
     assume (slave_awlen <= 8'd7);
   end
@@ -165,6 +167,26 @@ module mc_fvip_top (
       rd_stall <= ((rd_out != 0) && !(slave_rvalid && slave_rready)) ? rd_stall + 1 : 0;
       wr_stall <= ((wr_out != 0) && (wl_out != 0) && !(slave_bvalid && slave_bready)) ? wr_stall + 1 : 0;
     end
+  // Source rules the DESTINATION checker does not assume, needed so "AW and last W in" means the
+  // same to the harness as to Mem_Controller (which counts beats from AWLEN): W only for an
+  // accepted AW, WLAST exactly on beat AWLEN.
+  reg [7:0] lv_len [0:3];
+  reg [1:0] lv_tail = 0, lv_ptr = 0;
+  reg [2:0] lv_open = 0;
+  reg [7:0] lv_beat = 0;
+  always @(posedge CLK)
+    if (!RST_N) begin lv_tail <= 0; lv_ptr <= 0; lv_open <= 0; lv_beat <= 0; end
+    else begin
+      if (slave_awvalid && slave_awready) begin lv_len[lv_tail] <= slave_awlen; lv_tail <= lv_tail + 1; end
+      if (slave_wvalid && slave_wready) begin
+        if (slave_wlast) begin lv_ptr <= lv_ptr + 1; lv_beat <= 0; end else lv_beat <= lv_beat + 1;
+      end
+      lv_open <= lv_open + (slave_awvalid && slave_awready) - (slave_wvalid && slave_wready && slave_wlast);
+    end
+  always @* begin
+    assume (!slave_wvalid || lv_open != 0);
+    assume (!slave_wvalid || (slave_wlast == (lv_beat == lv_len[lv_ptr])));
+  end
   always @* begin
     assume (raw_req_wait < RAW_W);
     assume (raw_rsp_wait < RAW_W);

@@ -55,6 +55,18 @@ clears the slave transactor FIFOs while AWREADY/WREADY/ARREADY are high, so a ha
 cycle is dropped. In the SoC the masters are still in reset then; the harness now makes masters
 wait for `RDY_set_addr_map` (= `rg_ready`).
 
+m6 (Flute bf32060: drain-on-reset, no power-on FIFO clear), 2026-10-25: base BMC no failure
+through step 13; DATA no failure through step 15; LIVE with `-DNO_RDY_WAIT` (masters may drive in the
+power-on cycle) no failure through step 15, while the same harness fails `ap_live_r` at step 15 on m5.
+LIVE now also assumes the source rules W-after-AW and WLAST-on-AWLEN (without them a WLAST on beat 0
+of an AWLEN=1 burst made the harness count a finished write the controller was still receiving).
+
+ic3 (unbounded) on m5, `ic3 -check-cells -init-zero -bmc 30 -timeout 120`: 9 of 16 asserts proved
+(B/R STABLE*, `ap_making_progress_bounded`), 7 undecided (B/R `*_until_*READY`,
+`*_UNSUPPORTED_RESPONSE`, AW `ap_no_overflow`, `ap_data_integrity_out_of_order`, `ap_owed_le8`), 0
+disproved; covers 30 of 34 reached. Do NOT add `setundef -undriven -zero` before ic3: with it the
+run "proved" all 16 in 34 s with 0 of 34 covers reached (vacuous).
+
 Harness rules learned: the DESTINATION checker does not assume WLAST on beat AWLEN (a source rule);
 the DATA mode assumes it, because Mem_Controller counts beats from AWLEN. Edit run scripts only
 by rename (sed -i, python write to a new file): bash reads a running script by offset.
