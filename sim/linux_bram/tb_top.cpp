@@ -192,7 +192,7 @@ static void perf_sample(Vsv_tb_top* top) {
     unsigned mc = TOP_SIG(soc_top__DOT__mem0_controller__DOT__f_rd_pend__DOT__empty_reg) & 1 ? 2 : 3;
     unsigned clean = TOP_SIG(soc_top__DOT__mem0_controller__DOT__rg_buf_dirty) == 0;   // write-buffer dirty mask
     unsigned sd = TOP_SIG(mem_rg_state) & 31, sdw = (TOP_SIG(mem_rg_req)[9] >> 23) & 1;   // Raw_Mem_Req.write = bit 311 (312-bit struct)
-    unsigned chunk_v = TOP_SIG(soc_top__DOT__mem0_controller__DOT__f_raw_rsps_rv)[2] & 1;  // valid = bit 64
+    unsigned chunk_v = TOP_SIG(soc_top__DOT__mem0_controller__DOT__slave_xactor_f_rd_data__DOT__ENQ) & 1;  // an R beat leaves Mem_Controller
     static unsigned last_chunk_v = 0;
     p.sd_st[sd]++;
     if (sd >= 10 && sd <= 16) { if (sdw) p.sd_busy_wr++; else p.sd_busy_rd++; }
@@ -216,7 +216,7 @@ static void perf_sample(Vsv_tb_top* top) {
     if (p.ir_phase == 1 && ar_enq) { p.ir_t1 = p.cyc; p.ir_phase = 2; }
     if (p.ir_phase == 2 && sd_start && !sdw) { p.ir_t2 = p.cyc; p.ir_phase = 3; }   // SDRAM request start (ACT) for the read
     if (p.ir_phase == 2 && ist == 2 && ibeat != 0 && p.last_ibeat == 0) { p.ir_hit++; p.ir_phase = 0; }  // (no ACT seen: should not happen)
-    if (p.ir_phase == 3 && chunk_v && !last_chunk_v) { p.ir_t3 = p.cyc; p.ir_phase = 4; }               // first chunk at Mem_Controller
+    if (p.ir_phase == 3 && chunk_v) { p.ir_t3 = p.cyc; p.ir_phase = 4; }                                 // first R beat out of Mem_Controller
     if (p.ir_phase == 4 && ist == 2 && ibeat != 0 && p.last_ibeat == 0) {
         p.ir_n++; p.ir_arr += p.ir_t1 - p.ir_t0; p.ir_rl += p.ir_t2 - p.ir_t1; p.ir_rld += p.ir_t3 - p.ir_t2; p.ir_b1 += p.cyc - p.ir_t3;
         p.ir_phase = 0;
@@ -247,7 +247,7 @@ static void perf_print(const char* tag, const Perf& p, unsigned long long inst) 
            p.mc_wb, p.sd_rd, p.sd_wr, 100 * p.sd_busy_rd / c, 100 * p.sd_busy_wr / c);
     for (int i = 9; i < 19; i++) if (p.sd_st[i]) printf(" %s %.1f%%", sd_name[i], 100 * p.sd_st[i] / c);
     printf("\n[perf]   M: AR %llu AW %llu", p.mc_ar, p.mc_aw);
-    if (p.ir_n || p.ir_hit) printf(" | I-refill timeline (%llu clean samples, %llu no-ACT): req->AR@MC %.1f AR->ACT %.1f ACT->chunk1@MC %.1f chunk1->beat1 %.1f",
+    if (p.ir_n || p.ir_hit) printf(" | I-refill timeline (%llu clean samples, %llu no-ACT): req->AR@MC %.1f AR->ACT %.1f ACT->R1@MC %.1f R1->beat1 %.1f",
                        p.ir_n, p.ir_hit, p.ir_n ? (double)p.ir_arr / p.ir_n : 0.0, p.ir_n ? (double)p.ir_rl / p.ir_n : 0.0, p.ir_n ? (double)p.ir_rld / p.ir_n : 0.0, p.ir_n ? (double)p.ir_b1 / p.ir_n : 0.0);
     printf("\n");
 }
