@@ -39,6 +39,26 @@ Findings:
 - **AXI4_Deburster:** `rl_wr_resp_slave_to_master` matches downstream B responses by position (`f_w_awlen`) and forwards the last beat's BID. A slave that reorders across IDs, which is legal AXI, makes it return a wrong BID and then a duplicate upstream (`ap_data_integrity_out_of_order` at step 10). This is latent here because Boot_ROM and Mem_Controller answer in order. The read path depends on the same ordering.
 - **FVIP DESTINATION scoreboard:** `ap_no_overflow` asserts over AWVALID, which the environment drives. A standalone destination check therefore needs the source-side bound added explicitly.
 
+### Harness modes (2026-10-25, m5 RTL, `SOLVER=bitwuzla`)
+`mem_ctrl/run.sh [depth] [REACH]` takes `DEFS=` (extra defines), `TAGX=` (build-file suffix, so runs
+can share the directory) and `SOLVER=` (default yices; yices stalls past step 11 on m5).
+
+| Mode | Adds | Result |
+|---|---|---|
+| base | `ap_owed_le8`: the controller never owes raw memory more than 8 chunks | No failure through step 13 (`run.sh 14`). |
+| `DEFS=-DLIVE` | Bounded liveness: with a prompt environment (raw memory and RREADY/BREADY never wait), a read in flight gets an R beat, and a write whose AW and last W are in gets its B, within 12 cycles (`LIVE_K`, `LIVE_RAW_W`, `LIVE_RDY_W` override) | No failure through step 15. Non-vacuity: `LIVE_K=6` fails `ap_live_b` (step 10), `LIVE_K=3` fails both (step 7). |
+| `DEFS=-DDATA` | Data integrity for one symbolic word X with symbolic initial content. Raw memory is storage for X; an OKAY R beat for X must equal the last W data written to X, unless a write to X overlapped the read. Also R/B response = SLVERR exactly for bad bursts. | No failure through step 15. `reach_data_x` and `reach_data_wb` (read served from raw memory after a writeback of X) reached at step 13. Mutants fail: RDATA bit 0 flipped (step 8), writeback with all byte enables (step 11). |
+| `build_small.sh` + `DEFS=-DMC_SMALL` | Formal-only build: idle write-back after 2 cycles, age-out after 4, `dbg_age_out` probe; witness `reach_age_wb` | BMC no failure through step 13. All 12 witnesses reached; `reach_age_wb` at step 10. |
+
+Finding (`ap_live_r`, 2026-10-25): in the power-on reset cycle (`rg_ready` low) `rl_power_on_reset`
+clears the slave transactor FIFOs while AWREADY/WREADY/ARREADY are high, so a handshake in that one
+cycle is dropped. In the SoC the masters are still in reset then; the harness now makes masters
+wait for `RDY_set_addr_map` (= `rg_ready`).
+
+Harness rules learned: the DESTINATION checker does not assume WLAST on beat AWLEN (a source rule);
+the DATA mode assumes it, because Mem_Controller counts beats from AWLEN. Edit run scripts only
+by rename (sed -i, python write to a new file): bash reads a running script by offset.
+
 ### Unbounded results (2026-10-22, sv-yosys 5a2fc7b93, `ic3 -init-zero -bmc N -timeout T`)
 - **Mem_Controller** (`rst_done = 0` harness, `ic3 -check-cells -init-zero -bmc 30 -timeout 60`, 21 min):
   - **Asserts:** 9 of 15 proved for all depths, namely the STABLE checks on B/R and `ap_making_progress_bounded`. 6 are undecided because they ran out of budget, with no counterexample: B/R `UNSUPPORTED_RESPONSE`, `BVALID_until_BREADY`, `RVALID_until_RREADY`, AW `ap_no_overflow` and `ap_data_integrity_out_of_order`. These remain bounded-only, to step 13.

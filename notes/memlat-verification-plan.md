@@ -38,7 +38,7 @@ cost-to-value; items 1-3 are one file each.
 - Then lift the FVIP `!EN_server_reset_request_put` assume, so B/R handshakes in flight are
   covered (the fabric is reset too, so the harness may need the slave side to drop them).
 
-## 4. Formal depth and data (gap 5)
+## 4. Formal depth and data (gap 5) -- (a), (c) DONE 2026-10-25 (see formal/axi4_fvip/README.md)
 - (a) `max_dirty_cycles` and `idle_wb_cycles` behind a `define`; a formal-only bsc build of
   mkMem_Controller with 4 / 2, so depth 12 reaches age-out. New witness `reach_age_wb`.
 - (b) Unbounded: rerun the ic3 flow (sv-yosys fork) that proved 9/15 on the old controller,
@@ -49,7 +49,7 @@ cost-to-value; items 1-3 are one file each.
 - (d) Last: Sdram_Controller raw-port formal (credit never exceeds 8, chunks in order,
   command spacing). Effort: large; only if (a)-(c) are clean.
 
-## 5. Liveness (gap 8)
+## 5. Liveness (gap 8) -- FVIP part DONE 2026-10-25 (`DEFS=-DLIVE`; found the power-on-cycle drop)
 - Bounded liveness as safety in the FVIP harness: assume raw memory returns owed chunks within
   M cycles and RREADY/BREADY within MAXWAIT; assert `rd_out > 0` -> an R handshake within K
   cycles, `wr_out > 0` -> a B within K (K < depth). Assert `owed <= 8`.
@@ -83,5 +83,5 @@ cost-to-value; items 1-3 are one file each.
 | sim cache/AMO/CSR | cache pass, AMO/CSR running | to run |
 | J1 strict | pass | queued (strict_bram busy) |
 | Linux sim + sdram_chk | pass | running |
-| FVIP BMC + reach | pass | running |
+| FVIP BMC + reach | pass | pass (d13 bitwuzla, 11/11 by step 12; +LIVE, +DATA) |
 | board boot + soak | pass | to run (item 8) |

@@ -10,8 +10,8 @@ BSVLIB=${BSVLIB:-$HOME/src/bsc/inst/lib/Verilog}
 RTL=${RTL:-../../../build/verilog}
 S=../src
 mkdir -p build
-DEF=""; [ "$MODE" = REACH ] && DEF="-DREACH"
-TAG=mc${MODE:+_reach}
+DEF="${DEFS:-}"; [ "$MODE" = REACH ] && DEF="$DEF -DREACH"
+TAG=mc${TAGX:-}${MODE:+_reach}
 cat > build/$TAG.ys <<YS
 read_verilog -sv -formal $DEF $S/amba_axi4_protocol_checker_pkg.sv $S/amba_axi4_single_interface_requirements.sv $S/amba_axi4_definition_of_axi4_lite.sv $S/amba_axi4_atomic_accesses.sv $S/amba_axi4_transaction_structure.sv $S/amba_axi4_transaction_attributes.sv $S/amba_axi4_protocol_checker.sv $S/amba_axi4_low_power_interface.sv $S/amba_axi4_low_power_channel.sv $S/amba_axi4_write_response_dependencies.sv $S/amba_axi4_exclusive_access_source_perspective.sv $S/amba_axi4_write_response_channel.sv $S/amba_axi4_write_address_channel.sv $S/amba_axi4_write_data_channel.sv $S/amba_axi4_read_data_channel.sv $S/amba_axi4_read_address_channel.sv mc_fvip_top.sv
 read_verilog -sv -formal -DBSV_NO_INITIAL_BLOCKS $RTL/mkMem_Controller.v $BSVLIB/FIFO2.v $BSVLIB/FIFO20.v
@@ -36,7 +36,7 @@ sed -n '1,13p' build/$TAG.ys > build/$TAG.const.ys; echo 'dump t:$assert' >> bui
 NCONST=$(grep -c "connect .A 1'1" build/$TAG.const.log || true)
 if [ "$NCONST" != 0 ]; then echo "ERROR: $NCONST asserts are constant true (vacuous)"; exit 1; fi
 grep -E '\$(assert|assume)$' build/$TAG.stat || true
-"$B" -s yices --presat --keep-going -t "$DEPTH" build/$TAG.smt2 > build/$TAG.bmc.log 2>&1 || true
+"$B" -s ${SOLVER:-yices} --presat --keep-going -t "$DEPTH" build/$TAG.smt2 > build/$TAG.bmc.log 2>&1 || true
 grep -E "Assert failed|Checking assertions in step" build/$TAG.bmc.log | grep -B1 "Assert failed" | grep -v '^--' | grep -v 'failed before' \
   | sed -e 's/.*Checking assertions in step \([0-9]*\).*/step \1/' -e 's/.*Assert failed in mc_fvip_top: /  FAIL /'
 grep -E "Status|PASSED|FAILED" build/$TAG.bmc.log | tail -1
