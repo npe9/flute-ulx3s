@@ -82,9 +82,18 @@ module mkMC_UT (Empty);
    Reg #(UInt #(16)) rg_spin_cyc  <- mkReg (0);
    Reg #(Bool)       rg_spin_seen <- mkReg (False);
 
+   // +reset_test: after the store spin, reset Mem_Controller while a raw read
+   // is being delivered (the raw memory keeps sending its chunks, as
+   // Sdram_Controller does), then read back a line known to be in memory.
+   Reg #(Bool)     rg_rt_mode <- mkReg (False);
+   Reg #(Bit #(4)) rg_rt      <- mkReg (0);      // reset-test phase
+   Reg #(Bit #(9)) rg_rt_n    <- mkReg (0);
+
    rule rl_seed (! rg_seeded);
       lfsr.seed ('h1234_5679);
       rg_seeded <= True;
+      let m <- $test$plusargs ("reset_test");
+      rg_rt_mode <= m;
    endrule
 
    rule rl_map (rg_seeded && ! rg_mapped);
@@ -301,10 +310,60 @@ module mkMC_UT (Empty);
          rg_rbeat <= rg_rbeat + 1;
    endrule
 
-   rule rl_done (rg_spin && rg_spin_cyc >= 1000 && rg_out == 0);
+   Bool spin_done = rg_spin && rg_spin_cyc >= 1000 && rg_out == 0;
+
+   // phase 1: line 0 <- pattern (8 single writes); 2: wait for the B's and 300 idle cycles
+   rule rl_rt_write (rg_rt_mode && spin_done && rg_rt == 0 && rg_rt_n < 8);
+      Bit #(6)  sl = truncate (rg_rt_n);
+      Bit #(64) d  = 64'hC0DE_0000_0000_0000 | zeroExtend (rg_rt_n);
+      mx.i_wr_addr.enq (AXI4_Wr_Addr {awid: 0, awaddr: base + (zeroExtend (sl) << 3), awlen: 0, awsize: axsize_8,
+                                      awburst: axburst_incr, awlock: 0, awcache: 0, awprot: 0,
+                                      awqos: 0, awregion: 0, awuser: 0});
+      mx.i_wr_data.enq (AXI4_Wr_Data {wdata: d, wstrb: '1, wlast: True, wuser: 0});
+      shadow [sl] <= d;
+      pend_wr [sl] <= pend_wr [sl] + 1;
+      f_wspan.enq (Span {slot: sl, n: 1, id: 0, err: False});
+      rg_out  <= rg_out + 1;
+      rg_rt_n <= rg_rt_n + 1;
+   endrule
+   rule rl_rt_settle (rg_rt_mode && rg_rt == 0 && rg_rt_n >= 8 && rg_out == 0);
+      if (rg_rt_n == 308) begin rg_rt <= 1; rg_rt_n <= 0; end
+      else rg_rt_n <= rg_rt_n + 1;
+   endrule
+   // phase 3: a line read of line 4, never answered (it is reset away)
+   rule rl_rt_read4 (rg_rt == 1);
+      mx.i_rd_addr.enq (AXI4_Rd_Addr {arid: 0, araddr: base + 32 * 8, arlen: 7, arsize: axsize_8,
+                                      arburst: axburst_incr, arlock: 0, arcache: 0, arprot: 0,
+                                      arqos: 0, arregion: 0, aruser: 0});
+      rg_rt <= 2;
+   endrule
+   // phase 4: reset while the raw read is mid-delivery
+   rule rl_rt_reset (rg_rt == 2 && rg_mbusy && rg_mdelay == 0 && rg_mleft <= 6 && rg_mleft >= 2);
+      mc.server_reset.request.put (?);
+      rg_rt <= 3;
+      $display ("[mc_ut] reset with %0d raw chunks still to come", rg_mleft);
+   endrule
+   rule rl_rt_reset_done (rg_rt == 3);
+      let r <- mc.server_reset.response.get;
+      mx.reset;
+      rg_rt <= 4;
+   endrule
+   // phase 5: read line 0 back (checked by rl_r against the pattern)
+   rule rl_rt_read0 (rg_rt == 4);
+      mx.i_rd_addr.enq (AXI4_Rd_Addr {arid: 0, araddr: base, arlen: 7, arsize: axsize_8,
+                                      arburst: axburst_incr, arlock: 0, arcache: 0, arprot: 0,
+                                      arqos: 0, arregion: 0, aruser: 0});
+      f_rexp.enq (Span {slot: 0, n: 8, id: 0, err: False});
+      for (Integer i = 0; i < 8; i = i + 1) pend_rd [i] <= pend_rd [i] + 1;
+      rg_out <= rg_out + 1; rg_rd_out <= rg_rd_out + 1;
+      rg_rt <= 5;
+   endrule
+
+   rule rl_done (spin_done && ((! rg_rt_mode) || rg_rt == 5));
       $display ("[mc_ut] %0d ops (%0d read bursts, %0d write bursts), %0d R beats checked, %0d errors; raw reads %0d, raw writes %0d",
                 rg_ops, rg_bursts, rg_wbursts, rg_rbeats, rg_errs, rg_raw_rd, rg_raw_wr);
       $display ("[mc_ut] out-of-range: %0d SLVERR R beats, %0d SLVERR B", rg_err_r, rg_err_b);
+      if (rg_rt_mode) $display ("[mc_ut] reset test: line 0 read back after a mid-read reset (%0d errors total)", rg_errs);
       $display ("[mc_ut] store spin (1000 cycles, no idle gap) reached memory: %s", rg_spin_seen ? "yes" : "NO");
       $display ((rg_errs == 0 && rg_rbeats > 0 && rg_spin_seen && rg_err_r > 0 && rg_err_b > 0) ? "[mc_ut] PASS" : "[mc_ut] FAIL");
       $finish (0);

@@ -9,4 +9,4 @@ mkdir -p build
 "$BSC" -u -sim -g mkMC_UT -aggressive-conditions -no-warn-action-shadowing \
    -D RV32 -D FABRIC64 -p "$P" -bdir build -simdir build MC_UT.bsv > build/bsc.log 2>&1 || { cat build/bsc.log; exit 1; }
 "$BSC" -sim -e mkMC_UT -bdir build -simdir build -o build/mc_ut > build/link.log 2>&1 || { cat build/link.log; exit 1; }
-PATH=$(dirname "$BSC"):$PATH BLUESPECDIR=${BLUESPECDIR:-$(dirname "$BSC")/../lib} ./build/mc_ut | grep -v "Mem_Controller.set_addr_map"
+PATH=$(dirname "$BSC"):$PATH BLUESPECDIR=${BLUESPECDIR:-$(dirname "$BSC")/../lib} ./build/mc_ut "$@" | grep -v "Mem_Controller.set_addr_map"

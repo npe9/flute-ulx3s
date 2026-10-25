@@ -4,7 +4,7 @@ Scope: the streaming Mem_Controller + Sdram_Controller (m4b / m5). The core is u
 riscv-formal, RISCOF and TestRIG do not apply (they model memory themselves). Ordered by
 cost-to-value; items 1-3 are one file each.
 
-## 1. mc_ut extensions (gaps 2, 6; part of 1)
+## 1. mc_ut extensions (gaps 2, 6; part of 1) -- DONE (bfc2cea)
 - Random `arid/awid` (Wd_Id bits); assert `rid/bid` echo the request's ID.
 - `NLines` 8 -> 32, so evictions and line-crossing segments hit more distinct lines.
 - Raw-memory mode with the real cadence: first chunk after ~10 cycles, then one chunk every 4.
@@ -14,7 +14,7 @@ cost-to-value; items 1-3 are one file each.
   `arlen`, and one SLVERR B per write burst after all its W beats are consumed.
 - Pass: 0 errors; mutants (no ID echo, rlast early, B before last W) fail. Effort: small.
 
-## 2. sdram_ut on the streaming request shapes (gap 6, gap 7)
+## 2. sdram_ut on the streaming request shapes (gap 6, gap 7) -- DONE (d442e17, `RAW=1`, `RAW_PLL=1 TCK_PS=31111`)
 - Second UT top driving `mkSdram_Controller`'s raw port directly: random `b_first..b_last`
   (single bursts, odd first burst, all 4), partial `wbe` (empty bursts skipped), same-bank
   back-to-back (tDAL hold), credit-limited reads (consumer stalls). Mirror model + checker.
@@ -27,8 +27,11 @@ cost-to-value; items 1-3 are one file each.
   the core, Mem_Controller and fabric, not Sdram_Controller. A raw read in flight keeps
   returning chunks into the cleared Mem_Controller: later reads get shifted data. The write
   buffer is also dropped (acceptable on reset).
-- Reproduce first: mc_ut (or the FVIP harness with the reset assume lifted) issues reset with
-  reads outstanding, then checks the next read.
+- REPRODUCED (2026-10-25): `sim/mc_ut/run.sh +reset_test` resets Mem_Controller with 6 raw
+  chunks of a line read still to come; the next line read returns those 6 stale chunks first
+  (8 errors, every word shifted by 6). Reachable on the board: SoC_Top.rl_ndm_reset_start
+  (debug-module ndmreset, INCLUDE_GDB_CONTROL) calls the same fa_reset_start_actions.
+  The default mc_ut run (no plusarg) does not exercise it and passes.
 - Fix options (USER DECISION): (a) Mem_Controller drains owed chunks (counter, like the FVIP
   `owed`) before answering the reset; (b) reset Sdram_Controller with the SoC (refresh must
   continue; keep its init); (c) document reset as boot-only. Recommended: (a).
