@@ -45,7 +45,7 @@ Bit #(4) cmd_mrs     = 4'b0000;
 // Mode register: CL2, BL8, sequential burst, write bursts enabled
 Bit #(13) mode_reg_value = 13'h0023;
 
-Integer t_rcd         = 1;     // ACT -> READ/WRITE
+Integer t_rcd         = 1;     // ACT -> READ/WRITE (structural now: READ/WRITE is issued the cycle after ACT)
 Integer t_cas_first   = 3;     // IOB reg + BSV input reg pipeline (sim-validated)
 Integer refresh_div   = 98;     // 7.8 us at 12.5 MHz (80 ns/cycle)
 
@@ -159,7 +159,7 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
 
    Reg #(Bool) rg_inited     <- mkReg (False);
    Reg #(Bool) rg_cmd_valid  <- mkReg (False);
-   Reg #(Bool) rg_clear_cmd  <- mkReg (False);
+   PulseWire   pw_cmd        <- mkPulseWire;     // a command is issued this cycle
 
    FIFOF #(Raw_Mem_Req)  f_reqs <- mkSizedFIFOF (4);
    // Read chunks.  Credits: rg_chunks_issued - rg_chunks_taken chunks are
@@ -168,14 +168,25 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
    FIFOF #(Bit #(64))  f_rsps <- mkSizedFIFOF (8);
    Reg #(Bit #(4))     rg_chunks_issued <- mkReg (0);
    Reg #(Bit #(4))     rg_chunks_taken  <- mkReg (0);
+   // Bank written by the burst that just ended: an ACTIVE to it must wait
+   // one more IDLE cycle (last data-in + tWR 2 + tRP; tDAL).
+   Reg #(Maybe #(Bit #(2))) rg_wr_bank <- mkReg (tagged Invalid);
 
 
-   // Issue rules assert rg_cmd_valid for exactly one cycle; this rule
-   // clears it the following cycle.  Kept separate from data-burst rules
-   // so the behavioral model can sample command pins without a cycle.
-   rule rl_clear_cmd_valid (rg_clear_cmd);
-      rg_cmd_valid  <= False;
-      rg_clear_cmd  <= False;
+   // rg_cmd_valid is True exactly in the cycle after an issue rule wrote
+   // rg_cmd (so commands may go out in consecutive cycles: ACT, READ).
+   // Kept separate from data-burst rules so the behavioral model can
+   // sample command pins without a cycle.
+   function Action fa_cmd (Bit #(4) c);
+      action
+         rg_cmd <= c;
+         pw_cmd.send;
+      endaction
+   endfunction
+
+   (* fire_when_enabled, no_implicit_conditions *)
+   rule rl_cmd_valid;
+      rg_cmd_valid <= pw_cmd;
    endrule
 
    // ----------------------------------------------------------------
@@ -190,9 +201,7 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
    endrule
 
    rule rl_pre_all (rg_state == ST_PRE_ALL);
-      rg_cmd      <= cmd_pre;
-      rg_cmd_valid <= True;
-      rg_clear_cmd <= True;
+      fa_cmd (cmd_pre);
       rg_a        <= 13'h0400;    // A10 = 1: precharge all banks
       rg_ba       <= 0;
       rg_wait     <= fromInteger (t_init_gap);
@@ -207,9 +216,7 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
    endrule
 
    rule rl_init_ref1 (rg_state == ST_INIT_REF1);
-      rg_cmd      <= cmd_ref;
-      rg_cmd_valid <= True;
-      rg_clear_cmd <= True;
+      fa_cmd (cmd_ref);
       rg_wait     <= fromInteger (t_init_gap);
       rg_state    <= ST_INIT_REF1_WAIT;
    endrule
@@ -222,9 +229,7 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
    endrule
 
    rule rl_init_ref2 (rg_state == ST_INIT_REF2);
-      rg_cmd      <= cmd_ref;
-      rg_cmd_valid <= True;
-      rg_clear_cmd <= True;
+      fa_cmd (cmd_ref);
       rg_wait     <= fromInteger (t_init_gap);
       rg_state    <= ST_INIT_REF2_WAIT;
    endrule
@@ -245,9 +250,7 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
    endrule
 
    rule rl_mrs (rg_state == ST_MRS);
-      rg_cmd      <= cmd_mrs;
-      rg_cmd_valid <= True;
-      rg_clear_cmd <= True;
+      fa_cmd (cmd_mrs);
       rg_a        <= mode_reg_value;
       rg_ba       <= 0;
       rg_wait     <= fromInteger (t_init_gap);
@@ -278,9 +281,7 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
 
    rule rl_ref (rg_state == ST_REF && rg_ref_cnt <= 1);
       rg_ref_cnt  <= fromInteger (refresh_div);
-      rg_cmd      <= cmd_ref;
-      rg_cmd_valid <= True;
-      rg_clear_cmd <= True;
+      fa_cmd (cmd_ref);
       rg_wait     <= fromInteger (t_rfc);
       rg_state    <= ST_REF_WAIT;
    endrule
@@ -297,12 +298,21 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
 
    Bit #(4) chunks_in_flight = rg_chunks_issued - rg_chunks_taken;
 
+   function Action fa_act (Sdram_Line l);
+      action
+         fa_cmd (cmd_act);
+         rg_a  <= fn_row (l);
+         rg_ba <= fn_bank (l);
+      endaction
+   endfunction
+
    rule rl_idle (rg_state == ST_IDLE);
       rg_dq_oe     <= 1'b0;
       rg_dqm       <= 2'b11;
+      rg_wr_bank   <= tagged Invalid;
       if (rg_ref_cnt <= 1)
          rg_state <= ST_REF;
-      else if (f_reqs.notEmpty) begin
+      else if (f_reqs.notEmpty && (rg_wr_bank != tagged Valid fn_bank (f_reqs.first.line))) begin
          let req = f_reqs.first;
          let bm = fn_burst_mask (req.b_first, req.wbe);
          Bit #(4) n_chunks = (zeroExtend (req.b_last - req.b_first) + 1) << 1;
@@ -313,8 +323,10 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
             rg_bmask      <= bm;
             rg_burst      <= fn_first_set (bm);
             rg_burst_last <= fn_last_set (bm);
-            if (bm != 0)
-               rg_state <= ST_ACT;
+            if (bm != 0) begin
+               fa_act (req.line);
+               rg_state <= ST_WR;
+            end
          end
          else if (zeroExtend (chunks_in_flight) + zeroExtend (n_chunks) <= 5'd8) begin   // 5 bits: 8 + 8 must not wrap
             f_reqs.deq;
@@ -322,7 +334,8 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
             rg_burst         <= req.b_first;
             rg_burst_last    <= req.b_last;
             rg_chunks_issued <= rg_chunks_issued + n_chunks;
-            rg_state         <= ST_ACT;
+            fa_act (req.line);
+            rg_state         <= ST_RD;
          end
 `ifdef SDCAP_PROBES
          if (req.line == 0)
@@ -335,31 +348,17 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
    // ----------------------------------------------------------------
    // Shared row activation
 
-   rule rl_act (rg_state == ST_ACT);
-      rg_cmd      <= cmd_act;
-      rg_cmd_valid <= True;
-      rg_clear_cmd <= True;
-      rg_a        <= fn_row (rg_req.line);
-      rg_ba       <= fn_bank (rg_req.line);
-      rg_wait     <= fromInteger (t_rcd);
-      rg_state    <= ST_RCD_WAIT;
-   endrule
-
-   rule rl_rcd_wait (rg_state == ST_RCD_WAIT);
-      if (rg_wait == 0)
-         rg_state <= (rg_req.write ? ST_WR : ST_RD);
-      else
-         rg_wait <= rg_wait - 1;
-   endrule
+   // ACTIVE goes out with the IDLE cycle that takes the request; READ or
+   // WRITE follows in the next cycle (pins: ACT at n+1, READ/WRITE at n+2,
+   // one clock >= tRCD 18 ns at up to 55 MHz).  ST_ACT / ST_RCD_WAIT are
+   // no longer entered (kept so the state encoding the sim probes use is stable).
 
    // ----------------------------------------------------------------
    // Read: bursts rg_burst .. rg_burst_last, gapless, 64-bit chunks out
 
    function Action fa_read_cmd (BurstIdx b);
       action
-         rg_cmd       <= cmd_read;
-         rg_cmd_valid <= True;
-         rg_clear_cmd <= True;
+         fa_cmd (cmd_read);
          // Auto-precharge only on the last burst, so the row stays open
          // across the bursts of one request.
          rg_a         <= { 4'b0, fn_col (rg_req.line, b) } | ((b == rg_burst_last) ? 13'h0400 : 13'h0);
@@ -422,9 +421,7 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
    endfunction
 
    rule rl_wr (rg_state == ST_WR);
-      rg_cmd      <= cmd_write;
-      rg_cmd_valid <= True;
-      rg_clear_cmd <= True;
+      fa_cmd (cmd_write);
       // Auto-precharge only on the last written burst.
       rg_a        <= { 4'b0, fn_col (rg_req.line, rg_burst) } | ((rg_burst == rg_burst_last) ? 13'h0400 : 13'h0);
       rg_ba       <= fn_bank (rg_req.line);
@@ -452,6 +449,7 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
    rule rl_wr_end (rg_state == ST_WR_END);
       rg_dq_oe    <= 1'b0;
       rg_dqm      <= 2'b11;
+      rg_wr_bank  <= tagged Valid fn_bank (rg_req.line);
       rg_state <= ST_IDLE;
    endrule
 

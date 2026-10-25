@@ -184,8 +184,8 @@ static void perf_sample(Vsv_tb_top* top) {
     if (ist == 2) { if (CPU_SIG(near_mem__DOT__icache__DOT__rg_beat) == 0) p.i_lat++; else p.i_beat++; }
     if (ist == 1 && p.last_ist != 1) p.i_refill++;
     if (ist == 6 && p.last_ist != 6) p.i_walk++;
-    if (dst == 8 && p.last_dst != 8) p.d_refill++;
-    if (dst == 5 && p.last_dst != 5) p.d_walk++;
+    if (dst == 9 && p.last_dst != 9) p.d_refill++;   // START_REFILL
+    if (dst == 6 && p.last_dst != 6) p.d_walk++;     // PTW_START
     unsigned prev_ist = p.last_ist;
     p.last_ist = ist; p.last_dst = dst;
     // Streaming Mem_Controller: mc 2 = a read is outstanding (f_rd_pend non-empty), 3 = none
@@ -196,7 +196,8 @@ static void perf_sample(Vsv_tb_top* top) {
     static unsigned last_chunk_v = 0;
     p.sd_st[sd]++;
     if (sd >= 10 && sd <= 16) { if (sdw) p.sd_busy_wr++; else p.sd_busy_rd++; }
-    if (sd == 10 && p.last_sd != 10) { if (sdw) p.sd_wr++; else p.sd_rd++; }
+    bool sd_start = (sd == 12 || sd == 14) && p.last_sd == 9;   // IDLE -> RD / WR (ACT goes out with the IDLE cycle)
+    if (sd_start) { if (sdw) p.sd_wr++; else p.sd_rd++; }
     if (mc == 2) p.mc_reloading++;
     if (mc == 2 && p.last_mc != 2) { p.mc_reload++; if (p.last_sd != 9) p.mc_reload_busy++; }
     if (clean && !p.last_mc_clean && p.last_mc != 2) p.mc_wb++;
@@ -209,11 +210,11 @@ static void perf_sample(Vsv_tb_top* top) {
     if (ar_deq) p.last_merge_wr = 0; else if (aw_deq) p.last_merge_wr = 1;   // rd has priority at merge
     // I-refill timeline (only while the D side is not refilling or walking, so the path is the I side's)
     unsigned ibeat = CPU_SIG(near_mem__DOT__icache__DOT__rg_beat);
-    bool d_quiet = !(dst >= 5 && dst <= 11);
+    bool d_quiet = !(dst >= 5 && dst <= 12);   // UDTLB_FILL .. REREQ
     if (ist == 1 && prev_ist != 1) { p.ir_phase = d_quiet ? 1 : 0; p.ir_t0 = p.cyc; }
     if (p.ir_phase && !d_quiet) p.ir_phase = 0;
     if (p.ir_phase == 1 && ar_enq) { p.ir_t1 = p.cyc; p.ir_phase = 2; }
-    if (p.ir_phase == 2 && sd == 10 && p.last_sd != 10 && !sdw) { p.ir_t2 = p.cyc; p.ir_phase = 3; }   // SDRAM ACT for the read
+    if (p.ir_phase == 2 && sd_start && !sdw) { p.ir_t2 = p.cyc; p.ir_phase = 3; }   // SDRAM request start (ACT) for the read
     if (p.ir_phase == 2 && ist == 2 && ibeat != 0 && p.last_ibeat == 0) { p.ir_hit++; p.ir_phase = 0; }  // (no ACT seen: should not happen)
     if (p.ir_phase == 3 && chunk_v && !last_chunk_v) { p.ir_t3 = p.cyc; p.ir_phase = 4; }               // first chunk at Mem_Controller
     if (p.ir_phase == 4 && ist == 2 && ibeat != 0 && p.last_ibeat == 0) {
