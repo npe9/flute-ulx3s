@@ -84,4 +84,4 @@ cost-to-value; items 1-3 are one file each.
 | J1 strict | pass | queued (strict_bram busy) |
 | Linux sim + sdram_chk | pass | running |
 | FVIP BMC + reach | pass | pass (d13 bitwuzla, 11/11 by step 12; +LIVE, +DATA) |
-| board boot + soak | pass | to run (item 8) |
+| board boot + soak | pass | pass 2026-10-25: build/m5/ulx3s_top-m5-s2.bit (md5 80673f00), tick 1 at 3 s, 30-min soak tick 1743, 0 bad |
