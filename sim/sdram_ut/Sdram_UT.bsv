@@ -65,4 +65,51 @@ module mkSdram_UT (Sdram_UT_IFC);
    method sdram_dq_oe  = c.sdram_dq_oe;
    method sdram_dq_in  = c.sdram_dq_in;
 endmodule
+// The controller's raw port as is (tb_raw.sv): the request shapes the
+// streaming Mem_Controller sends (any burst range b_first..b_last for reads,
+// one 32-byte half with any byte mask for writes), 64-bit chunks back.
+interface Sdram_RawUT_IFC;
+   interface Server #(Raw_Mem_Req, Raw_Mem_Chunk) raw;
+   (* always_ready *) method Bool     init_done;
+   (* always_ready *) method Bit #(1)  sdram_cke;
+   (* always_ready *) method Bit #(1)  sdram_cs_n;
+   (* always_ready *) method Bit #(1)  sdram_ras_n;
+   (* always_ready *) method Bit #(1)  sdram_cas_n;
+   (* always_ready *) method Bit #(1)  sdram_we_n;
+   (* always_ready *) method Bit #(2)  sdram_ba;
+   (* always_ready *) method Bit #(13) sdram_a;
+   (* always_ready *) method Bit #(2)  sdram_dqm;
+   (* always_ready *) method Bit #(16) sdram_dq_out;
+   (* always_ready *) method Bit #(1)  sdram_dq_oe;
+   (* always_enabled *) method Action sdram_dq_in (Bit #(16) v);
+endinterface
+
+module mkSdram_RawUT_clk #(Integer clk_hz) (Sdram_RawUT_IFC);
+   let c <- mkSdram_Controller (clk_hz);
+   interface raw          = c.mem_server;
+   method init_done    = c.init_done;
+   method sdram_cke    = c.sdram_cke;
+   method sdram_cs_n   = c.sdram_cs_n;
+   method sdram_ras_n  = c.sdram_ras_n;
+   method sdram_cas_n  = c.sdram_cas_n;
+   method sdram_we_n   = c.sdram_we_n;
+   method sdram_ba     = c.sdram_ba;
+   method sdram_a      = c.sdram_a;
+   method sdram_dqm    = c.sdram_dqm;
+   method sdram_dq_out = c.sdram_dq_out;
+   method sdram_dq_oe  = c.sdram_dq_oe;
+   method sdram_dq_in  = c.sdram_dq_in;
+endmodule
+
+(* synthesize *)
+module mkSdram_RawUT (Sdram_RawUT_IFC);            // 25 MHz board clock
+   let m <- mkSdram_RawUT_clk (25_000_000);
+   return m;
+endmodule
+
+(* synthesize *)
+module mkSdram_RawUT_PLL (Sdram_RawUT_IFC);        // SYS_PLL=1 build: 32.142857 MHz
+   let m <- mkSdram_RawUT_clk (32_142_857);
+   return m;
+endmodule
 endpackage
