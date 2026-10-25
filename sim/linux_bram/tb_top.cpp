@@ -191,7 +191,7 @@ static void perf_sample(Vsv_tb_top* top) {
     // Streaming Mem_Controller: mc 2 = a read is outstanding (f_rd_pend non-empty), 3 = none
     unsigned mc = TOP_SIG(soc_top__DOT__mem0_controller__DOT__f_rd_pend__DOT__empty_reg) & 1 ? 2 : 3;
     unsigned clean = TOP_SIG(soc_top__DOT__mem0_controller__DOT__rg_buf_dirty) == 0;   // write-buffer dirty mask
-    unsigned sd = TOP_SIG(mem_rg_state) & 31, sdw = (TOP_SIG(mem_rg_req)[9] >> 21) & 1;   // Raw_Mem_Req.write = bit 309
+    unsigned sd = TOP_SIG(mem_rg_state) & 31, sdw = (TOP_SIG(mem_rg_req)[9] >> 23) & 1;   // Raw_Mem_Req.write = bit 311 (312-bit struct)
     unsigned chunk_v = TOP_SIG(soc_top__DOT__mem0_controller__DOT__f_raw_rsps_rv)[2] & 1;  // valid = bit 64
     static unsigned last_chunk_v = 0;
     p.sd_st[sd]++;
