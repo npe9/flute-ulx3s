@@ -216,6 +216,7 @@ static const char* ist_name[] = {"RUN","REFILL_REQ","REFILL","IO_REQ","IO_RSP","
 static const char* dst_name[] = {"PRERESET","RESETTING","READY","RUNNING","EXC_RSP","UDTLB_FILL","PTW_START","PTW_L1","PTW_L0","START_REFILL",
     "SNAPSHOT","REFILL","REREQ","AMO_EXEC","ST_AMO_RSP","IO_REQ","IO_AWAIT_W","IO_AWAIT_R","IO_READ_RSP","IO_AWAIT_AMO"};
 static void perf_sample(Vsv_tb_top* top) {
+#if TB_MEMLAT_PROBES    // streaming Mem_Controller signals: not in the E20 netlist
     Perf& p = perf_cur;
     unsigned ist = CPU_SIG(near_mem__DOT__icache__DOT__rg_st) & 15;
     unsigned dst = CPU_SIG(near_mem__DOT__dcache__DOT__rg_state) & 31;
@@ -270,6 +271,7 @@ static void perf_sample(Vsv_tb_top* top) {
     dbg_last_phase = p.ir_phase;
     p.last_ibeat = ibeat;
     p.last_mc = mc; p.last_mc_clean = clean; p.last_sd = sd; last_chunk_v = chunk_v;
+#endif
 }
 static void perf_print(const char* tag, const Perf& p, unsigned long long inst) {
     if (!p.cyc) return;
@@ -646,7 +648,7 @@ int main(int argc, char** argv) {
             if (progress_every && (g_cycle % progress_every) == 0) {
                 static time_t t0 = time(nullptr);
                 printf("\n[tb] cycle %llu, %ld s wall\n", (unsigned long long)g_cycle, (long)(time(nullptr) - t0));
-#if VM_TRACE_VCD
+#if VM_TRACE_VCD && TB_MEMLAT_PROBES
                 printf("[tb]   minstret %llu next_pc %08x priv %u | mcause %08x mepc %08x mtval %08x | scause %08x sepc %08x stval %08x satp %08x\n",
                        (unsigned long long)CPU_SIG(csr_regfile__DOT__rg_minstret), CPU_SIG(rg_next_pc), CPU_SIG(rg_cur_priv),
                        CPU_SIG(csr_regfile__DOT__rg_mcause), CPU_SIG(csr_regfile__DOT__rg_mepc), CPU_SIG(csr_regfile__DOT__rg_mtval),
