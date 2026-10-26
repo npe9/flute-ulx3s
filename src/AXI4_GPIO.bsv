@@ -26,6 +26,9 @@ import AXI4_Accel_IFC :: *;
 
 interface AXI4_GPIO_IFC;
    method Action init (Bit #(Wd_Id) axi4_id, Bit #(Wd_Addr) addr_base, Bit #(Wd_Addr) addr_lim);
+   // SoC soft reset (ndmreset): drop transactions in flight with the fabric that is reset with
+   // this slave (the fabric routes responses in order; a stale one would go to the wrong request)
+   method Action reset;
 
    interface AXI4_Slave_IFC  #(Wd_Id, Wd_Addr, Wd_Data, Wd_User)  slave;
 
@@ -111,6 +114,11 @@ module mkAXI4_GPIO (AXI4_GPIO_IFC);
    method Action init (Bit #(Wd_Id) axi4_id, Bit #(Wd_Addr) addr_base, Bit #(Wd_Addr) addr_lim);
       rg_addr_base <= addr_base;
       rg_addr_lim  <= addr_lim;
+   endmethod
+
+   method Action reset;
+      slave_xactor.reset;
+      master_xactor.reset;
    endmethod
 
    interface slave  = slave_xactor.axi_side;
