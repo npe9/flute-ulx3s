@@ -130,8 +130,8 @@ extern "C" void tb_tohost(int v) { if (!g_tohost) g_tohost = v; }
 static const char* sig_file = nullptr;
 static vluint64_t  sig_drain = 0, tohost_cycle = 0;
 static uint32_t sig_idx(uint32_t addr) {   // = isa_run.py model_idx()
-    uint32_t b = addr - 0x80000000u, r = b >> 5, hw = (b >> 1) & 15;
-    return ((r >> 5) & 3) << 22 | ((r >> 7) & 0x1FFF) << 9 | (r & 0x1F) << 4 | hw;
+    uint32_t b = addr - 0x80000000u, l = b >> 6, hw = (b >> 1) & 31;
+    return (l & 3) << 22 | ((l >> 6) & 0x1FFF) << 9 | ((l >> 2) & 15) << 5 | hw;
 }
 static void sig_dump() {
     uint32_t a0 = (uint32_t)strtoul(getenv("TB_SIG_BEGIN"), nullptr, 16);

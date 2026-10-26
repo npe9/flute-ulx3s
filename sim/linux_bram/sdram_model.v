@@ -78,8 +78,8 @@ module w9825g6 (
 
    // ISA-test harness (sim/isa_bram only):
    //   +PRELOAD=<file>  $readmemh after the zero fill; the file is already in
-   //                    model index order (isa_run.py: idx = {r[6:5], r[19:7],
-   //                    r[4:0], hw[3:0]}, r = (addr - 0x80000000) >> 5)
+   //                    model index order (isa_run.py: idx = {l[1:0], l[18:6],
+   //                    l[5:2], hw[4:0]}, l = (addr - 0x80000000) >> 6)
    //   +TOHOST=<hex>    model index of tohost's low halfword: the first nonzero
    //                    write there is reported to the TB (tb_tohost)
    import "DPI-C" function void tb_tohost (input int v);

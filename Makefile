@@ -57,6 +57,23 @@ DEFINES := -D RV32 -D ISA_I -D ISA_M -D ISA_A -D ISA_C \
            -D INCLUDE_ACCEL0 \
            -D INCLUDE_GDB_CONTROL -D JTAG_TAP
 
+# FP=1: F and D extensions (stock Flute FBox).  Off by default: the stock FBox does not fit the
+# 85F with everything else (notes/linux-isa-plan.md); the formal flow uses it (arithmetic under
+# RVFI_ALTOPS) to verify the ISA_F/ISA_D hooks.
+FP ?= 0
+ifeq ($(FP),1)
+DEFINES += -D ISA_F -D ISA_D -D INCLUDE_FDIV -D INCLUDE_FSQRT
+endif
+# FPU_TRIM=1 (with FP=1): the area-trimmed F/D unit (Flute/src_Core/CPU/FPU_Trim.bsv) instead of
+# the stock FBox, which stays the default and the functional reference.  Use a separate BUILD dir:
+# bsc -u does not see -D changes.
+FPU_TRIM ?= 0
+ifeq ($(FP)$(FPU_TRIM),11)
+DEFINES += -D FPU_TRIM
+endif
+# Extra defines for the RVFI build only (formal/run.sh sets FORMAL_DEFINES=-D RVFI_ALTOPS with FP=1)
+FORMAL_DEFINES ?=
+
 # SYS_PLL=1: 32.142857 MHz system clock from the ECP5 PLL (src/Top.v).
 # Changing it needs a clean bsc build (rm -rf build/bsc build/verilog/mkULX3S_Top.v):
 # bsc -u does not see -D changes.  Bench: EXPECT_HZ=32142857 scripts/hw_test_suite.py.
@@ -144,7 +161,7 @@ formal-verilog: $(FORMAL_VERILOG)
 
 $(FORMAL_VERILOG): $(wildcard $(REPO)/src_Core/*/*.bsv)
 	mkdir -p $(FBDIR) $(FVDIR) $(FIDIR)
-	$(BSC) -u -verilog -g mkCPU $(BSC_FLAGS) $(DEFINES) -D RVFI \
+	$(BSC) -u -verilog -g mkCPU $(BSC_FLAGS) $(DEFINES) -D RVFI $(FORMAL_DEFINES) \
 	    -p $(BSC_PATH) -bdir $(FBDIR) -vdir $(FVDIR) -info-dir $(FIDIR) \
 	    $(REPO)/src_Core/CPU/CPU.bsv > $(BUILD)/formal/elaboration.log 2>&1
 	cat $(FVDIR)/*.v > $@

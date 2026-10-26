@@ -1,15 +1,18 @@
 // ================================================================
-// Sdram_Controller: bridge between Flute's "raw memory" port
-// (256-bit words, byte-enables, fire-and-forget writes, one
-// outstanding request) and the ULX3S's 32 MB Winbond W9825G6KH-6
-// 16-bit SDR SDRAM, running from the 25 MHz board clock.
+// Sdram_Controller: the ULX3S's 32 MB Winbond W9825G6KH-6 16-bit SDR
+// SDRAM, running from the 25 MHz board clock.
 //
-// Raw-memory address r is a 32-byte granule number:
-//   byte  = r << 5,  halfword = r << 4
-//   bank  = r[6:5],  row = r[19:7],  col base = {r[4:0], 4'b0}
-// A 256-bit request is two BL8 bursts (burst 0 at col, burst 1 at
-// col+8), with auto-precharge, so all banks are closed between
-// requests and refresh can be inserted at request boundaries.
+// Core: a streaming request port.  A request names one 64-byte line and a
+// contiguous range of its four BL8 bursts (16 bytes each).  The line sits in
+// one bank and row:  line l (= byte >> 6):  bank = l[1:0],  row = l[18:6],
+// col = {l[5:2], burst, beat}.  One ACTIVE, gapless bursts, auto-precharge
+// on the last, so all banks are closed between requests and refresh can be
+// inserted at request boundaries.  Reads return two 64-bit chunks per burst
+// in address order; a read is only started when the response FIFO has room
+// for all of its chunks (SDRAM data cannot be stalled).  Writes carry one
+// 32-byte half of the line and skip bursts with no enabled byte.
+//
+// The request and chunk types are Mem_Controller's raw memory port.
 //
 // Timing constants are in system clock cycles (25 MHz = 40 ns; the PLL
 // build runs at 32.14 MHz = 31.1 ns): tRCD 1 (>=18 ns), CL 2, tRFC and the
@@ -25,9 +28,8 @@ import Vector      :: *;
 import FIFOF       :: *;
 import GetPut      :: *;
 import ClientServer :: *;
-import Memory      :: *;    // MemoryRequest, MemoryResponse, MemoryServer
 
-import Mem_Controller :: *;    // Bits_per_Raw_Mem_Addr/WWord
+import Mem_Controller :: *;    // Raw_Mem_Req, Raw_Mem_Chunk
 
 // ================================================================
 
@@ -43,7 +45,7 @@ Bit #(4) cmd_mrs     = 4'b0000;
 // Mode register: CL2, BL8, sequential burst, write bursts enabled
 Bit #(13) mode_reg_value = 13'h0023;
 
-Integer t_rcd         = 1;     // ACT -> READ/WRITE
+Integer t_rcd         = 1;     // ACT -> READ/WRITE (structural now: READ/WRITE is issued the cycle after ACT)
 Integer t_cas_first   = 3;     // IOB reg + BSV input reg pipeline (sim-validated)
 Integer refresh_div   = 98;     // 7.8 us at 12.5 MHz (80 ns/cycle)
 
@@ -57,7 +59,6 @@ typedef enum {ST_PWR_WAIT,
               ST_IDLE,
               ST_ACT, ST_RCD_WAIT,
               ST_RD, ST_RD_CAP,
-              ST_GAP,
               ST_WR, ST_WR_DATA, ST_WR_END,
               ST_REF, ST_REF_WAIT } State
 deriving (Bits, Eq, FShow);
@@ -65,7 +66,7 @@ deriving (Bits, Eq, FShow);
 // ================================================================
 
 interface Sdram_Controller_IFC;
-   interface MemoryServer #(Bits_per_Raw_Mem_Addr, Bits_per_Raw_Mem_Word)  mem_server;
+   interface Server #(Raw_Mem_Req, Raw_Mem_Chunk)  mem_server;
 
    (* always_ready *) method Bool     init_done;
 
@@ -84,11 +85,38 @@ endinterface
 
 // ================================================================
 
-function Bit #(2)  fn_bank (Bit #(64) a); return a [6:5];   endfunction
-function Bit #(13) fn_row  (Bit #(64) a); return a [19:7];  endfunction
-function Bit #(9)  fn_col  (Bit #(64) a, Bool second_burst);
-   return { a [4:0], 4'b0 } + (second_burst ? 9'd8 : 9'd0);
+typedef Raw_Mem_Line Sdram_Line;
+typedef Bit #(2)     BurstIdx;       // burst within a line
+
+function Bit #(2)  fn_bank (Sdram_Line l); return l [1:0];   endfunction
+function Bit #(13) fn_row  (Sdram_Line l); return l [18:6];  endfunction
+function Bit #(9)  fn_col  (Sdram_Line l, BurstIdx b); return { l [5:2], b, 3'b0 }; endfunction
+
+// Write: bursts of the line with at least one enabled byte (16 bytes each)
+function Bit #(4) fn_burst_mask (BurstIdx b_first, Bit #(32) be);
+   Bit #(2) m = { pack (be [31:16] != 0), pack (be [15:0] != 0) };
+   return (b_first [1] == 1) ? { m, 2'b0 } : { 2'b0, m };
 endfunction
+function BurstIdx fn_first_set (Bit #(4) m);
+   BurstIdx r = 0;
+   for (Integer b = 3; b >= 0; b = b - 1)
+      if (m [b] == 1) r = fromInteger (b);
+   return r;
+endfunction
+function BurstIdx fn_last_set (Bit #(4) m);
+   BurstIdx r = 0;
+   for (Integer b = 0; b < 4; b = b + 1)
+      if (m [b] == 1) r = fromInteger (b);
+   return r;
+endfunction
+// Next set burst strictly above b (b itself if none: caller checks last).
+function BurstIdx fn_next_set (Bit #(4) m, BurstIdx b);
+   BurstIdx r = b;
+   for (Integer k = 3; k >= 0; k = k - 1)
+      if (m [k] == 1 && fromInteger (k) > b) r = fromInteger (k);
+   return r;
+endfunction
+
 
 // ================================================================
 
@@ -109,18 +137,16 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
    Reg #(Bit #(16)) rg_pwrcnt    <- mkReg (fromInteger (t_powerup));
    Reg #(Bit #(16)) rg_ref_cnt   <- mkReg (fromInteger (refresh_div));
    Reg #(Bit #(2))  rg_init_pairs <- mkReg (0);   // init REF1/REF2 pairs done
-   Reg #(Bool)      rg_rsp_pend   <- mkReg (False); // read word in rg_rdata awaiting f_rsps space
 
    // Latched current request
-   Reg #(Bool)      rg_req_write  <- mkReg (False);
-   Reg #(Bit #(64)) rg_req_addr   <- mkReg (0);
-   Reg #(Bit #(256)) rg_req_data  <- mkReg (0);
-   Reg #(Bit #(32)) rg_req_byteen <- mkReg (0);
-   Reg #(Bool)      rg_phase      <- mkReg (False);    // second burst
-   Reg #(Bit #(4))  rg_beat       <- mkReg (0);
+   Reg #(Raw_Mem_Req) rg_req        <- mkRegU;
+   Reg #(BurstIdx)  rg_burst      <- mkReg (0);        // current burst
+   Reg #(BurstIdx)  rg_burst_last <- mkReg (0);        // last burst of this request
+   Reg #(Bit #(4))  rg_bmask      <- mkReg (0);        // write: bursts with enabled bytes
+   Reg #(Bit #(3))  rg_beat       <- mkReg (0);
 
-   // Read-data assembly (16 halfword beats)
-   Vector #(16, Reg #(Bit #(16))) rg_rdata <- replicateM (mkReg (16'h0));
+   // Read: halfwords 0..2 of the current 64-bit chunk (the 4th is rg_dq_in)
+   Vector #(3, Reg #(Bit #(16))) rg_hw <- replicateM (mkReg (16'h0));
 
    // Pin registers
    Reg #(Bit #(4))  rg_cmd      <- mkReg (cmd_nop);    // command output (updated by state rules)
@@ -133,17 +159,34 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
 
    Reg #(Bool) rg_inited     <- mkReg (False);
    Reg #(Bool) rg_cmd_valid  <- mkReg (False);
-   Reg #(Bool) rg_clear_cmd  <- mkReg (False);
+   PulseWire   pw_cmd        <- mkPulseWire;     // a command is issued this cycle
 
-   FIFOF #(MemoryRequest  #(Bits_per_Raw_Mem_Addr, Bits_per_Raw_Mem_Word)) f_reqs <- mkSizedFIFOF (4);
-   FIFOF #(MemoryResponse #(Bits_per_Raw_Mem_Word))                        f_rsps <- mkSizedFIFOF (2);
+   FIFOF #(Raw_Mem_Req)  f_reqs <- mkSizedFIFOF (4);
+   // Read chunks.  Credits: rg_chunks_issued - rg_chunks_taken chunks are
+   // promised to f_rsps (each counter has one writer); a read starts only
+   // if all of its chunks fit.
+   FIFOF #(Bit #(64))  f_rsps <- mkSizedFIFOF (8);
+   Reg #(Bit #(4))     rg_chunks_issued <- mkReg (0);
+   Reg #(Bit #(4))     rg_chunks_taken  <- mkReg (0);
+   // Bank written by the burst that just ended: an ACTIVE to it must wait
+   // one more IDLE cycle (last data-in + tWR 2 + tRP; tDAL).
+   Reg #(Maybe #(Bit #(2))) rg_wr_bank <- mkReg (tagged Invalid);
 
-   // Issue rules assert rg_cmd_valid for exactly one cycle; this rule
-   // clears it the following cycle.  Kept separate from data-burst rules
-   // so the behavioral model can sample command pins without a cycle.
-   rule rl_clear_cmd_valid (rg_clear_cmd);
-      rg_cmd_valid  <= False;
-      rg_clear_cmd  <= False;
+
+   // rg_cmd_valid is True exactly in the cycle after an issue rule wrote
+   // rg_cmd (so commands may go out in consecutive cycles: ACT, READ).
+   // Kept separate from data-burst rules so the behavioral model can
+   // sample command pins without a cycle.
+   function Action fa_cmd (Bit #(4) c);
+      action
+         rg_cmd <= c;
+         pw_cmd.send;
+      endaction
+   endfunction
+
+   (* fire_when_enabled, no_implicit_conditions *)
+   rule rl_cmd_valid;
+      rg_cmd_valid <= pw_cmd;
    endrule
 
    // ----------------------------------------------------------------
@@ -158,9 +201,7 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
    endrule
 
    rule rl_pre_all (rg_state == ST_PRE_ALL);
-      rg_cmd      <= cmd_pre;
-      rg_cmd_valid <= True;
-      rg_clear_cmd <= True;
+      fa_cmd (cmd_pre);
       rg_a        <= 13'h0400;    // A10 = 1: precharge all banks
       rg_ba       <= 0;
       rg_wait     <= fromInteger (t_init_gap);
@@ -175,9 +216,7 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
    endrule
 
    rule rl_init_ref1 (rg_state == ST_INIT_REF1);
-      rg_cmd      <= cmd_ref;
-      rg_cmd_valid <= True;
-      rg_clear_cmd <= True;
+      fa_cmd (cmd_ref);
       rg_wait     <= fromInteger (t_init_gap);
       rg_state    <= ST_INIT_REF1_WAIT;
    endrule
@@ -190,9 +229,7 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
    endrule
 
    rule rl_init_ref2 (rg_state == ST_INIT_REF2);
-      rg_cmd      <= cmd_ref;
-      rg_cmd_valid <= True;
-      rg_clear_cmd <= True;
+      fa_cmd (cmd_ref);
       rg_wait     <= fromInteger (t_init_gap);
       rg_state    <= ST_INIT_REF2_WAIT;
    endrule
@@ -213,9 +250,7 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
    endrule
 
    rule rl_mrs (rg_state == ST_MRS);
-      rg_cmd      <= cmd_mrs;
-      rg_cmd_valid <= True;
-      rg_clear_cmd <= True;
+      fa_cmd (cmd_mrs);
       rg_a        <= mode_reg_value;
       rg_ba       <= 0;
       rg_wait     <= fromInteger (t_init_gap);
@@ -246,9 +281,7 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
 
    rule rl_ref (rg_state == ST_REF && rg_ref_cnt <= 1);
       rg_ref_cnt  <= fromInteger (refresh_div);
-      rg_cmd      <= cmd_ref;
-      rg_cmd_valid <= True;
-      rg_clear_cmd <= True;
+      fa_cmd (cmd_ref);
       rg_wait     <= fromInteger (t_rfc);
       rg_state    <= ST_REF_WAIT;
    endrule
@@ -263,35 +296,51 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
    // ----------------------------------------------------------------
    // IDLE: serve refresh first, then latch the next request.
 
+   Bit #(4) chunks_in_flight = rg_chunks_issued - rg_chunks_taken;
+
+   function Action fa_act (Sdram_Line l);
+      action
+         fa_cmd (cmd_act);
+         rg_a  <= fn_row (l);
+         rg_ba <= fn_bank (l);
+      endaction
+   endfunction
+
    rule rl_idle (rg_state == ST_IDLE);
       rg_dq_oe     <= 1'b0;
       rg_dqm       <= 2'b11;
+      rg_wr_bank   <= tagged Invalid;
       if (rg_ref_cnt <= 1)
          rg_state <= ST_REF;
-      else if (rg_rsp_pend) begin
-         // Stalled read response: the word is complete in rg_rdata and
-         // leaves as soon as f_rsps has space.  Refresh is still served
-         // above; no new request is taken (a read would overwrite rg_rdata).
-         if (f_rsps.notFull) begin
-            f_rsps.enq (MemoryResponse {data: pack (readVReg (rg_rdata))});
-            rg_rsp_pend <= False;
-         end
-      end
-      else if (f_reqs.notEmpty) begin
+      else if (f_reqs.notEmpty && (rg_wr_bank != tagged Valid fn_bank (f_reqs.first.line))) begin
          let req = f_reqs.first;
-         f_reqs.deq;
-         rg_req_write  <= req.write;
-         rg_req_addr   <= req.address;
-         rg_req_data   <= req.data;
-         rg_req_byteen <= req.byteen;
-         rg_phase      <= False;
-         rg_state      <= ST_ACT;
+         let bm = fn_burst_mask (req.b_first, req.wbe);
+         Bit #(4) n_chunks = (zeroExtend (req.b_last - req.b_first) + 1) << 1;
+         if (req.write) begin
+            // Only bursts with enabled bytes (no ACTIVE at all for an empty mask)
+            f_reqs.deq;
+            rg_req        <= req;
+            rg_bmask      <= bm;
+            rg_burst      <= fn_first_set (bm);
+            rg_burst_last <= fn_last_set (bm);
+            if (bm != 0) begin
+               fa_act (req.line);
+               rg_state <= ST_WR;
+            end
+         end
+         else if (zeroExtend (chunks_in_flight) + zeroExtend (n_chunks) <= 5'd8) begin   // 5 bits: 8 + 8 must not wrap
+            f_reqs.deq;
+            rg_req           <= req;
+            rg_burst         <= req.b_first;
+            rg_burst_last    <= req.b_last;
+            rg_chunks_issued <= rg_chunks_issued + n_chunks;
+            fa_act (req.line);
+            rg_state         <= ST_RD;
+         end
 `ifdef SDCAP_PROBES
-         // granule 0 only (req.address == 0): keeps REPL-boot logs small
-         if (req.address == 0)
-            $display ("%0d SDREQ %s addr=%0h (byte %0h) byteen=%0h",
-                      0, req.write ? "WR" : "RD", req.address,
-                      req.address << 5, req.byteen);
+         if (req.line == 0)
+            $display ("%0d SDREQ %s line=%0h bursts %0d..%0d wbe=%0h",
+                      0, req.write ? "WR" : "RD", req.line, req.b_first, req.b_last, req.wbe);
 `endif
       end
    endrule
@@ -299,35 +348,27 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
    // ----------------------------------------------------------------
    // Shared row activation
 
-   rule rl_act (rg_state == ST_ACT);
-      rg_cmd      <= cmd_act;
-      rg_cmd_valid <= True;
-      rg_clear_cmd <= True;
-      rg_a        <= fn_row (rg_req_addr);
-      rg_ba       <= fn_bank (rg_req_addr);
-      rg_wait     <= fromInteger (t_rcd);
-      rg_state    <= ST_RCD_WAIT;
-   endrule
-
-   rule rl_rcd_wait (rg_state == ST_RCD_WAIT);
-      if (rg_wait == 0)
-         rg_state <= (rg_req_write ? ST_WR : ST_RD);
-      else
-         rg_wait <= rg_wait - 1;
-   endrule
+   // ACTIVE goes out with the IDLE cycle that takes the request; READ or
+   // WRITE follows in the next cycle (pins: ACT at n+1, READ/WRITE at n+2,
+   // one clock >= tRCD 18 ns at up to 55 MHz).  ST_ACT / ST_RCD_WAIT are
+   // no longer entered (kept so the state encoding the sim probes use is stable).
 
    // ----------------------------------------------------------------
-   // Read: two BL8 bursts, capture 16 halfwords, return 256-bit word
+   // Read: bursts rg_burst .. rg_burst_last, gapless, 64-bit chunks out
+
+   function Action fa_read_cmd (BurstIdx b);
+      action
+         fa_cmd (cmd_read);
+         // Auto-precharge only on the last burst, so the row stays open
+         // across the bursts of one request.
+         rg_a         <= { 4'b0, fn_col (rg_req.line, b) } | ((b == rg_burst_last) ? 13'h0400 : 13'h0);
+         rg_ba        <= fn_bank (rg_req.line);
+      endaction
+   endfunction
 
    rule rl_rd (rg_state == ST_RD);
-      rg_cmd      <= cmd_read;
-      rg_cmd_valid <= True;
-      rg_clear_cmd <= True;
-      // Auto-precharge only on the second burst, so the row stays open
-      // across the two bursts of one raw-memory request.
-      rg_a        <= { 4'b0, fn_col (rg_req_addr, rg_phase) } | (rg_phase ? 13'h0400 : 13'h0);
-      rg_ba       <= fn_bank (rg_req_addr);
-      rg_dqm      <= 2'b00;    // unmask read data for the entire burst
+      fa_read_cmd (rg_burst);
+      rg_dqm      <= 2'b00;    // unmask read data for the entire request
       rg_beat     <= 0;
       rg_wait     <= fromInteger (t_cas_first);
       rg_state    <= ST_RD_CAP;
@@ -336,95 +377,71 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
    rule rl_rd_cap (rg_state == ST_RD_CAP);
       if (rg_wait != 0)
          rg_wait <= rg_wait - 1;
-      else if ((rg_beat == 7) && rg_phase) begin
-         // Final beat of the request: assemble and return the word.  The
-         // beat is captured unconditionally; if f_rsps is full the word is
-         // left in rg_rdata with rg_rsp_pend set and returned from IDLE,
-         // where refresh can still run.  (This rule used to block on a
-         // full f_rsps at this beat while rg_dq_in kept sampling the bus,
-         // so the returned beat 15 was whatever was on DQ when it fired.)
-         Vector #(16, Bit #(16)) v = readVReg (rg_rdata);
-         v [15] = rg_dq_in;
-         rg_rdata [15] <= rg_dq_in;
-         if (f_rsps.notFull)
-            f_rsps.enq (MemoryResponse {data: pack (v)});
-         // SIM PROBE: log returned read data (granule 0 only)
-`ifdef SDCAP_PROBES
-         if (rg_req_addr == 0)
-            $display ("%0d SDRSP addr=%0h data=%0h", 0, rg_req_addr, pack (v));
-`endif
-         if (! f_rsps.notFull) rg_rsp_pend <= True;
-         rg_state <= ST_IDLE;
-      end
       else begin
-         Bit #(4) idx = (rg_phase ? 4'd8 : 4'd0) + rg_beat;
-         rg_rdata [idx] <= rg_dq_in;
+         // Beats 3 and 7 complete a chunk.  f_rsps has room: the request's
+         // chunks were reserved before it started.
+         if (rg_beat [1:0] == 3) begin
+            Bit #(64) chunk = { rg_dq_in, rg_hw [2], rg_hw [1], rg_hw [0] };
+            f_rsps.enq (chunk);
 `ifdef SDCAP_PROBES
-         if (rg_req_addr == 0)
-            $display ("%0d SDCAP phase=%0d beat=%0d idx=%0d dq_in=%0h",
-                      0, rg_phase, rg_beat, idx, rg_dq_in);
+            if (rg_req.line == 0)
+               $display ("%0d SDCAP burst=%0d beat=%0d chunk=%0h", 0, rg_burst, rg_beat, chunk);
 `endif
-         if (rg_beat == 7) begin    // first burst complete
-            rg_phase <= True;
-            rg_state <= ST_GAP;
          end
          else
-            rg_beat <= rg_beat + 1;
+            rg_hw [rg_beat [1:0]] <= rg_dq_in;
+
+         // Gapless bursts: the next READ goes out with beat 4 (8 cycles after
+         // this burst's READ), so its first beat follows this burst's beat 7.
+         if ((rg_beat == 4) && (rg_burst != rg_burst_last))
+            fa_read_cmd (rg_burst + 1);
+
+         if (rg_beat == 7) begin
+            if (rg_burst == rg_burst_last)
+               rg_state <= ST_IDLE;
+            else
+               rg_burst <= rg_burst + 1;    // its beat 0 follows
+         end
+         rg_beat <= rg_beat + 1;
       end
-   endrule
-
-   // One idle cycle between the two bursts of a request (tCCD)
-
-   rule rl_gap_rd (rg_state == ST_GAP && ! rg_req_write);
-      rg_state    <= ST_RD;
-   endrule
-
-   rule rl_gap_wr (rg_state == ST_GAP && rg_req_write);
-      rg_state    <= ST_WR;
    endrule
 
    // ----------------------------------------------------------------
-   // Write: two BL8 bursts, zero write latency (first beat driven
-   // with the WRITE command), per-byte DQM masking.
+   // Write: BL8 bursts of the latched half, zero write latency (first beat
+   // driven with the WRITE command), per-byte DQM masking.
+
+   function Action fa_drive_wbeat (BurstIdx b, Bit #(3) beat);
+      action
+         Vector #(16, Bit #(16)) v_wdata = unpack (rg_req.wdata);
+         Bit #(4) idx    = { b [0], beat };
+         Bit #(5) be_idx = { idx, 1'b0 };
+         rg_dq_out <= v_wdata [idx];
+         rg_dqm    <= { ~ rg_req.wbe [be_idx + 1], ~ rg_req.wbe [be_idx] };
+      endaction
+   endfunction
 
    rule rl_wr (rg_state == ST_WR);
-      Vector #(16, Bit #(16)) v_wdata = unpack (rg_req_data);
-      Vector #(32, Bit #(1))  v_be    = unpack (rg_req_byteen);
-      Bit #(4) idx     = rg_phase ? 4'd8 : 4'd0;
-      Bit #(5) be_idx  = { idx, 1'b0 };
-      rg_cmd      <= cmd_write;
-      rg_cmd_valid <= True;
-      rg_clear_cmd <= True;
-      // Auto-precharge only on the second burst, so the row stays open
-      // across the two bursts of one raw-memory request.
-      rg_a        <= { 4'b0, fn_col (rg_req_addr, rg_phase) } | (rg_phase ? 13'h0400 : 13'h0);
-      rg_ba       <= fn_bank (rg_req_addr);
+      fa_cmd (cmd_write);
+      // Auto-precharge only on the last written burst.
+      rg_a        <= { 4'b0, fn_col (rg_req.line, rg_burst) } | ((rg_burst == rg_burst_last) ? 13'h0400 : 13'h0);
+      rg_ba       <= fn_bank (rg_req.line);
       rg_dq_oe    <= 1'b1;
-      rg_dq_out   <= v_wdata [idx];
-      rg_dqm      <= { ~ v_be [be_idx + 1], ~ v_be [be_idx] };
+      fa_drive_wbeat (rg_burst, 0);
       rg_beat     <= 1;
       rg_state    <= ST_WR_DATA;
-`ifdef SDCAP_PROBES
-      if (rg_req_addr == 0)
-         $display ("%0d SDWRB0 addr=%0h idx=%0d dq=%0h dqm=%0b",
-                   0, rg_req_addr, idx, v_wdata [idx], { ~ v_be [be_idx + 1], ~ v_be [be_idx] });
-`endif
    endrule
 
    rule rl_wr_data (rg_state == ST_WR_DATA);
-      Vector #(16, Bit #(16)) v_wdata = unpack (rg_req_data);
-      Vector #(32, Bit #(1))  v_be    = unpack (rg_req_byteen);
-      Bit #(4) idx     = (rg_phase ? 4'd8 : 4'd0) + rg_beat;
-      Bit #(5) be_idx  = { idx, 1'b0 };
-      rg_dq_out <= v_wdata [idx];
-      rg_dqm    <= { ~ v_be [be_idx + 1], ~ v_be [be_idx] };
-`ifdef SDCAP_PROBES
-      if (rg_req_addr == 0)
-         $display ("%0d SDWRB%0d addr=%0h idx=%0d dq=%0h dqm=%0b",
-                   0, rg_beat, rg_req_addr, idx, v_wdata [idx], { ~ v_be [be_idx + 1], ~ v_be [be_idx] });
-`endif
-      if (rg_beat == 7)
-         rg_state <= ST_WR_END;
+      fa_drive_wbeat (rg_burst, rg_beat);
+      // The next burst's WRITE (with its beat 0) follows beat 7 directly (tCCD 1)
+      if (rg_beat == 7) begin
+         if (rg_burst != rg_burst_last) begin
+            rg_burst <= fn_next_set (rg_bmask, rg_burst);
+            rg_state <= ST_WR;
+         end
+         else
+            rg_state <= ST_WR_END;
+      end
       else
          rg_beat <= rg_beat + 1;
    endrule
@@ -432,12 +449,8 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
    rule rl_wr_end (rg_state == ST_WR_END);
       rg_dq_oe    <= 1'b0;
       rg_dqm      <= 2'b11;
-      if (! rg_phase) begin
-         rg_phase <= True;
-         rg_state <= ST_GAP;
-      end
-      else
-         rg_state <= ST_IDLE;
+      rg_wr_bank  <= tagged Valid fn_bank (rg_req.line);
+      rg_state <= ST_IDLE;
    endrule
 
    // ----------------------------------------------------------------
@@ -449,7 +462,16 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
       return rg_cmd_valid ? rg_cmd : cmd_nop;
    endfunction
 
-   interface MemoryServer mem_server = toGPServer (f_reqs, f_rsps);
+   interface Server mem_server;
+      interface Put request = toPut (f_reqs);
+      interface Get response;
+         method ActionValue #(Raw_Mem_Chunk) get;
+            f_rsps.deq;
+            rg_chunks_taken <= rg_chunks_taken + 1;
+            return f_rsps.first;
+         endmethod
+      endinterface
+   endinterface
 
    method Bool init_done = rg_inited;
 

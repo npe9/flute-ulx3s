@@ -22,7 +22,7 @@ logger = logging.getLogger()
 # Local copy of riscv-arch-test 3.10.0 riscof-plugins/rv32/sail_cSim, adapted to Flute:
 #  - riscv64-unknown-elf toolchain (no riscv32-*), -march via gcc_march (adds zicsr/zifencei)
 #  - Sail flags mirror the RTL: -i mtval holds illegal insn bits (CPU_Stage1.bsv),
-#    -I misa not writable, -F no F/D, --pmp-grain=10 (PMP.bsv G=10), --pmp-count=16
+#    -I misa not writable, -F no F/D (only when the ISA yaml has no F), --pmp-grain=10 (PMP.bsv G=10), --pmp-count=16
 #    (this Sail accepts only 0/16/64; Flute shows 16 and implements 0-7, so entries 8-15 differ)
 #  - no trace (-V), -l 10000000 instruction cap, ref log capped at 20 MB; make -k and a
 #    long execute_all timeout
@@ -148,7 +148,7 @@ class sail_cSim(pluginTemplate):
             # trap loop (fetch fault on the handler: pmp32 NAPOT/TOR under G=10) retires nothing,
             # so a 300 s wall-clock timeout too; and
             # the log is capped at 20 MB regardless.
-            execute += 'timeout 300 ' + self.sail_exe[self.xlen] + '  -i -I -F -V -l 10000000  --pmp-count=16 --pmp-grain=10  --test-signature={0} {1} 2>&1 | head -c 20000000 > {2}.log;'.format(sig_file, elf, test_name)
+            execute += 'timeout 300 ' + self.sail_exe[self.xlen] + '  -i -I' + ('' if 'f' in self.isa else ' -F') + ' -V -l 10000000  --pmp-count=16 --pmp-grain=10  --test-signature={0} {1} 2>&1 | head -c 20000000 > {2}.log;'.format(sig_file, elf, test_name)
 
             cov_str = ' '
             for label in testentry['coverage_labels']:

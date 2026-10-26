@@ -68,6 +68,9 @@ import SoC_Map      :: *;    // MemRegion, fn_soc_memmap, DeviceId
 
 interface SoC_Info_IFC;
    method Action init (Bit #(Wd_Id) axi4_id, Bit #(Wd_Addr) addr_base, Bit #(Wd_Addr) addr_lim);
+   // SoC soft reset (ndmreset): drop transactions in flight with the fabric that is reset with
+   // this slave (the fabric routes responses in order; a stale one would go to the wrong request)
+   method Action reset;
    interface AXI4_Slave_IFC #(Wd_Id, Wd_Addr, Wd_Data, Wd_User) slave;
    // Bus-error monitor feed (from the AXI fabric's decode-error events).
    method Action note_err (BusErrEvent e);
@@ -329,6 +332,11 @@ module mkSoC_Info #(int clk_hz) (SoC_Info_IFC);
    method Action init (Bit #(Wd_Id) axi4_id, Bit #(Wd_Addr) addr_base, Bit #(Wd_Addr) addr_lim);
       rg_addr_base <= addr_base;
       rg_addr_lim  <= addr_lim;
+   endmethod
+
+   method Action reset;
+      slave_xactor.reset;
+      f_rd_pending.clear;
    endmethod
 
    interface slave = slave_xactor.axi_side;

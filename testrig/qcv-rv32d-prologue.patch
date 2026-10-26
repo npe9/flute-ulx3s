@@ -1,0 +1,17 @@
+diff --git a/src/QuickCheckVEngine/Templates/Utils/FP.hs b/src/QuickCheckVEngine/Templates/Utils/FP.hs
+index 6f47a20..dba559d 100644
+--- a/src/QuickCheckVEngine/Templates/Utils/FP.hs
++++ b/src/QuickCheckVEngine/Templates/Utils/FP.hs
+@@ -48,6 +48,11 @@ fp_prologue t = readParams $ \p ->
+                                            , csrs (unsafe_csrs_indexFromName "mstatus") 1
+                                            , csrs (unsafe_csrs_indexFromName "fcsr") 0
+                                            , mconcat $ [inst $ fmv_w_x i 0 | i <- [0..4]]
+-                                                    ++ [inst $ (if has_d (archDesc p) then fmv_d_x else fmv_w_x) i 0 | i <- [16..20]]
++                                                    ++ [inst $ clr_d p i | i <- [16..20]]
+                                            ] <> t)
+     else t
++  where
++    -- fmv.d.x is RV64-only (it traps on RV32): clear D registers with fcvt.d.w rd, x0 there
++    clr_d p i = if not (has_d (archDesc p)) then fmv_w_x i 0
++              else if has_xlen_64 (archDesc p) then fmv_d_x i 0
++              else fcvt_d_w i 0 0
