@@ -14,7 +14,7 @@ PASS: every cycle reaches the boot banner, loads, and Linux ticks again
 Usage: ndmreset_board.py <fw_payload.bin> [-n cycles] [-p port]
 Program the FPGA first.  Holds the serial port for the whole run.
 """
-import argparse, os, sys, time
+import argparse, os, struct, sys, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "scripts"))
@@ -45,6 +45,53 @@ def wait_for(fd, pats, timeout, log):
     return None, buf
 
 
+def arm_checked(d):
+    """Arm, then a framing canary: data0 (0x04) is scratch, so a write/read-back of a fresh
+    token proves request and response streams are aligned (an offset makes every read return
+    the previous op's data)."""
+    d.arm()
+    tok = int(time.time() * 1000) & 0xFFFFFFFF
+    d.wr(0x04, tok)
+    got = d.rd(0x04)
+    if got != tok:
+        raise RuntimeError("DMI framing canary: wrote %#x, read %#x" % (tok, got))
+
+
+def load_blob_logged(fd, blob, log, dst=0x80000000):
+    """loader.load_blob with every received byte logged (hex, per chunk attempt): 0xDB frames
+    mean the bridge was still armed, 'N ...' lines are ROM NAKs, silence means nothing reached
+    the ROM or nothing came back."""
+    loader.drain(fd, 2.0)
+    os.write(fd, struct.pack('<II', dst, len(blob)))
+    for ci in range((len(blob) + 255) // 256):
+        ck = blob[ci * 256:(ci + 1) * 256]
+        x = 0
+        for b in ck:
+            x ^= b
+        for retry in range(8):
+            os.write(fd, bytes([ci & 0xFF]) + ck + bytes([x, 0x55]))
+            buf = b''
+            t0 = time.time()
+            ok = False
+            while time.time() - t0 < 2.5:
+                dd = loader.read_avail(fd, 0.1)
+                if dd:
+                    buf += dd
+                    if b'\x06' in buf:
+                        ok = True
+                        break
+                    if b'\x15' in buf:
+                        break
+            if ci == 0 or not ok:
+                log.write(b"\n[ndmreset] chunk %d try %d rx %d bytes: %s\n"
+                          % (ci, retry, len(buf), buf[:120].hex().encode()))
+                log.flush()
+            if ok:
+                break
+        else:
+            raise RuntimeError('load failed at chunk %d' % ci)
+
+
 def load(fd, payload, log, banner_wait):
     """Wait for the banner, then load. The bridge holds console output back while it is armed,
     so the banner printed right after an ndmreset can be lost: without it, load anyway -- the
@@ -56,7 +103,7 @@ def load(fd, payload, log, banner_wait):
         log.write(b"\n[ndmreset] no banner seen; loading anyway\n")
     t0 = time.time()
     try:
-        loader.load_blob(fd, payload)
+        load_blob_logged(fd, payload, log)
     except Exception as e:                      # noqa: BLE001
         return "load failed (%s)" % (e,)
     log.write(b"\n[ndmreset] loaded in %.1fs\n" % (time.time() - t0)); log.flush()
@@ -80,7 +127,7 @@ def diagnose(d, log):
     out = []
     d.buf = b""
     try:
-        d.arm()
+        arm_checked(d)
         st = d.rd(0x11)
         hart = ("UNAVAILABLE (hart held in reset: the SoC reset never completed)" if st & (1 << 13)
                 else "halted" if st & (1 << 9) else "running" if st & (1 << 11) else "?")
@@ -96,6 +143,14 @@ def diagnose(d, log):
             except Exception as e:              # noqa: BLE001
                 out.append("%s FAILED (%s)" % (name, e))
         d.resume()
+        d.disarm()
+        # Does a console byte reach the ROM?  From the banner loop (step 2) one byte moves it
+        # to the load protocol (step 3); if it does not, the RX path to the ROM is dead.
+        os.write(d.fd, b"\x00")
+        time.sleep(0.2)
+        d.buf = b""
+        arm_checked(d)
+        out.append("after one console byte: foren step %#x" % d.mem_read(0x81FFFF84, 1)[0])
         d.disarm()
     except Exception as e:                      # noqa: BLE001
         out.append("diagnose aborted (%s)" % (e,))
@@ -129,11 +184,17 @@ def main():
     passed = 0
     for i in range(1, args.cycles + 1):
         d.buf = b""
-        d.arm()
-        d.wr(DMCONTROL, 0x3)          # dmactive | ndmreset
-        d.wr(DMCONTROL, 0x1)          # release
-        d.disarm()                    # console pass-through again
-        if args.busy and i < args.cycles:
+        try:
+            arm_checked(d)
+            d.wr(DMCONTROL, 0x3)      # dmactive | ndmreset
+            d.wr(DMCONTROL, 0x1)      # release
+            d.disarm()                # console pass-through again
+            err = None
+        except Exception as e:        # noqa: BLE001
+            err = "reset sequence failed (%s)" % (e,)
+        if err:
+            pass
+        elif args.busy and i < args.cycles:
             # load, let Linux boot for a moment, and reset again next iteration
             err = load(fd, payload, log, 5)
             if not err:

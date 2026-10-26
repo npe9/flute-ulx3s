@@ -160,9 +160,20 @@ class DMI:
                 raise
             # The bridge can drop out of DMI mode under host CPU UART
             # traffic (observed after ~10 ops with the REPL running).
-            # Re-announce the magic and retry the request once; stale
-            # response frames are harmless (0xDB resync in _response).
-            time.sleep(0.05)
+            # Re-announce the magic and retry the request.  Wait out the
+            # bridge's armed-idle timeout first (50M cycles = 2 s at
+            # 25 MHz): MAGIC sent to a bridge that is still armed is
+            # parsed as a request frame plus 2 bytes, and every later
+            # frame (and response) is then misaligned.  A late response
+            # to the timed-out request would also shift every later read
+            # by one, so drop whatever arrived before the retry.
+            sys.stderr.write("dmi: op %r addr %#x timed out; retrying (%d left)\n"
+                             % (chr(op), addr, _reattempts))
+            time.sleep(2.2)
+            self.buf = b""
+            while select.select([self.fd], [], [], 0)[0]:
+                if not os.read(self.fd, 4096):
+                    break
             os.write(self.fd, MAGIC)
             time.sleep(0.05)
             return self.req(op, addr, data, _reattempts - 1)

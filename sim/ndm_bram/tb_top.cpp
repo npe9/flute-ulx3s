@@ -134,6 +134,11 @@ static bool   saw_tick0 = false;
 static int        ndm_total = 0, ndm_done = 0;
 static vluint64_t ndm_delay0 = 1000, ndm_step = 37, ndm_send_at = 0;
 static bool       ndm_sent = false;
+// TB_NDM_AT=<cycle> (TB_ISA / linux_run.py runs): the first reset fires at that cycle while the
+// preloaded program (e.g. Linux booting: I$ and D$ refills, write-backs in flight) runs; after
+// the resets the ROM loads TB_NDM_RELOAD (default sw/hello.bin) and it must run as usual.
+static vluint64_t ndm_at = 0;
+static std::string ndm_reload = "../../sw/hello.bin";
 static size_t     banner_mark = 0, ndm_mark = 0;
 // The bridge's 6-byte responses ([0xDB, status, data x4]) interleave with console output and
 // can split the banner: match console text with them removed (the ROM prints ASCII only).
@@ -172,9 +177,11 @@ static void fail(const char* what) {
     stage = ST_FAIL;
 }
 
+static size_t stage_mark = 0;        // tx_log position at stage entry
 static void new_stage(Stage s) {
     stage = s;
     stage_start = g_cycle;
+    stage_mark = tx_log.size();
     tx_scan = tx_stream.size();    // ignore bytes from before the stage
 }
 
@@ -354,6 +361,8 @@ int main(int argc, char** argv) {
     if (const char* n = getenv("TB_NDM")) ndm_total = atoi(n);
     if (const char* n = getenv("TB_NDM_DELAY0")) ndm_delay0 = strtoull(n, nullptr, 10);
     if (const char* n = getenv("TB_NDM_STEP")) ndm_step = strtoull(n, nullptr, 10);
+    if (const char* n = getenv("TB_NDM_AT")) ndm_at = strtoull(n, nullptr, 10);
+    if (const char* n = getenv("TB_NDM_RELOAD")) ndm_reload = n;
 
     printf("[tb] image: %s\n", image_path);
     if (env_strict) printf("[tb] STRICT_BRAM=%s\n", env_strict);
@@ -459,7 +468,7 @@ int main(int argc, char** argv) {
           case ST_BANNER:
             if (strip_dmi(tx_log.substr(banner_mark)).find("ULX3S Flute SoC") != std::string::npos) {
                 printf("[tb] banner seen at cycle %llu\n", (unsigned long long)g_cycle);
-                if (ndm_done < ndm_total) {
+                if (ndm_done < ndm_total && ! (ndm_at && ndm_done == 0)) {    // TB_NDM_AT: first reset from ST_ISA
                     ndm_send_at = g_cycle + ndm_delay0 + (vluint64_t)ndm_done * ndm_step;
                     ndm_sent = false;
                     new_stage(ST_NDM);
@@ -511,7 +520,11 @@ int main(int argc, char** argv) {
                 break;
             }
             {
-                size_t t = tx_log.find("T12345678", ndm_mark);
+                // The ROM's self-test line "T12345678 9abcdef0".  A reset that lands while the UART
+                // is mid-character (Linux printing) desynchronizes the bench's UART monitor for a
+                // few bytes, so accept either intact half.
+                size_t t = tx_log.find("12345678", ndm_mark);
+                if (t == std::string::npos) t = tx_log.find("9abcdef0", ndm_mark);
                 if (t != std::string::npos) {
                     ndm_done++;
                     printf("[tb] ndmreset %d/%d: ROM rerun at cycle %llu (%llu cycles after the frames)\n",
@@ -580,16 +593,53 @@ int main(int argc, char** argv) {
 
           case ST_READBACK:
             if (deadline(readback_deadline)) { fail("no head/tail readback"); break; }
-            if (tx_log.find(']') != std::string::npos &&
-                tx_log.find('[') != std::string::npos &&
-                tx_log.find(']') > tx_log.find('[')) {
+            if (tx_log.find(']', stage_mark) != std::string::npos &&
+                tx_log.find('[', stage_mark) != std::string::npos &&
+                tx_log.find(']', stage_mark) > tx_log.find('[', stage_mark)) {
                 printf("[tb] load readback seen at cycle %llu\n",
                        (unsigned long long)g_cycle);
+                if (ndm_total) {
+                    // TB_NDM: the readback (8 head + 8 tail words read through the D-side after
+                    // the resets) must match the image exactly; stop here (the ROM's ~24 s
+                    // repair window before the jump is too long to simulate per run)
+                    auto w32 = [](size_t o) { return (uint32_t)image[o] | (uint32_t)image[o + 1] << 8
+                                                   | (uint32_t)image[o + 2] << 16 | (uint32_t)image[o + 3] << 24; };
+                    std::string exp = "[";
+                    char h[16];
+                    for (size_t i = 0; i < 8 && i * 4 < image.size(); i++) {
+                        snprintf(h, sizeof h, "%s%08x", i ? " " : "", w32(i * 4)); exp += h;
+                    }
+                    if (image.size() >= 32) {
+                        exp += " :";
+                        for (size_t i = 0; i < 8; i++) { snprintf(h, sizeof h, " %08x", w32(image.size() - 32 + i * 4)); exp += h; }
+                    }
+                    exp += "]";
+                    if (strip_dmi(tx_log.substr(stage_mark)).find(exp) == std::string::npos) {
+                        printf("[tb] expected readback %s\n", exp.c_str());
+                        fail("readback after ndmreset does not match the image");
+                    } else {
+                        printf("[tb] readback matches the image after %d ndmreset(s)\n", ndm_done);
+                        new_stage(ST_PASS);
+                    }
+                    break;
+                }
                 new_stage(ST_HELLO);
             }
             break;
 
           case ST_ISA:
+            if (ndm_at && ndm_done < ndm_total && g_cycle >= ndm_at) {
+                printf("\n[tb] TB_NDM_AT: ndmreset while the preloaded program runs (cycle %llu); reload %s\n",
+                       (unsigned long long)g_cycle, ndm_reload.c_str());
+                std::ifstream f(ndm_reload, std::ios::binary);
+                if (!f) { fail("cannot open TB_NDM_RELOAD"); break; }
+                image.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+                isa_mode = false;           // after the resets: a normal load + hello check
+                ndm_send_at = g_cycle;
+                ndm_sent = false;
+                new_stage(ST_NDM);
+                break;
+            }
 #if VM_TRACE_VCD
             if (perf_on) perf_sample(top);
 #endif
@@ -630,12 +680,12 @@ int main(int argc, char** argv) {
           case ST_HELLO:
             if (deadline(hello_deadline)) { fail("no hello output after jump"); break; }
             if (!saw_hello_banner &&
-                tx_log.find("Hello from Flute") != std::string::npos) {
+                tx_log.find("Hello from Flute", stage_mark) != std::string::npos) {
                 saw_hello_banner = true;
                 printf("[tb] hello banner at cycle %llu\n", (unsigned long long)g_cycle);
             }
             if (saw_hello_banner &&
-                tx_log.find("tick 00000000") != std::string::npos) {
+                tx_log.find("tick 00000000", stage_mark) != std::string::npos) {
                 saw_tick0 = true;
                 new_stage(ST_PASS);
             }

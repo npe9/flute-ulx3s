@@ -343,12 +343,20 @@ module mkMC_UT (Empty);
       rg_rt <= 3;
       $display ("[mc_ut] reset with %0d raw chunks still to come", rg_mleft);
    endrule
-   rule rl_rt_reset_done (rg_rt == 3);
-      let r <- mc.server_reset.response.get;
+   // the master side is reset one cycle later, as SoC_Top's fabric is (its rl_reset runs in the
+   // cycle the controller takes the reset request)
+   rule rl_rt_mx_reset (rg_rt == 3);
       mx.reset;
       rg_rt <= 4;
    endrule
-   // phase 5: read line 0 back (checked by rl_r against the pattern)
+   // phase 5: read line 0 back (checked by rl_r against the pattern) while the controller is
+   // still draining (before its reset response): the request must wait and be served, not
+   // dropped (the fabric would route the next real response to the dropped request's master)
+   rule rl_rt_reset_done (rg_rt == 6);
+      let r <- mc.server_reset.response.get;
+      $display ("[mc_ut] reset response after the line-0 read was issued");
+      rg_rt <= 5;
+   endrule
    rule rl_rt_read0 (rg_rt == 4);
       mx.i_rd_addr.enq (AXI4_Rd_Addr {arid: 0, araddr: base, arlen: 7, arsize: axsize_8,
                                       arburst: axburst_incr, arlock: 0, arcache: 0, arprot: 0,
@@ -356,7 +364,7 @@ module mkMC_UT (Empty);
       f_rexp.enq (Span {slot: 0, n: 8, id: 0, err: False});
       for (Integer i = 0; i < 8; i = i + 1) pend_rd [i] <= pend_rd [i] + 1;
       rg_out <= rg_out + 1; rg_rd_out <= rg_rd_out + 1;
-      rg_rt <= 5;
+      rg_rt <= 6;
    endrule
 
    rule rl_done (spin_done && ((! rg_rt_mode) || rg_rt == 5));
