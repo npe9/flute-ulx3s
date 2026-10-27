@@ -84,12 +84,21 @@ cost-to-value; items 1-3 are one file each.
 - Validates `t_cas_first = 3` (IOB + input register pipeline) only as far as the model is
   cycle-accurate at the pins; the board remains the final word.
 
-## 8. Board-level timing (gap 7) -- m12 soak DONE; PLL build has no 10% candidate
+## 8. Board-level timing (gap 7) -- m12 soak DONE; PLL: m15p soak PASS (m14 box-launch fix)
 - m12 30-min Linux soak (build/m12/ulx3s_top-m12-s3.bit, md5 e3729c14): tick 1740 at 1774 s,
   0 bad (one tick line interleaved with "crng init done", as on m5).
 - m12 SYS_PLL=1 (32.14 MHz): seeds 33.33 / 35.35 / 34.10 / 31.54 (FAIL) MHz, LUT4 59,186,
   COMB 87%. Best margin 9.99% < rule 7's 10%: not benched. Critical path: D$ rg_addr ->
   rg_lrsc_pa enable (LR/SC reservation compare), 5.1 ns logic / 23.2 ns routing (congestion).
+  Correction: the real sink is stage2_fbox.rg_x CE -- box reqs were issued from fa_enq, so
+  their enables depended on the stage2 advance (D$ hit).
+- m14 (Flute c36092e): deferred box launch (shifter/MBox/XBox/FBox), +1 cycle per box op.
+  ISA 79/79, RISCOF B 32 / K 21 / M 8 vs Sail. m14p seeds 37.51/37.10/37.79/35.40 MHz.
+- m14p board: Linux ran clean ~28 min (1635 ticks, 0 bad) but Linux time ran 1.286x fast:
+  mtime counted system clocks against the 25 MHz DTB timebase.
+- m15 (Flute: mtime Bresenham accumulator under SYS_CLK_HZ): m15p seeds 36.41/35.99/37.57/
+  38.94 MHz (worst 12% margin), LUT4 59,205. Board build/m15p/ulx3s_top-m15p-s4.bit (md5
+  04a0e097): 30-min soak tick 1751, 0 bad, uptime 1775 s in 1779 s wall. Item 8 PLL: PASS.
 - m5 board boot + 30-min soak (first board run of consecutive ACT -> READ).
 - PLL build (`make SYS_PLL=1`, 32.14 MHz) of m5: seeds, boot, soak. Only place the real
   tRCD / CAS margins are exercised. Bitstreams named *.bit; restore the custody bit after.
