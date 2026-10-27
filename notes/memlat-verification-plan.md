@@ -22,7 +22,15 @@ cost-to-value; items 1-3 are one file each.
   the run guards future constants.
 - Pass: 0 mismatches, `[sdram_chk] 0 error(s)` at both clocks. Effort: small.
 
-## 3. Soft reset with traffic in flight (gap 3) -- probable real bug
+## 3. Soft reset with traffic in flight (gap 3) -- FIXED (m12, 2026-10-26)
+- m12 (Flute a440cc7, outer 2af8251): I$ epoch+abandon, MC drain keeps reqs taken during the drain,
+  D$ epoch filter on B/R, two-pass ndmreset in SoC_Top, Boot_ROM/deburster/GPIO/SoC_Info reset with
+  the SoC. Board idle 10/10, busy 10/10 (m9: 1/10); sim/ndm_bram 24/24; J1 strict, ISA 79/79.
+  Merged into linux-isa (084c246).
+- Ported to main/E20 (outer 63449fa, Flute cebade2). E20 needed two extras: Mem_Controller
+  `f_reqs.clear`, and resetting the AXI4_Deburster in front of mem0_controller (unreset, it kept a
+  stale AW, mis-paired the next write, lost a B, and the D$ hung in CACHE_START_REFILL). E20 custody
+  bit fails busy ndmreset at cycle 19/20; the port passes 40/40. All rule-15 gates green.
 - `SoC_Top.fa_reset_start_actions` (debug-module ndmreset, e.g. GDB `monitor reset`) resets
   the core, Mem_Controller and fabric, not Sdram_Controller. A raw read in flight keeps
   returning chunks into the cleared Mem_Controller: later reads get shifted data. The write
