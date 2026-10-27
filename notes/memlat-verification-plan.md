@@ -63,7 +63,12 @@ cost-to-value; items 1-3 are one file each.
   cycles, `wr_out > 0` -> a B within K (K < depth). Assert `owed <= 8`.
 - System level: mc_ut watchdog, Linux boots, board soaks (already running).
 
-## 6. Other masters (gap 1)
+## 6. Other masters (gap 1) -- debug sysbus DONE on the board 2026-10-26 (m12)
+- `test/sysbus_board.py`: with Linux running, 4096-word sysbus read of OpenSBI text vs the
+  payload, same-value word/byte/64 B-block writes, then 16 KiB of distinct-value writes (256
+  autoincrement blocks + 1197 shuffled byte/halfword/word writes) to the padding after OpenSBI
+  text (0x80038000, nomap for Linux), checked against a host model and zeroed again.
+  m12: PASS, 0 mismatches, sberror clear, Linux keeps ticking. Sim variant not done.
 - accel0 (`src/AXI4_GPIO.bsv`) never issues on its master port: nothing to test.
 - Debug-module system bus: on the board, GDB/JTAG reads and writes to SDRAM while Linux runs
   (word, byte, 64 B block), compared with a CPU-side readback. Pass: data matches, Linux keeps
@@ -79,7 +84,12 @@ cost-to-value; items 1-3 are one file each.
 - Validates `t_cas_first = 3` (IOB + input register pipeline) only as far as the model is
   cycle-accurate at the pins; the board remains the final word.
 
-## 8. Board-level timing (gap 7)
+## 8. Board-level timing (gap 7) -- m12 soak DONE; PLL build has no 10% candidate
+- m12 30-min Linux soak (build/m12/ulx3s_top-m12-s3.bit, md5 e3729c14): tick 1740 at 1774 s,
+  0 bad (one tick line interleaved with "crng init done", as on m5).
+- m12 SYS_PLL=1 (32.14 MHz): seeds 33.33 / 35.35 / 34.10 / 31.54 (FAIL) MHz, LUT4 59,186,
+  COMB 87%. Best margin 9.99% < rule 7's 10%: not benched. Critical path: D$ rg_addr ->
+  rg_lrsc_pa enable (LR/SC reservation compare), 5.1 ns logic / 23.2 ns routing (congestion).
 - m5 board boot + 30-min soak (first board run of consecutive ACT -> READ).
 - PLL build (`make SYS_PLL=1`, 32.14 MHz) of m5: seeds, boot, soak. Only place the real
   tRCD / CAS margins are exercised. Bitstreams named *.bit; restore the custody bit after.
