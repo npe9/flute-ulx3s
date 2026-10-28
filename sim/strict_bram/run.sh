@@ -104,12 +104,15 @@ COMMON_FLAGS=(
     --x-initial unique
     --timescale-override "1ns/1ps"
     --assert
-    --coverage --coverage-user
     -Wno-lint -Wno-style
     -Wno-NOTREDOP
     -Wno-STMTDLY
     -I"$ROOT/src"
 )
+# TB_NOCOV=1 (part of the build; use its own BUILD_DIR): no coverage instrumentation, so no
+# hazard-bin gate either -- for runs judged on their UART output (CI cache/AMO tests).  The J1
+# verdict needs the bins: never use it for J1.
+if [[ "${TB_NOCOV:-0}" != "1" ]]; then COMMON_FLAGS+=(--coverage --coverage-user); fi
 # VERILATOR_TRACE=1: build with VCD tracing (then TB_TRACE=<file> TB_TRACE_FROM/TO=<cycle> at run time).
 # Keep VERILATOR_TRACE=1 on EVERY run that uses a traced BUILD_DIR: the flags are part of the
 # verilator build, so a run without it silently rebuilds that dir without tracing.
@@ -126,7 +129,7 @@ if [[ "$LINT_ONLY" == "1" ]]; then
 fi
 
 # ---- build ----------------------------------------------------------
-verilator --cc --exe --build -j "$(sysctl -n hw.ncpu 2>/dev/null || echo 4)" \
+verilator --cc --exe --build -j "$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)" \
     "${COMMON_FLAGS[@]}" \
     -Mdir "$BUILD_DIR" \
     -o Vsv_tb_top \
