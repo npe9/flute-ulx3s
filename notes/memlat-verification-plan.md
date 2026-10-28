@@ -22,7 +22,15 @@ cost-to-value; items 1-3 are one file each.
   the run guards future constants.
 - Pass: 0 mismatches, `[sdram_chk] 0 error(s)` at both clocks. Effort: small.
 
-## 3. Soft reset with traffic in flight (gap 3) -- probable real bug
+## 3. Soft reset with traffic in flight (gap 3) -- FIXED (m12, 2026-10-26)
+- m12 (Flute a440cc7, outer 2af8251): I$ epoch+abandon, MC drain keeps reqs taken during the drain,
+  D$ epoch filter on B/R, two-pass ndmreset in SoC_Top, Boot_ROM/deburster/GPIO/SoC_Info reset with
+  the SoC. Board idle 10/10, busy 10/10 (m9: 1/10); sim/ndm_bram 24/24; J1 strict, ISA 79/79.
+  Merged into linux-isa (084c246).
+- Ported to main/E20 (outer 63449fa, Flute cebade2). E20 needed two extras: Mem_Controller
+  `f_reqs.clear`, and resetting the AXI4_Deburster in front of mem0_controller (unreset, it kept a
+  stale AW, mis-paired the next write, lost a B, and the D$ hung in CACHE_START_REFILL). E20 custody
+  bit fails busy ndmreset at cycle 19/20; the port passes 40/40. All rule-15 gates green.
 - `SoC_Top.fa_reset_start_actions` (debug-module ndmreset, e.g. GDB `monitor reset`) resets
   the core, Mem_Controller and fabric, not Sdram_Controller. A raw read in flight keeps
   returning chunks into the cleared Mem_Controller: later reads get shifted data. The write
@@ -55,7 +63,12 @@ cost-to-value; items 1-3 are one file each.
   cycles, `wr_out > 0` -> a B within K (K < depth). Assert `owed <= 8`.
 - System level: mc_ut watchdog, Linux boots, board soaks (already running).
 
-## 6. Other masters (gap 1)
+## 6. Other masters (gap 1) -- debug sysbus DONE on the board 2026-10-26 (m12)
+- `test/sysbus_board.py`: with Linux running, 4096-word sysbus read of OpenSBI text vs the
+  payload, same-value word/byte/64 B-block writes, then 16 KiB of distinct-value writes (256
+  autoincrement blocks + 1197 shuffled byte/halfword/word writes) to the padding after OpenSBI
+  text (0x80038000, nomap for Linux), checked against a host model and zeroed again.
+  m12: PASS, 0 mismatches, sberror clear, Linux keeps ticking. Sim variant not done.
 - accel0 (`src/AXI4_GPIO.bsv`) never issues on its master port: nothing to test.
 - Debug-module system bus: on the board, GDB/JTAG reads and writes to SDRAM while Linux runs
   (word, byte, 64 B block), compared with a CPU-side readback. Pass: data matches, Linux keeps
@@ -71,7 +84,29 @@ cost-to-value; items 1-3 are one file each.
 - Validates `t_cas_first = 3` (IOB + input register pipeline) only as far as the model is
   cycle-accurate at the pins; the board remains the final word.
 
-## 8. Board-level timing (gap 7)
+## 8. Board-level timing (gap 7) -- m12 soak DONE; PLL: m15p soak PASS (m14 box-launch fix)
+- m12 30-min Linux soak (build/m12/ulx3s_top-m12-s3.bit, md5 e3729c14): tick 1740 at 1774 s,
+  0 bad (one tick line interleaved with "crng init done", as on m5).
+- m12 SYS_PLL=1 (32.14 MHz): seeds 33.33 / 35.35 / 34.10 / 31.54 (FAIL) MHz, LUT4 59,186,
+  COMB 87%. Best margin 9.99% < rule 7's 10%: not benched. Critical path: D$ rg_addr ->
+  rg_lrsc_pa enable (LR/SC reservation compare), 5.1 ns logic / 23.2 ns routing (congestion).
+  Correction: the real sink is stage2_fbox.rg_x CE -- box reqs were issued from fa_enq, so
+  their enables depended on the stage2 advance (D$ hit).
+- m14 (Flute c36092e): deferred box launch (shifter/MBox/XBox/FBox), +1 cycle per box op.
+  ISA 79/79, RISCOF B 32 / K 21 / M 8 vs Sail. m14p seeds 37.51/37.10/37.79/35.40 MHz.
+- m14p board: Linux ran clean ~28 min (1635 ticks, 0 bad) but Linux time ran 1.286x fast:
+  mtime counted system clocks against the 25 MHz DTB timebase.
+- m15 (Flute: mtime Bresenham accumulator under SYS_CLK_HZ): m15p seeds 36.41/35.99/37.57/
+  38.94 MHz (worst 12% margin), LUT4 59,205. Board build/m15p/ulx3s_top-m15p-s4.bit (md5
+  04a0e097): 30-min soak tick 1751, 0 bad, uptime 1775 s in 1779 s wall. Item 8 PLL: PASS.
+- m15 gates (2026-10-28): riscv-formal smoke 10/10 PASS (no FP; covers deferred SH/M/X
+  launch). F2 8 seeds identical on non-PLL build/m15 (the strict sim's UART monitor assumes
+  25 MHz, so PLL netlists garble the banner -- run sims on the non-PLL build). Sim cache /
+  AMO print T..D (run.sh FAIL is the expected missing-hello scoreboard check, same as E20).
+  Board m15p: cache PASS, AMO PASS, bench 69/1/2 at 32.14 MHz (perf cycles rate ok); the one
+  FAIL is `Reg misa` hard-coded to main's 0x40101105 vs linux-isa 0x4014112f (ACDFIMSU),
+  i.e. the suite needs a per-config misa. A first bench run showed a second FAIL that was
+  not captured and did not recur. Custody restored (e8521522).
 - m5 board boot + 30-min soak (first board run of consecutive ACT -> READ).
 - PLL build (`make SYS_PLL=1`, 32.14 MHz) of m5: seeds, boot, soak. Only place the real
   tRCD / CAS margins are exercised. Bitstreams named *.bit; restore the custody bit after.
