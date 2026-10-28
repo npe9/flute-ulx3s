@@ -163,6 +163,12 @@ module mkSoC_Boot_Tb (Empty);
       m_a_d1   <= cur_a;
       m_ba_d1  <= cur_ba;
 
+   endrule
+
+   // DQ into the DUT from the model's register, in its own rule: the SDRAM controller may need its
+   // dq_in method scheduled apart from the command/address outputs rl_model reads (the linux-isa
+   // memlat controller does: G0004 when both were in rl_model).  Same timing: m_dq is a register.
+   rule rl_model_dq;
       dut.sdram_dq_in (m_dq);
    endrule
 
