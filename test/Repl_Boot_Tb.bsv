@@ -24,6 +24,7 @@ package Repl_Boot_Tb;
 import Vector   :: *;
 import RegFile  :: *;
 import FIFOF    :: *;
+import ConfigReg :: *;
 
 import ULX3S_Top :: *;
 
@@ -267,7 +268,7 @@ module mkRepl_Boot_Tb (Empty);
    Reg #(Bit #(9))  m_col      <- mkReg (0);
    Reg #(Bit #(2))  m_wr_bank  <- mkReg (0);
    Reg #(Bit #(9))  m_wr_col   <- mkReg (0);
-   Reg #(Bit #(16)) m_dq       <- mkReg (0);
+   Reg #(Bit #(16)) m_dq       <- mkConfigReg (0);   // ConfigReg: rl_model_dq reads it after rl_model writes it
 
    function ModelAddr m_addr ();
       return { m_bank, m_open_row [m_bank], m_col } + extend (m_beat);
