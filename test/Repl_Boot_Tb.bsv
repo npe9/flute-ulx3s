@@ -24,6 +24,7 @@ package Repl_Boot_Tb;
 import Vector   :: *;
 import RegFile  :: *;
 import FIFOF    :: *;
+import ConfigReg :: *;
 
 import ULX3S_Top :: *;
 
@@ -267,11 +268,24 @@ module mkRepl_Boot_Tb (Empty);
    Reg #(Bit #(9))  m_col      <- mkReg (0);
    Reg #(Bit #(2))  m_wr_bank  <- mkReg (0);
    Reg #(Bit #(9))  m_wr_col   <- mkReg (0);
-   Reg #(Bit #(16)) m_dq       <- mkReg (0);
+   Reg #(Bit #(16)) m_dq       <- mkConfigReg (0);   // ConfigReg: rl_model_dq reads it after rl_model writes it
 
    function ModelAddr m_addr ();
       return { m_bank, m_open_row [m_bank], m_col } + extend (m_beat);
    endfunction
+
+`ifdef MDL_WATCH
+   // byte offset (from 0x80000000) of a model address: inverse of the preload mapping
+   function Bit #(32) m_byte (ModelAddr ma);
+      Bit #(24) a = zeroExtend (ma);
+      Bit #(24) h = (a & 24'h001F) | ((a & 24'h01E0) << 2) | ((a >> 17) & 24'h0060) | ((a & 24'h3F_FE00) << 2);
+      return zeroExtend (h) << 1;
+   endfunction
+   function Bool m_watch (ModelAddr ma);
+      Bit #(32) b = m_byte (ma);
+      return (b >= `MDL_WATCH_LO) && (b < `MDL_WATCH_HI);
+   endfunction
+`endif
 
    rule rl_model;
       let cur_cmd = { dut.sdram_cs_n, dut.sdram_ras_n, dut.sdram_cas_n, dut.sdram_we_n };
@@ -292,6 +306,10 @@ module mkRepl_Boot_Tb (Empty);
       else if (m_reading) begin
          n_dq      = model_mem.sub (m_addr ());
          n_drive   = True;
+`ifdef MDL_WATCH
+         if (m_watch (m_addr ()))
+            $display ("[mdl] cyc %0d RD %h <- %h (beat %0d)", rg_cycle, m_byte (m_addr ()), n_dq, m_beat);
+`endif
 `ifdef MDL_PROBES
          // granule 0 only (addr < 16): model addrs 0-15 exist only for
          // row 0/bank 0, i.e. blob byte offsets 0-31 -- cheap, exact
@@ -308,11 +326,11 @@ module mkRepl_Boot_Tb (Empty);
 
       Bool wr_new = (cur_cmd == m_cmd_write);
 
-      // Blob preload owns the model write port until done.  The
-      // controller interleaves bank bits into the address
-      // (bank = granule[6:5] = byte offset [10:9]), so the model
-      // address is the halfword index with bit fields rotated:
-      //   model_addr = {idx[10:9] (bank), idx[23:11] (row), idx[8:0] (col)}
+      // Blob preload owns the model write port until done.  The memlat
+      // controller (src/Sdram_Controller.bsv) puts each 64-byte line in one
+      // bank and row: line l = byte >> 6, bank = l[1:0], row = l[18:6],
+      // col = {l[5:2], burst, beat}.  In halfword index terms:
+      //   model_addr = {idx[6:5] (bank), idx[23:11] (row), idx[10:7], idx[4:0] (col)}
       // After the blob, keep writing ZEROS to the end of the model:
       // Bluesim's RegFile malloc is NOT zeroed, so never-written SDRAM
       // reads as heap garbage (observed 0xaaaaaaaa) that varies RUN TO
@@ -320,9 +338,10 @@ module mkRepl_Boot_Tb (Empty);
       // nondeterministic against it.  Zeroing once makes sim boots
       // reproducible (and matches a freshly-zeroed model).
       if (pl_opened && ! pl_done) begin
-         Bit #(32) p_addr = ((pl_idx & 32'h0000_0600) << 13)
+         Bit #(32) p_addr = ((pl_idx & 32'h0000_0060) << 17)
                           | ((pl_idx >> 2) & 32'h003F_FE00)
-                          | (pl_idx & 32'h0000_01FF);
+                          | ((pl_idx >> 2) & 32'h0000_01E0)
+                          | (pl_idx & 32'h0000_001F);
          Bit #(16) p_data = (pl_idx < pl_total) ? c_blob_half (pl_idx) : 16'h0;
          model_mem.upd (truncate (p_addr), p_data);
          if (pl_idx [19:0] == 0)
@@ -343,6 +362,10 @@ module mkRepl_Boot_Tb (Empty);
             Bit #(16) merged = zeroExtend ((cur_dqm [1] == 1'b1) ? d_old [15:8] : d_new [15:8]) << 8
                              | zeroExtend ((cur_dqm [0] == 1'b1) ? d_old [7:0]  : d_new [7:0]);
             model_mem.upd (w_addr, merged);
+`ifdef MDL_WATCH
+            if (m_watch (w_addr))
+               $display ("[mdl] cyc %0d WR %h <- %h (old %h dqm %b beat %0d new %0d)", rg_cycle, m_byte (w_addr), merged, d_old, cur_dqm, w_beat, wr_new);
+`endif
 `ifdef MDL_PROBES
             if (w_addr < 16)
                $display ("%0t MDLWR beat=%0d addr=%0h dq=%0h dqm=%0b",
@@ -361,20 +384,26 @@ module mkRepl_Boot_Tb (Empty);
             n_beat = m_beat + 1;
       end
 
-      if (m_cmd_d1 == m_cmd_act) begin
-         m_open_row [m_ba_d1] <= m_a_d1 [12:0];
+      // ACTIVATE takes effect at once: a WRITE may follow it in the next cycle (tRCD = 1 cycle)
+      // and addresses its first beat in that same cycle, from cur_ba/cur_a and the open row.
+      if (cur_cmd == m_cmd_act) begin
+         m_open_row [cur_ba] <= cur_a [12:0];
 `ifdef MDL_PROBES
-         $display ("%0t MDLCMd ACT bank=%0h row=%0h", $time, m_ba_d1, m_a_d1 [12:0]);
+         $display ("%0t MDLCMd ACT bank=%0h row=%0h", $time, cur_ba, cur_a [12:0]);
 `endif
       end
 
-      else if (m_cmd_d1 == m_cmd_read) begin
+      if (m_cmd_d1 == m_cmd_read) begin
          m_bank  <= m_ba_d1;
          m_col   <= m_a_d1 [8:0];
          // Real W9825G6KH: first beat driven 2 cycles after the READ cmd
          // is clocked in, i.e. during this decode cycle; the controller
          // (registered cmd, t_cas_first=3) samples it at end of cycle.
          n_dq      = model_mem.sub ({ m_ba_d1, m_open_row [m_ba_d1], m_a_d1 [8:0] });
+`ifdef MDL_WATCH
+         if (m_watch ({ m_ba_d1, m_open_row [m_ba_d1], m_a_d1 [8:0] }))
+            $display ("[mdl] cyc %0d RD %h <- %h (beat 0)", rg_cycle, m_byte ({ m_ba_d1, m_open_row [m_ba_d1], m_a_d1 [8:0] }), n_dq);
+`endif
          n_drive   = True;
          n_reading = True;
          n_beat    = 1;

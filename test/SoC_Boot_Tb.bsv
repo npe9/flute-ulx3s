@@ -21,6 +21,7 @@ package SoC_Boot_Tb;
 import Vector   :: *;
 import RegFile  :: *;
 import FIFOF    :: *;
+import ConfigReg :: *;
 
 import ULX3S_Top :: *;
 
@@ -73,7 +74,7 @@ module mkSoC_Boot_Tb (Empty);
    Reg #(Bit #(9))  m_col      <- mkReg (0);
    Reg #(Bit #(2))  m_wr_bank  <- mkReg (0);
    Reg #(Bit #(9))  m_wr_col   <- mkReg (0);
-   Reg #(Bit #(16)) m_dq       <- mkReg (0);
+   Reg #(Bit #(16)) m_dq       <- mkConfigReg (0);   // ConfigReg: rl_model_dq reads it after rl_model writes it
 
    function ModelAddr m_addr ();
       return { m_bank, m_open_row [m_bank], m_col } + extend (m_beat);
@@ -136,10 +137,12 @@ module mkSoC_Boot_Tb (Empty);
             n_beat = m_beat + 1;
       end
 
-      if (m_cmd_d1 == m_cmd_act)
-         m_open_row [m_ba_d1] <= m_a_d1 [12:0];
+      // ACTIVATE takes effect at once: a WRITE may follow it in the next cycle (tRCD = 1 cycle)
+      // and addresses its first beat in that same cycle, from cur_ba/cur_a and the open row.
+      if (cur_cmd == m_cmd_act)
+         m_open_row [cur_ba] <= cur_a [12:0];
 
-      else if (m_cmd_d1 == m_cmd_read) begin
+      if (m_cmd_d1 == m_cmd_read) begin
          m_bank  <= m_ba_d1;
          m_col   <= m_a_d1 [8:0];
          // Real W9825G6KH: first beat driven 2 cycles after the READ cmd

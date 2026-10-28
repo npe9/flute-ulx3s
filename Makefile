@@ -95,7 +95,7 @@ endif
 # BRAM_HAZARD_ASSERT enables the sim-only BRAM access-discipline checks in
 # MMU_Cache.bsv (port A write-only / port B read-only / no cross-port
 # same-address).  Sim-only: synthesis builds use $(DEFINES), not this.
-SIM_DEFINES := $(subst -D JTAG_TAP,,$(DEFINES)) -D BRAM_HAZARD_ASSERT
+SIM_DEFINES := $(subst -D JTAG_TAP,,$(DEFINES)) -D BRAM_HAZARD_ASSERT -D BSIM_TRNG
 
 BSC_FLAGS := -keep-fires -aggressive-conditions -no-warn-action-shadowing -show-schedule \
              -no-show-timestamps -suppress-warnings G0020 \
