@@ -137,7 +137,7 @@ jobs:
     needs: [setup, verilog]
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
-    timeout-minutes: 180
+    timeout-minutes: 340   # nextpnr: 2h18m on the GitHub runner (main, 2026-10-28)
     container:
       image: ${{ needs.setup.outputs.image }}
       credentials: { username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}" }
