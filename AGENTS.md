@@ -400,6 +400,14 @@ Sources checked (bsc install + Yosys 0.51):
   REVOKED — pure stock also gets repl_responded=0 (prompt-detector
   artifact of the bit-rate-mismatched decoder). J1/hw suite are the
   only functional gates; DUT-internal Bluesim probes remain valid.
+  UPDATE 2026-10-28 (branch ci): the TB causes are fixed -- both TBs
+  now clock 25 MHz / 40 cycles per bit, SoC_Boot_Tb's chunk XOR no
+  longer NAKs every chunk, and the SDRAM model opens a row on the
+  ACTIVATE cycle (it was a cycle late: beat 0 of a WRITE right after
+  ACT went to the old row).  `make sim-gate` / ci/bluesim_gate.sh
+  decodes "Hello from Flute" and the REPL's "1+1;" -> "=2" (prompt at
+  ~89M cycles).  Still Bluesim: the BRAM model stays idealized, so J1 and
+  the hw suite remain the functional gates of record.
   New binding cone: stage1 output fn/bypass -> GPR regfile (28.2 ns).
   Committed: Flute b88680d, wrapper 6b2de18. Details:
   build/timing-exp/rld-PLAN.md.
@@ -483,6 +491,8 @@ Sources checked (bsc install + Yosys 0.51):
    (25 MHz/115200). Its "TX: %c" chars are garbage for ANY design,
    healthy or not — never judge boot output by them. J1's C++ tb is the
    TX-functional gate of record (decoded step7's banner at cycle 20542).
+   FIXED 2026-10-28 (branch ci): both Bluesim TBs decode at 40 cycles
+   per bit (25 MHz, the ROM's 625 kbaud); their TX text is now valid.
 6. The Bluesim boot tb (`test/SoC_Boot_Tb.bsv`) spoke a STALE loader
    protocol (raw header+payload streaming) until Track D0 (2026-10-10)
    rewrote it to the CHUNKED protocol the ROM actually speaks (seq +

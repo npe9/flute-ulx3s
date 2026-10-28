@@ -29,9 +29,18 @@ same flows on every push so local changes cannot silently break the system or th
   -- the cause of the revoked REPL-TB verdict in AGENTS.md); `SoC_Boot_Tb`'s chunk XOR was
   accumulated on every cycle of the stop bit (always 0, every chunk NAKed); unconditional
   per-beat model logging (GBs per run) now behind `TB_PROBES`.
-- Remaining: measure Bluesim time-to-prompt for the REPL and time-to-"tick 2" for Linux and set
-  caps; TempleOS built from source in CI (holyc-riscv + `make -C templeos repl`); first green run
-  on GitHub from a fresh `git clone --recursive`; port to `linux-isa`.
+- More TB fixes for the `linux-isa` (memlat) controller: `sdram_dq_in` in its own rule with
+  `m_dq` a ConfigReg (schedule); the SDRAM model opens a row on the ACTIVATE cycle (beat 0 of a
+  WRITE right after ACT went to the previous row and overwrote OpenSBI's relocation table); the
+  REPL TB's preload uses the controller's line-in-one-bank mapping; `BSIM_TRNG` swaps the
+  imported ring-oscillator Verilog for a BSV LFSR (Bluesim cannot instantiate Verilog).
+- Measured (M-series Mac): hello 70M cycles ~8 min; REPL prompt ~89M cycles, gate ~22 min;
+  Linux to `/init` "tick 2" 139M cycles ~18 min (16M of them zero-filling the SDRAM model);
+  strict J1 38 min (hello banner at 52.19M cycles, coverage on). GitHub's 4-core runner is
+  ~5x slower: J1 needs ~3 h, so strict tests run as a j1/cache/amo matrix, cache/AMO without
+  coverage (`TB_NOCOV=1`; their verdict is the UART trace, J1's includes the hazard bins).
+- Status: local gates pass on `ci` (Bluesim hello + REPL, J1) and `ci-linux` (Bluesim Linux);
+  GitHub runs in progress. Then: merge `ci` -> `main`, `ci-linux` -> `linux-isa`.
 
 ## 3. Virtual ULX3S: a BSV board simulator for users without hardware -- planned
 
