@@ -230,7 +230,7 @@ jobs:
           SIM_BLOB=linux-sw/out-fp/fw_payload.bin SIM_PASS_STR="tick 2" SIM_MAX_CYCLES=300000000 \
             make ${{ needs.setup.outputs.makeflags }} SIM_REPL_PROBES= sim-repl > build/ci/bluesim-linux.log 2>&1 || true
           grep -a "\[tb\] PASS" build/ci/bluesim-linux.log
-          grep -a -q "fp ok" build/ci/bluesim-linux.log
+          ci/console_text.py build/ci/bluesim-linux.log | grep -a "tick 1" | grep -q "fp ok"
       - if: always()
         uses: actions/upload-artifact@v4
         with:
