@@ -4,3 +4,4 @@
 [submodule "templeos/tos"]
 	path = templeos/tos
 	url = https://github.com/npe9/templeos-cursor-riscv.git
+	branch = ulx3s-repl

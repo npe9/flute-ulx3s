@@ -40,7 +40,7 @@ Integer cycles_per_bit = clk_hz / baud;    // 40 at 25 MHz
 
 Integer max_cycles  = 600_000_000;    // global cap (24 s at 25 MHz)
 Integer quiet_max   = 60_000_000;     // console silence => hang (4.8 s)
-Integer wprompt_cap = 60_000_000;      // thin seed: boot ~15-25M incl banner
+Integer wprompt_cap = 200_000_000;     // REPL reaches its prompt ~72M cycles after the jump (2026-10-28)
 Integer watch_cap   = 100_000_000;     // eval is mul-heavy I64 emulation
 Integer dmi_timeout = 5_000_000;      // per-request response timeout
 Integer preload_end = 16777216;       // zero-fill the whole 24-bit model

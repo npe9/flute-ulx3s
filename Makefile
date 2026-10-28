@@ -23,11 +23,12 @@ SEED    ?= 3
 RISCV_PREFIX ?= riscv64-unknown-elf-
 
 # BSC primitive Verilog library (FIFO2, RegFile, ...), excluding
-# file-test harnesses and modules yosys cannot parse (Load BRAMs use
+# file-test harnesses and modules yosys cannot parse (ConstrainedRandom is sim-only; newer yosys
+# rejects it.  Load BRAMs use
 # $readmemh with empty names; InoutConnect/Probe* use SV interfaces).
 BSC_VERILOG_LIB := $(abspath $(dir $(realpath $(BSC)))../lib/Verilog)
 BSC_VERILOG_FILES := $(foreach f,$(wildcard $(BSC_VERILOG_LIB)/*.v),\
-	$(if $(findstring Load,$(notdir $f)),,$(if $(findstring InoutConnect,$(notdir $f)),,$(if $(findstring Probe,$(notdir $f)),,$(if $(filter main.v,$(notdir $f)),,$f)))))
+	$(if $(findstring Load,$(notdir $f)),,$(if $(findstring InoutConnect,$(notdir $f)),,$(if $(findstring Probe,$(notdir $f)),,$(if $(filter main.v ConstrainedRandom.v,$(notdir $f)),,$f)))))
 
 BUILD := build
 BDIR  := $(BUILD)/bsc
