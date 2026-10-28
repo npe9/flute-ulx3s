@@ -1,5 +1,7 @@
 # ULX3S Bluespec Flute SoC
 
+[![ci](https://github.com/npe9/flute-ulx3s/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/npe9/flute-ulx3s/actions/workflows/ci.yml)
+
 This project brings up [Bluespec Flute](https://github.com/Bluespec/Flute) RV32IMAC on the [Radiona ULX3S-85F](https://ulx3s.github.io/) ECP5 board.
 
 Current status (`linux-isa` branch, 2026-10-28):
@@ -48,18 +50,31 @@ RISC-V bare-metal and Linux GCC):
 ```bash
 git clone --recursive https://github.com/npe9/flute-ulx3s.git && cd flute-ulx3s
 docker build --platform linux/amd64 -t flute-ci ci/
-docker run --rm -it -v "$PWD":/work flute-ci make sim-gate      # Bluesim: hello + TempleOS REPL
+docker run --rm -it -v "$PWD":/work -w /work flute-ci ci/bluesim_gate.sh   # Bluesim: hello + TempleOS REPL
 ```
 
 Without Docker, put `bsc`, `verilator`, `yosys`, `nextpnr-ecp5`, `ecppack` and
 `riscv64-unknown-elf-gcc` on PATH (or set `BSC`, `NEXTPNR`, `ECPPACK`, `RISCV_PREFIX`).
 GitHub Actions (`.github/workflows/ci.yml`) runs the same image on every push: Verilog build,
 Bluesim boot (hello + TempleOS REPL), the strict Verilator J1 + cache/AMO gates, and the
-bitstream at the 25 MHz constraint.
+bitstream at the 25 MHz constraint. On the `linux-isa` branch it also builds OpenSBI + Linux from
+source and boots them to user space in Verilator and in Bluesim.
 
+### No board? Simulate it
+
+| What | Command | Cycles | Time (M-series Mac / GitHub runner) |
+|---|---|---|---|
+| Boot ROM loads hello over the UART | `make sim-boot` | 70M | 8 min / 40 min |
+| TempleOS HolyC REPL, `1+1;` -> `=2` | `ci/bluesim_gate.sh` (both sims, TempleOS built from source) | ~89M to the prompt | 22 min / 1h50m |
+| Strict-BRAM Verilator boot (J1) | `sim/strict_bram/run.sh --strict=error` | 52M | 38 min / 2h50m |
+| Linux to `/init` (`linux-isa`) | `SIM_BLOB=linux-sw/out-fp/fw_payload.bin SIM_PASS_STR="tick 2" make FP=1 FPU_TRIM=1 sim-repl` | 139M | 18 min / 1h49m |
+
+`SIM_BLOB` (any image to preload at 0x80000000), `SIM_PASS_STR` (stop when the UART prints it)
+and `SIM_MAX_CYCLES` turn `make sim-repl` into a general console runner; `ci/console_text.py`
+prints the decoded UART text of its log. Bluesim's BRAM model is idealized (see AGENTS.md), so
+the strict Verilator harness stays the functional gate of record.
 
 ```bash
-export PATH="$HOME/src/bsc/inst/bin:$PATH"
 make bitstream   # BSV -> Verilog -> Yosys -> nextpnr -> bitstream
 make sw          # build example RISC-V programs
 ```
