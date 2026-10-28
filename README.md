@@ -2,13 +2,21 @@
 
 This project brings up [Bluespec Flute](https://github.com/Bluespec/Flute) RV32IMAC on the [Radiona ULX3S-85F](https://ulx3s.github.io/) ECP5 board.
 
-Current status:
-- 12.5 MHz system clock derived from the 25 MHz on-board oscillator.
-- FTDI UART at 115200 baud works without an external USB-UART adapter.
-- Boot loader in on-chip BRAM prints a banner and loads a kernel into SDRAM over UART.
-- 8 on-board LEDs show boot / SDRAM / load milestones.
-- SDRAM read/write path works: `hello.bin` runs from SDRAM and the 28 MB memtest passes over UART.
-- TempleOS HolyC REPL AOT image boots to the `>` prompt and prints a system report; expression evaluation still needs RV64 or an RV32 JIT port.
+Current status (`linux-isa` branch, 2026-10-28):
+- ISA: RV32IMAFDC + Zicsr/Zifencei, Zba/Zbb/Zbc/Zbs, Zkn/Zkr/Zkt; M, S and U privilege; Sv32
+  with an 8-entry I-TLB and a D-side TLB; PMP (8 entries, 4 KiB grain). Every extension is
+  checked against Sail (riscv-formal checks, RISCOF, Sail-generated test cases).
+- Boots OpenSBI 1.9 + Linux 6.12 to user space on the board, with an FPU-checking `/init`.
+- Clock: the Linux bitstream runs at 32.142857 MHz (`make FP=1 FPU_TRIM=1 SYS_PLL=1`):
+  post-route 35.99-38.94 MHz over 4 seeds, 59.2K LUT4 of 83.6K. mtime ticks at 25 MHz to
+  match the device tree timebase.
+- Memory path: streaming SDRAM requests, I-cache early restart, and the `ndmreset` fixes
+  (epoch-tagged AXI IDs, memory-controller drain, two-pass SoC reset).
+- FTDI UART at 625000 baud; the boot loader in on-chip ROM loads images into SDRAM with a
+  chunked, checksummed protocol. The TempleOS HolyC REPL and the bare-metal tests still run.
+- Every change ships only after the verification gates below.
+
+`main` carries the M/U-mode RV32IMAC base (E20, 25 MHz). This branch is not merged into main.
 
 Planned peripherals (after UART/SDRAM bring-up):
 - HDMI via the GPDI connector.
@@ -22,9 +30,9 @@ Planned peripherals (after UART/SDRAM bring-up):
    ```bash
    ls /dev/cu.usbserial-*
    ```
-3. Open a terminal at 115200 baud, for example:
+3. Open a terminal at 625000 baud, for example:
    ```bash
-   picocom -b 115200 /dev/cu.usbserial-XXXX
+   picocom -b 625000 /dev/cu.usbserial-XXXX
    ```
    The bootloader banner is:
    ```
@@ -40,6 +48,14 @@ make sw          # build example RISC-V programs
 ```
 
 The default `make` target builds both the bitstream and the example software.
+
+`make SYS_PLL=1` builds for the 32.142857 MHz PLL clock. bsc -u does not notice -D changes,
+so switch with a clean bsc build (`rm -rf build/bsc build/verilog/mkULX3S_Top.v`).
+`FP=1` adds F/D; `FPU_TRIM=1` uses the area-trimmed F/D unit (`Flute/src_Core/CPU/FPU_Trim.bsv`),
+which is what fits on the 85F. Use a separate `BUILD=` directory per flag set.
+
+Promoted bitstreams are kept under `bits/` (`openFPGALoader` needs the `.bit` extension in
+the file name).
 
 ## Program and run
 
@@ -176,7 +192,7 @@ slaves are not yet captured.
 #### Interface conformance suite
 
 `python3 scripts/hw_test_suite.py` programs the FPGA, loads the REPL, and
-exercises every interface surface end to end (65 checks, ~8 min):
+exercises every interface surface end to end (72 checks, ~8 min):
 eval core (arithmetic/Print/globals/functions/asm), observability
 (Sys/Uptime/MemRep/IrqRep/DevRep/Cnts/DMesg/Regs/Reg/MemMap/MemMapDrv/
 Man/Sections/Dir/Pwd/help/Tty/VtList/LogCount/CRLF discipline),
@@ -184,7 +200,7 @@ trap recovery (`Fault;`, bad accesses, eval-after-fault), the
 self-describing SoC block and device ROM, the bus error monitor
 (clear → fault → captured address/count/rw), and the RISC-V debug module
 (system-bus reads/writes, SDRAM poke/readback, GPIO LED write/read via
-DMI, halt/resume + dpc). Last run: **65 PASS, 0 FAIL, 2 WARN** — the WARNs
+DMI, halt/resume + dpc), plus performance counters. Last run on E20: **70 PASS, 0 FAIL, 2 WARN** — the WARNs
 are the documented I64-pair hi-half limitation (`Print("%d", expr)` and
 `for`-loop `%d` print 64-bit pair values with garbage hi halves; the
 32-bit lo halves are correct). Notes: `Funs*` are upstream-partial
@@ -192,6 +208,7 @@ are the documented I64-pair hi-half limitation (`Print("%d", expr)` and
 discovery goes through the REPL's `Reg("…")`; and the REPL's `$HC_DUMP`
 framing is fs/9P-backed — it stalls retrying without a 9P host, so the
 suite verifies registers over the DMI system bus instead.
+For a PLL bitstream set `EXPECT_HZ=32142857` (SoC Info clock and perf-counter rate checks).
 
 #### Debug/verification roadmap (staged)
 
@@ -346,6 +363,51 @@ Next steps:
 - `ulx3s_mem.hc` + `ulx3s_memmap.hc`: heap base `0x80200000 → 0x80500000`
   (was inside the AOT image; the first MAlloc stomped code the eval needed).
 
+## Running Linux
+
+The kernel, OpenSBI and `/init` are built in Docker from `linux-sw/` (see `linux-sw/README.md`;
+`./build-fp.sh` for the F/D image). Then:
+
+```bash
+make FP=1 FPU_TRIM=1 SYS_PLL=1 BUILD=build/lx bitstream
+openFPGALoader -b ulx3s -m build/lx/ulx3s_top.bit      # program first
+python3 scripts/loader.py <linux-sw>/out-fp/fw_payload.bin -t 0
+```
+
+The console prints the OpenSBI banner, the kernel log, and then
+`tick N  uptime U s  fp ok` once a second. In simulation:
+`sim/linux_bram/linux_run.py <fw_payload.bin>` (passes at "tick 2").
+
+## Verification gates
+
+A change is promoted only when all of these pass (AGENTS.md has the rules; timing closure
+comes from architecture, with at least 10% margin before benching):
+
+- **J1 strict sim** — `sim/strict_bram/run.sh --strict=error`: Verilator replay of the boot
+  scenario on `build/verilog_all.v` with a strict ECP5 DP16KD BRAM model (lost reads and
+  cross-port hazards that Bluesim cannot see), SDRAM model + timing checker, UART scoreboard.
+  Compare the hello-banner cycle count against the previous netlist, not just PASS.
+- **F2 X-sweep** — `sim/strict_bram/run_sweep.sh 8`: 8 Verilator seeds with randomized
+  uninitialized state; output must be byte-identical.
+- **Cache / AMO tests** — `test/cache_test.S`, `test/amo_test.S` in the strict sim
+  (`TB_TX_TRACE=1`, pass = `T` ... `D`) and on the board (`test/run_cache_test.py`).
+- **riscv-formal** — `formal/run.sh`: 10 smoke checks on mkCPU with RVFI (see
+  `formal/README.md`); never run two at once against one riscv-formal checkout.
+- **ndmreset** — `sim/ndm_bram` in simulation and `test/ndmreset_board.py` on the board,
+  idle and busy.
+- **Board bench** — `scripts/hw_test_suite.py`; on this branch use
+  `EXPECT_HZ=32142857 EXPECT_MISA=4014112f` (70/0/2 expected on the F/D PLL build).
+- **ISA tests** — `sim/isa_bram/isa_run.py`: riscv-tests (Flute and Sail repos) and the
+  generated PMP, B/K and F/D tests in the strict harness.
+- **RISCOF** — `compliance/run.sh` against the Sail C model.
+- **Formal ISA coverage** — `formal/run.sh` with the S-mode and F/D CSR configs
+  (`formal/csrs_msu*.cfg`) and the Sail-derived riscv-formal checks; the AXI4 FVIP harness
+  for the memory controller in `formal/axi4_fvip/`.
+- **Linux** — simulated boot (`sim/linux_bram`), a 30-minute board soak, and
+  `test/sysbus_board.py` (debug-module system bus traffic while Linux runs).
+- Unit harnesses: `sim/mc_ut` (memory controller) and `sim/sdram_ut` (SDRAM controller, with
+  `VENDOR=1` for the Micron model; not in this repo).
+
 ## Debugging: UART DMI bridge
 
 Flute's on-chip RISC-V Debug Module (External Debug Support v0.13, in
@@ -407,7 +469,7 @@ favor of this bridge (J1 pins A10/A11/B11/C11 are free GPIO again).
 
 The first-stage boot loader lives in the on-chip Boot ROM (reset PC = `0x00001000`).
 It speaks a small binary protocol over UART0 (625000 baud on the ULX3S FTDI
-port; the SoC clock is 12.5 MHz and `Uart_Pins` uses `clk_per_bit = 20`):
+port; `Uart_Pins` derives `clk_per_bit` from the system clock, 40 at 25 MHz):
 
 1. Host sends 4-byte destination address (little-endian).
 2. Host sends 4-byte byte count (little-endian).
@@ -459,8 +521,8 @@ instead of a silent reset, which is very useful during bring-up.
 ## SDRAM status
 
 The SDRAM controller targets the on-board Winbond W9825G6KH-6 32 MB SDR SDRAM.
-It runs at the 12.5 MHz system clock with CL=2, BL=8 bursts, auto-precharge, and
-periodic refresh.
+It runs at the system clock (25 MHz, or 32.14 MHz with `SYS_PLL=1`) with BL=8 bursts,
+auto-precharge, and periodic refresh.
 
 The controller returns 256-bit words to Flute's raw-memory port as two back-to-back
 BL8 bursts. Auto-precharge is asserted only on the second burst, so the active row
@@ -473,8 +535,10 @@ Verification:
   per-MB LFSR patterns across 28 MB (`0x80200000`..`0x81e00000`) over the UART
   loader, leaving the first 2 MB for the program and the last 2 MB for the stack.
 
-The Bluesim testbench (`test/Sdram_Tb.bsv`) still needs its behavioral SDRAM model
-updated to match the fixed read timing; it is not currently passing in simulation.
+In simulation the controller is exercised by the strict Verilator harnesses
+(`sim/strict_bram`, `sim/ndm_bram`), which pair `sdram_model.v` (data) with
+`sdram_timing_check.v`, a pin-level checker of the W9825G6KH-6 timing, init and refresh
+rules. The older Bluesim testbench (`test/Sdram_Tb.bsv`) is not maintained.
 
 ## Known issues
 
@@ -512,7 +576,7 @@ updated to match the fixed read timing; it is not currently passing in simulatio
 
 ## Project layout
 
-- `src/Top.v` — Verilog wrapper, clock divider, SDRAM DDR clock output, pin mapping.
+- `src/Top.v` — Verilog wrapper, optional system PLL, SDRAM clock output, pin mapping.
 - `src/ULX3S_Top.bsv` — BSV FPGA top level: Flute SoC + SDRAM controller + UART + GPIO.
 - `src/Sdram_Controller.bsv` — W9825G6KH SDRAM controller (256-bit raw memory port).
 - `src/AXI4_GPIO.bsv` — GPIO slave for LEDs and FIRE1 button.
@@ -529,4 +593,15 @@ updated to match the fixed read timing; it is not currently passing in simulatio
 - `scripts/exp_chunk2.py` — small protocol-experiment driver (per-attempt ACK/NAK logging, diagnostic-NAK capture).
 - `scripts/dmi.py` — host client for the UART DMI debug bridge (halt/resume/regs/pc/mem).
 - `scripts/monitor.py` — automated smoke test for the TempleOS monitor.
+- `src/SoC_Info.bsv` — self-describing SoC block (device table, build date, clock, bus error monitor).
+- `sim/strict_bram/`, `sim/ndm_bram/` — Verilator gate harnesses (J1, F2, ndmreset).
+- `formal/` — riscv-formal wrapper and gate runner.
+- `test/` — bare-metal gate tests (`cache_test`, `amo_test`, `ipc_bench`) and board scripts.
+- `scripts/hw_test_suite.py` — board interface conformance suite.
+- `bits/` — promoted bitstreams (rollback points).
+- `linux-sw/` — OpenSBI + Linux + `/init` build (Docker).
+- `sim/isa_bram/`, `sim/linux_bram/`, `sim/mc_ut/`, `sim/sdram_ut/`, `compliance/` — ISA, Linux,
+  memory-controller, SDRAM and RISCOF harnesses.
+- `notes/` — `linux-isa-plan.md` (ISA program), `memlat-verification-plan.md` (memory path).
+- `AGENTS.md`, `HANDOFF.md` — working rules and the campaign history.
 - `constraints/ulx3s_85f.lpf` — ULX3S-85F pin constraints.
