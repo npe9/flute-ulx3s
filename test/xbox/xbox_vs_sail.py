@@ -10,8 +10,8 @@ on the integrated core.  usage: xbox_vs_sail.py [--n N] [--seed S]"""
 import argparse, os, random, re, subprocess, sys, tempfile
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-BSC = os.path.expanduser("~/src/bsc/inst/bin/bsc")
-SAIL = os.path.expanduser("~/src/sail-riscv/c_emulator/riscv_sim_RV32")
+BSC = os.environ.get("BSC") or subprocess.run([os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../scripts/bsc_bin.sh")], capture_output=True, text=True).stdout.strip()
+SAIL = os.environ.get("SAIL") or os.path.expanduser("~/src/sail-riscv/c_emulator/riscv_sim_RV32")
 R, I, U, A = "r", "i", "u", "a"
 OPS = {
     "sh1add": (R, 0b0010000, 0b010, 0x33), "sh2add": (R, 0b0010000, 0b100, 0x33), "sh3add": (R, 0b0010000, 0b110, 0x33),

@@ -10,7 +10,7 @@
 # ================================================================
 
 ROOT    := $(abspath ..)
-BSC     ?= $(HOME)/src/bsc/inst/bin/bsc
+BSC     ?= $(shell $(ROOT)/scripts/bsc_bin.sh)
 REPO    := $(ROOT)/Flute
 OUT     ?= $(ROOT)/build/testrig-dii
 JOBS    ?= 4

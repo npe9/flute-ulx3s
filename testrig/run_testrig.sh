@@ -22,7 +22,7 @@ else
     DUT="${DUT:-$ROOT/build/testrig-dii/Flute_RVFI_DII}"
     export SAIL_RVFI_RAM_BASE=0 SAIL_RVFI_RAM_SIZE=0xffffffc0
 fi
-BSC_BIN="${BSC_BIN:-$HOME/src/bsc/inst/bin}"
+BSC_BIN="${BSC_BIN:-$(dirname "$("$HERE/../scripts/bsc_bin.sh")")}"
 # Sail platform config matching the Flute core (see README "Configuration"):
 #   -I  misa not writable        -F  no F/D        -i  mtval = instruction bits on illegal instr
 #   16 PMP CSRs visible (Flute implements entries 0-7, 8-15 read-only zero;

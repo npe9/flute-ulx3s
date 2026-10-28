@@ -18,3 +18,5 @@ __pycache__/
 *.dat
 # ---- templeos build artifacts ----
 templeos/build/
+# ---- generated RISCOF config (compliance/run.sh) ----
+compliance/.*.gen

@@ -2,7 +2,7 @@
 # sim/mc_ut/run.sh -- Mem_Controller data-integrity unit test (Bluesim).  PASS = "[mc_ut] PASS".
 set -e
 cd "$(dirname "$0")"
-BSC=${BSC:-$HOME/src/bsc/inst/bin/bsc}
+BSC=$(../../scripts/bsc_bin.sh) || exit 1
 F=../../Flute
 P="+:$F/src_Testbench/SoC:$F/src_Testbench/Fabrics/AXI4:$F/src_Core/BSV_Additional_Libs:$F/src_Core/ISA:$F/src_Core/Core:$F/src_Core/CPU:$F/src_Core/Cache_Config:$F/src_Core/PLIC:$F/src_Core/Near_Mem_IO:$F/src_Core/Debug_Module:$F/src_Core/RegFiles:$F/src_Core/Near_Mem_VM_WT_L1"
 mkdir -p build

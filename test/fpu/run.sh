@@ -12,7 +12,7 @@
 set -e
 cd "$(dirname "$0")"
 R=$(cd ../.. && pwd); B=${FPU_TF_BUILD:-$R/build/fpu-tf}; mkdir -p $B/bsc $B/logs
-BSC=${BSC:-$HOME/src/bsc/inst/bin/bsc}
+BSC=$(../../scripts/bsc_bin.sh) || exit 1
 TF=${TF:-$HOME/src/berkeley-testfloat-3/build/Linux-x86_64-GCC/testfloat_gen}
 DUT_SRC=${DUT_SRC:-$R/Flute/src_Core/CPU/FBox_Top.bsv}
 DUT=${DUT:-mkFBox_Top}

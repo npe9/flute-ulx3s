@@ -6,7 +6,7 @@ cd "$(dirname "$0")"
 DEPTH=${1:-20}; MODE=${2:-}
 Y=${SVA_YOSYS:-$HOME/src/sv-yosys/third_party/yosys/build/yosys}
 B=$(dirname "$Y")/yosys-smtbmc
-BSVLIB=${BSVLIB:-$HOME/src/bsc/inst/lib/Verilog}
+BSVLIB=${BSVLIB:-$(../../../scripts/bsc_lib.sh)}
 RTL=${RTL:-../../../build/verilog}
 S=../src
 mkdir -p build

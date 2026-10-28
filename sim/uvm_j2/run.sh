@@ -29,8 +29,8 @@ cd "$(dirname "$0")"
 
 ROOT="$(cd ../.. && pwd)"
 SB="$PWD/../strict_bram"
-BSC_LIB="${BSC:-$HOME/src/bsc/inst}/lib/Verilog"
-VUVM="$HOME/src/verilator-uvm"
+BSC_LIB="$(../../scripts/bsc_lib.sh)" || exit 1
+VUVM="${VUVM:-$HOME/src/verilator-uvm}"
 UVM_DIR="$VUVM/share/verilator/uvm"
 UVM_PKG="$UVM_DIR/uvm_pkg_all_v2020_3_2_nodpi.svh"
 VERILATOR_BIN="${VERILATOR:-$VUVM/bin/verilator}"
