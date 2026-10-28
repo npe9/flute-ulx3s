@@ -2,13 +2,24 @@
 
 This project brings up [Bluespec Flute](https://github.com/Bluespec/Flute) RV32IMAC on the [Radiona ULX3S-85F](https://ulx3s.github.io/) ECP5 board.
 
-Current status:
-- 12.5 MHz system clock derived from the 25 MHz on-board oscillator.
-- FTDI UART at 115200 baud works without an external USB-UART adapter.
-- Boot loader in on-chip BRAM prints a banner and loads a kernel into SDRAM over UART.
-- 8 on-board LEDs show boot / SDRAM / load milestones.
-- SDRAM read/write path works: `hello.bin` runs from SDRAM and the 28 MB memtest passes over UART.
-- TempleOS HolyC REPL AOT image boots to the `>` prompt and prints a system report; expression evaluation still needs RV64 or an RV32 JIT port.
+Current status (main, 2026-10-28):
+- Core: RV32IMAC, M+U privilege, write-through L1 caches, 64-bit AXI4 fabric, RISC-V debug
+  module (UART DMI bridge and FTDI JTAG). The current base is **E20**: pipelined I-side
+  (`ICache_Pipe.bsv`), CPI 1.05 on straight-line code (was 4.0).
+- Clock: the 25 MHz on-board oscillator drives the SoC directly. Post-route fmax is
+  48.9-53.1 MHz over 4 seeds (seed 3 = 48.88 MHz ships). `make SYS_PLL=1` builds an optional
+  32.142857 MHz PLL clock (`src/Top.v`).
+- FTDI UART at 625000 baud; the boot loader in on-chip ROM loads images into SDRAM with a
+  chunked, checksummed protocol.
+- SDRAM (W9825G6KH-6, 32 MB) runs `hello.bin`, the 28 MB memtest, and the TempleOS HolyC
+  REPL, which evaluates HolyC on hardware.
+- `ndmreset` (debug-module system reset) works with traffic in flight: epoch-tagged AXI IDs,
+  memory-controller drain, a two-pass SoC reset, and a deburster reset.
+- Every change ships only after the verification gates below.
+
+Linux: the `linux-isa` branch (outer repo and the Flute submodule, worked in a separate
+checkout) adds S-mode, Sv32 (I and D TLBs), PMP, F/D, Zb* and Zkn/Zkr/Zkt, and boots OpenSBI 1.9 +
+Linux 6.12 on the board at 32.14 MHz (`make SYS_PLL=1`). It is not merged into main.
 
 Planned peripherals (after UART/SDRAM bring-up):
 - HDMI via the GPDI connector.
@@ -22,9 +33,9 @@ Planned peripherals (after UART/SDRAM bring-up):
    ```bash
    ls /dev/cu.usbserial-*
    ```
-3. Open a terminal at 115200 baud, for example:
+3. Open a terminal at 625000 baud, for example:
    ```bash
-   picocom -b 115200 /dev/cu.usbserial-XXXX
+   picocom -b 625000 /dev/cu.usbserial-XXXX
    ```
    The bootloader banner is:
    ```
@@ -40,6 +51,11 @@ make sw          # build example RISC-V programs
 ```
 
 The default `make` target builds both the bitstream and the example software.
+
+`make SYS_PLL=1` builds for the 32.142857 MHz PLL clock. bsc -u does not notice -D changes,
+so switch with a clean bsc build (`rm -rf build/bsc build/verilog/mkULX3S_Top.v`).
+Promoted bitstreams are kept under `bits/` (`openFPGALoader` needs the `.bit` extension in
+the file name).
 
 ## Program and run
 
@@ -176,7 +192,7 @@ slaves are not yet captured.
 #### Interface conformance suite
 
 `python3 scripts/hw_test_suite.py` programs the FPGA, loads the REPL, and
-exercises every interface surface end to end (65 checks, ~8 min):
+exercises every interface surface end to end (72 checks, ~8 min):
 eval core (arithmetic/Print/globals/functions/asm), observability
 (Sys/Uptime/MemRep/IrqRep/DevRep/Cnts/DMesg/Regs/Reg/MemMap/MemMapDrv/
 Man/Sections/Dir/Pwd/help/Tty/VtList/LogCount/CRLF discipline),
@@ -184,7 +200,7 @@ trap recovery (`Fault;`, bad accesses, eval-after-fault), the
 self-describing SoC block and device ROM, the bus error monitor
 (clear → fault → captured address/count/rw), and the RISC-V debug module
 (system-bus reads/writes, SDRAM poke/readback, GPIO LED write/read via
-DMI, halt/resume + dpc). Last run: **65 PASS, 0 FAIL, 2 WARN** — the WARNs
+DMI, halt/resume + dpc), plus performance counters. Last run on E20: **70 PASS, 0 FAIL, 2 WARN** — the WARNs
 are the documented I64-pair hi-half limitation (`Print("%d", expr)` and
 `for`-loop `%d` print 64-bit pair values with garbage hi halves; the
 32-bit lo halves are correct). Notes: `Funs*` are upstream-partial
@@ -192,6 +208,7 @@ are the documented I64-pair hi-half limitation (`Print("%d", expr)` and
 discovery goes through the REPL's `Reg("…")`; and the REPL's `$HC_DUMP`
 framing is fs/9P-backed — it stalls retrying without a 9P host, so the
 suite verifies registers over the DMI system bus instead.
+For a PLL bitstream set `EXPECT_HZ=32142857` (SoC Info clock and perf-counter rate checks).
 
 #### Debug/verification roadmap (staged)
 
@@ -346,6 +363,25 @@ Next steps:
 - `ulx3s_mem.hc` + `ulx3s_memmap.hc`: heap base `0x80200000 → 0x80500000`
   (was inside the AOT image; the first MAlloc stomped code the eval needed).
 
+## Verification gates
+
+A change is promoted only when all of these pass (AGENTS.md has the rules; timing closure
+comes from architecture, with at least 10% margin before benching):
+
+- **J1 strict sim** — `sim/strict_bram/run.sh --strict=error`: Verilator replay of the boot
+  scenario on `build/verilog_all.v` with a strict ECP5 DP16KD BRAM model (lost reads and
+  cross-port hazards that Bluesim cannot see), SDRAM model + timing checker, UART scoreboard.
+  Compare the hello-banner cycle count against the previous netlist, not just PASS.
+- **F2 X-sweep** — `sim/strict_bram/run_sweep.sh 8`: 8 Verilator seeds with randomized
+  uninitialized state; output must be byte-identical.
+- **Cache / AMO tests** — `test/cache_test.S`, `test/amo_test.S` in the strict sim
+  (`TB_TX_TRACE=1`, pass = `T` ... `D`) and on the board (`test/run_cache_test.py`).
+- **riscv-formal** — `formal/run.sh`: 10 smoke checks on mkCPU with RVFI (see
+  `formal/README.md`); never run two at once against one riscv-formal checkout.
+- **ndmreset** — `sim/ndm_bram` in simulation and `test/ndmreset_board.py` on the board,
+  idle and busy.
+- **Board bench** — `scripts/hw_test_suite.py` (70/0/2 expected).
+
 ## Debugging: UART DMI bridge
 
 Flute's on-chip RISC-V Debug Module (External Debug Support v0.13, in
@@ -407,7 +443,7 @@ favor of this bridge (J1 pins A10/A11/B11/C11 are free GPIO again).
 
 The first-stage boot loader lives in the on-chip Boot ROM (reset PC = `0x00001000`).
 It speaks a small binary protocol over UART0 (625000 baud on the ULX3S FTDI
-port; the SoC clock is 12.5 MHz and `Uart_Pins` uses `clk_per_bit = 20`):
+port; `Uart_Pins` derives `clk_per_bit` from the system clock, 40 at 25 MHz):
 
 1. Host sends 4-byte destination address (little-endian).
 2. Host sends 4-byte byte count (little-endian).
@@ -459,8 +495,8 @@ instead of a silent reset, which is very useful during bring-up.
 ## SDRAM status
 
 The SDRAM controller targets the on-board Winbond W9825G6KH-6 32 MB SDR SDRAM.
-It runs at the 12.5 MHz system clock with CL=2, BL=8 bursts, auto-precharge, and
-periodic refresh.
+It runs at the system clock (25 MHz, or 32.14 MHz with `SYS_PLL=1`) with BL=8 bursts,
+auto-precharge, and periodic refresh.
 
 The controller returns 256-bit words to Flute's raw-memory port as two back-to-back
 BL8 bursts. Auto-precharge is asserted only on the second burst, so the active row
@@ -473,8 +509,10 @@ Verification:
   per-MB LFSR patterns across 28 MB (`0x80200000`..`0x81e00000`) over the UART
   loader, leaving the first 2 MB for the program and the last 2 MB for the stack.
 
-The Bluesim testbench (`test/Sdram_Tb.bsv`) still needs its behavioral SDRAM model
-updated to match the fixed read timing; it is not currently passing in simulation.
+In simulation the controller is exercised by the strict Verilator harnesses
+(`sim/strict_bram`, `sim/ndm_bram`), which pair `sdram_model.v` (data) with
+`sdram_timing_check.v`, a pin-level checker of the W9825G6KH-6 timing, init and refresh
+rules. The older Bluesim testbench (`test/Sdram_Tb.bsv`) is not maintained.
 
 ## Known issues
 
@@ -512,7 +550,7 @@ updated to match the fixed read timing; it is not currently passing in simulatio
 
 ## Project layout
 
-- `src/Top.v` — Verilog wrapper, clock divider, SDRAM DDR clock output, pin mapping.
+- `src/Top.v` — Verilog wrapper, optional system PLL, SDRAM clock output, pin mapping.
 - `src/ULX3S_Top.bsv` — BSV FPGA top level: Flute SoC + SDRAM controller + UART + GPIO.
 - `src/Sdram_Controller.bsv` — W9825G6KH SDRAM controller (256-bit raw memory port).
 - `src/AXI4_GPIO.bsv` — GPIO slave for LEDs and FIRE1 button.
@@ -529,4 +567,11 @@ updated to match the fixed read timing; it is not currently passing in simulatio
 - `scripts/exp_chunk2.py` — small protocol-experiment driver (per-attempt ACK/NAK logging, diagnostic-NAK capture).
 - `scripts/dmi.py` — host client for the UART DMI debug bridge (halt/resume/regs/pc/mem).
 - `scripts/monitor.py` — automated smoke test for the TempleOS monitor.
+- `src/SoC_Info.bsv` — self-describing SoC block (device table, build date, clock, bus error monitor).
+- `sim/strict_bram/`, `sim/ndm_bram/` — Verilator gate harnesses (J1, F2, ndmreset).
+- `formal/` — riscv-formal wrapper and gate runner.
+- `test/` — bare-metal gate tests (`cache_test`, `amo_test`, `ipc_bench`) and board scripts.
+- `scripts/hw_test_suite.py` — board interface conformance suite.
+- `bits/` — promoted bitstreams (rollback points).
+- `AGENTS.md`, `HANDOFF.md` — working rules and the campaign history.
 - `constraints/ulx3s_85f.lpf` — ULX3S-85F pin constraints.
