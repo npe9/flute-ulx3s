@@ -1,6 +1,6 @@
 # ULX3S Bluespec Flute SoC
 
-[![ci](https://github.com/npe9/flute-ulx3s/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/npe9/flute-ulx3s/actions/workflows/ci.yml)
+[![ci](https://github.com/npe9/flute-ulx3s/actions/workflows/ci.yml/badge.svg?branch=linux-isa)](https://github.com/npe9/flute-ulx3s/actions/workflows/ci.yml)
 
 This project brings up [Bluespec Flute](https://github.com/Bluespec/Flute) RV32IMAC on the [Radiona ULX3S-85F](https://ulx3s.github.io/) ECP5 board.
 
@@ -65,9 +65,10 @@ source and boots them to user space in Verilator and in Bluesim.
 | What | Command | Cycles | Time (M-series Mac / GitHub runner) |
 |---|---|---|---|
 | Boot ROM loads hello over the UART | `make sim-boot` | 70M | 8 min / 40 min |
-| TempleOS HolyC REPL, `1+1;` -> `=2` | `ci/bluesim_gate.sh` (both sims, TempleOS built from source) | ~89M to the prompt | 22 min / 1h50m |
-| Strict-BRAM Verilator boot (J1) | `sim/strict_bram/run.sh --strict=error` | 52M | 38 min / 2h50m |
-| Linux to `/init` (`linux-isa`) | `SIM_BLOB=linux-sw/out-fp/fw_payload.bin SIM_PASS_STR="tick 2" make FP=1 FPU_TRIM=1 sim-repl` | 139M | 18 min / 1h49m |
+| TempleOS HolyC REPL, `1+1;` -> `=2` | `ci/bluesim_gate.sh` (both sims, TempleOS built from source) | ~89M to the prompt | 22 min (main) / 1h22m |
+| Strict-BRAM Verilator boot (J1, with coverage) | `sim/strict_bram/run.sh --strict=error` | 54M | — / 4h35m |
+| Linux to `/init`, strict Verilator (no coverage) | see the `linux` job in `.github/workflows/ci.yml` (`sim/linux_bram`) | 122M | — / 21 min |
+| Linux to `/init`, Bluesim | `SIM_BLOB=linux-sw/out-fp/fw_payload.bin SIM_PASS_STR="tick 2" make FP=1 FPU_TRIM=1 sim-repl` | 139M | 18 min / 1h49m |
 
 `SIM_BLOB` (any image to preload at 0x80000000), `SIM_PASS_STR` (stop when the UART prints it)
 and `SIM_MAX_CYCLES` turn `make sim-repl` into a general console runner; `ci/console_text.py`
