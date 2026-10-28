@@ -199,7 +199,7 @@ jobs:
           test -x obj_dir_lx/Vsv_tb_top || { tail -40 ../../build/lx-build.log; exit 1; }
       - name: Boot OpenSBI + Linux to user space (/init "tick 2", FP context check)
         run: |
-          BUILD_DIR=obj_dir_lx sim/linux_bram/linux_run.py linux-sw/out-fp/fw_payload.bin 2>&1 | tee build/linux.log
+          BUILD_DIR=obj_dir_lx sim/linux_bram/linux_run.py "$GITHUB_WORKSPACE/linux-sw/out-fp/fw_payload.bin" 2>&1 | tee build/linux.log
           grep -a "tick 2" build/linux.log | grep -q "fp ok"
       - if: always()
         uses: actions/upload-artifact@v4
