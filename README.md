@@ -44,6 +44,23 @@ Planned peripherals (after UART/SDRAM bring-up):
 
 ## Build
 
+Everything needed is public. The quickest way to get the exact toolchain is the CI image
+(`ci/Dockerfile`: bsc 2025.01.1, Verilator 5.052, yosys/nextpnr-ecp5/ecppack from oss-cad-suite,
+RISC-V bare-metal and Linux GCC):
+
+```bash
+git clone --recursive https://github.com/npe9/flute-ulx3s.git && cd flute-ulx3s
+docker build --platform linux/amd64 -t flute-ci ci/
+docker run --rm -it -v "$PWD":/work flute-ci make sim-gate      # Bluesim: hello + TempleOS REPL
+```
+
+Without Docker, put `bsc`, `verilator`, `yosys`, `nextpnr-ecp5`, `ecppack` and
+`riscv64-unknown-elf-gcc` on PATH (or set `BSC`, `NEXTPNR`, `ECPPACK`, `RISCV_PREFIX`).
+GitHub Actions (`.github/workflows/ci.yml`) runs the same image on every push: Verilog build,
+Bluesim boot (hello + TempleOS REPL), the strict Verilator J1 + cache/AMO gates, and the
+bitstream at the 25 MHz constraint.
+
+
 ```bash
 export PATH="$HOME/src/bsc/inst/bin:$PATH"
 make bitstream   # BSV -> Verilog -> Yosys -> nextpnr -> bitstream

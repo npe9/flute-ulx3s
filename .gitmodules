@@ -1,3 +1,6 @@
 [submodule "Flute"]
 	path = Flute
-	url = git@github.com:npe9/Flute.git
+	url = https://github.com/npe9/Flute.git
+[submodule "templeos/tos"]
+	path = templeos/tos
+	url = https://github.com/npe9/templeos-cursor-riscv.git

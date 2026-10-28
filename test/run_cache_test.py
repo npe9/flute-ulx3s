@@ -3,15 +3,18 @@
 Usage: python3 run_cache_test.py [bitstream] [blob]   (blob default test/cache_test.bin;
 test/amo_test.bin uses the same T/M/D protocol)"""
 import sys, os, time, subprocess
-sys.path.insert(0, '/Users/npe/src/ulx3s-experiments/flute-ulx3s/scripts')
-os.chdir('/Users/npe/src/ulx3s-experiments/flute-ulx3s')
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, 'scripts'))
+# Paths on the command line are relative to the caller's cwd; defaults to the repo root.
+args = [os.path.abspath(a) for a in sys.argv[1:]]
+os.chdir(ROOT)
 import hw_test_suite as H
 
-bit = sys.argv[1] if len(sys.argv) > 1 else 'build/ulx3s_top.bit'
+bit = args[0] if len(args) > 0 else 'build/ulx3s_top.bit'
 r = subprocess.run(['openFPGALoader', '-b', 'ulx3s', '-m', bit], capture_output=True, text=True)
 print('program rc=', r.returncode)
 fd = H.open_port()
-blob = open(sys.argv[2] if len(sys.argv) > 2 else 'test/cache_test.bin', 'rb').read()
+blob = open(args[1] if len(args) > 1 else 'test/cache_test.bin', 'rb').read()
 H.drain(fd, 3.0)
 boot = H.drain(fd, 1.0)
 H.load_blob(fd, blob)

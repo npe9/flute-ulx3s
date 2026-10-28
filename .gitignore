@@ -18,3 +18,5 @@ __pycache__/
 *.dat
 # ---- templeos build artifacts ----
 templeos/build/
+# ---- bsc -show-schedule output (written next to the sources) ----
+*.sched

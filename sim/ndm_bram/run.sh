@@ -35,7 +35,7 @@ set -uo pipefail
 cd "$(dirname "$0")"
 
 ROOT="$(cd ../.. && pwd)"
-BSC_LIB="${BSC:-$HOME/src/bsc/inst}/lib/Verilog"
+BSC_LIB="$(../../scripts/bsc_lib.sh)" || exit 1
 # Netlist under test: default the LIVE tree path so Step 3's later gates
 # work unchanged; J1 validation points VERILOG_ALL at the frozen baseline
 # snapshot (build/timing-exp/verilog_all.v.pre-step3).

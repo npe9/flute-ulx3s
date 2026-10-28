@@ -1,7 +1,14 @@
 # TempleOS/RV32 bare-metal monitor for ULX3S Flute SoC
 
-HOLYC      ?= /Users/npe/src/templeos-cursor-riscv/holyc-riscv
-TOS_REPO   ?= /Users/npe/src/templeos-cursor-riscv
+# TOS_REPO: a checkout of templeos-cursor-riscv (HolyC compiler + bootstrap tree).  Default: the
+# templeos/tos submodule (git submodule update --init templeos/tos), else ~/src/templeos-cursor-riscv.
+# `make holyc` builds the compiler there.  Without either, the sims use the committed
+# prebuilt/ulx3s_repl.blob.bin (see prebuilt/README.md).
+TOS_REPO   ?= $(firstword $(patsubst %/Makefile,%,$(wildcard $(CURDIR)/tos/Makefile)) $(wildcard $(HOME)/src/templeos-cursor-riscv))
+HOLYC      ?= $(TOS_REPO)/holyc-riscv
+ifeq ($(strip $(TOS_REPO)),)
+$(error TOS_REPO is not set: point it at a templeos-cursor-riscv checkout (prebuilt/ has the REPL blob))
+endif
 PREFIX     ?= riscv64-unknown-elf-
 CC         := $(PREFIX)gcc
 LD         := $(PREFIX)ld
@@ -14,6 +21,11 @@ CFLAGS     := -march=$(MARCH) -mabi=$(MABI) -mcmodel=medany -O2 -g \
               -nostdlib -ffreestanding -fno-builtin -Wall -Wextra
 
 all: build/hello/hello_ulx3s.bin build/monitor/monitor.bin
+
+# The HolyC -> RISC-V compiler (plain C, built in the TempleOS checkout).
+holyc: $(HOLYC)
+$(HOLYC):
+	$(MAKE) -C $(TOS_REPO) holyc-riscv
 
 .PRECIOUS: build/hello/hello_ulx3s.elf build/monitor/monitor.elf
 
@@ -80,7 +92,7 @@ $(REPL_ROOT)/.setup-stamp: $(ULX3S_REPL_SRCS) $(FLUTE_MAP_SRCS) scripts/gen_boar
 	@rm -rf $(REPL_ROOT)
 	@mkdir -p $(REPL_ROOT)
 	cp -R -s $(TOS_REPO)/bootstrap $(REPL_ROOT)/bootstrap
-	@rm $(REPL_ROOT)/bootstrap/seed/MemMapSelected.hc \
+	@rm -f $(REPL_ROOT)/bootstrap/seed/MemMapSelected.hc \
 	    $(REPL_ROOT)/bootstrap/seed/mem.hc \
 	    $(REPL_ROOT)/bootstrap/seed/fs.hc \
 	    $(REPL_ROOT)/bootstrap/seed/trap.hc \

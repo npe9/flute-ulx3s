@@ -29,9 +29,14 @@ import ULX3S_Top :: *;
 
 // ================================================================
 
-Integer clk_hz = 12_500_000;
+// Same system clock as ULX3S_Top (src/ULX3S_Top.bsv): the UART bit time must match the DUT's.
+`ifdef SYS_CLK_HZ
+Integer clk_hz = `SYS_CLK_HZ;
+`else
+Integer clk_hz = 25_000_000;
+`endif
 Integer baud   = 625_000;
-Integer cycles_per_bit = clk_hz / baud;    // 20
+Integer cycles_per_bit = clk_hz / baud;    // 40 at 25 MHz
 
 Integer max_cycles = 70_000_000;    // > boot ROM's 60M-cycle repair window
 
@@ -93,7 +98,9 @@ module mkSoC_Boot_Tb (Empty);
       else if (m_reading) begin
          n_dq      = model_mem.sub (m_addr ());
          n_drive   = True;
+`ifdef TB_PROBES
          $display ("%0t MDLRD beat=%0d addr=%0h dq=%0h", $time, m_beat, m_addr (), model_mem.sub (m_addr ()));
+`endif
          if (m_beat == 7)
             n_reading = False;
          else
@@ -112,8 +119,10 @@ module mkSoC_Boot_Tb (Empty);
             Bit #(16) merged = zeroExtend ((cur_dqm [1] == 1'b1) ? d_old [15:8] : d_new [15:8]) << 8
                              | zeroExtend ((cur_dqm [0] == 1'b1) ? d_old [7:0]  : d_new [7:0]);
             model_mem.upd (w_addr, merged);
+`ifdef TB_PROBES
             $display ("%0t MDLWR beat=%0d addr=%0h dq=%0h dqm=%0b",
                       $time, w_beat, w_addr, cur_dq, cur_dqm);
+`endif
          end
          if (wr_new) begin
             m_wr_bank <= cur_ba;
@@ -321,8 +330,9 @@ module mkSoC_Boot_Tb (Empty);
       end
       rg_rxd <= bit_v;
 
-      // running xor over the chunk's data bytes (pos 1..m)
-      if (rx_started && rx_in_payload && (! rx_wait_ack) && (rx_bit == 9)) begin
+      // running xor over the chunk's data bytes (pos 1..m), once per byte: at the end of the
+      // stop bit (rx_timer == 0), the same cycle the stream position advances.
+      if (rx_started && rx_in_payload && (! rx_wait_ack) && (rx_bit == 9) && (rx_timer == 0)) begin
          if (rx_pos == 0)
             rx_xor <= 0;
          else if (extend (rx_pos) <= m)

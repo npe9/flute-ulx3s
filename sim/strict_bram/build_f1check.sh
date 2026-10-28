@@ -5,7 +5,7 @@
 set -uo pipefail
 cd "$(dirname "$0")"
 ROOT="$(cd ../.. && pwd)"
-BSC_LIB="${BSC:-$HOME/src/bsc/inst}/lib/Verilog"
+BSC_LIB="$(../../scripts/bsc_lib.sh)" || exit 1
 # see run.sh: VERILOG_ALL overrides the netlist under test (J1 baseline
 # validation); default keeps the live tree path for Step 3's gates.
 VERILOG_ALL="${VERILOG_ALL:-$ROOT/build/verilog_all.v}"
