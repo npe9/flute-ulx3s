@@ -8,8 +8,8 @@ written by boot_loader.c's forensic recorder.
 
 Usage: python3 scripts/forensic_read.py [port]
 """
-import sys
-sys.path.insert(0, '/Users/npe/src/ulx3s-experiments/flute-ulx3s/scripts')
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import dmi as D
 
 FOREN_BASE = 0x81FFFF80

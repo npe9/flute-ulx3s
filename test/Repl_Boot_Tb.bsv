@@ -29,11 +29,16 @@ import ULX3S_Top :: *;
 
 // ================================================================
 
-Integer clk_hz = 12_500_000;
+// Same system clock as ULX3S_Top (src/ULX3S_Top.bsv): the UART bit time must match the DUT's.
+`ifdef SYS_CLK_HZ
+Integer clk_hz = `SYS_CLK_HZ;
+`else
+Integer clk_hz = 25_000_000;
+`endif
 Integer baud   = 625_000;
-Integer cycles_per_bit = clk_hz / baud;    // 20
+Integer cycles_per_bit = clk_hz / baud;    // 40 at 25 MHz
 
-Integer max_cycles  = 600_000_000;    // global cap (~48 s at 12.5 MHz)
+Integer max_cycles  = 600_000_000;    // global cap (24 s at 25 MHz)
 Integer quiet_max   = 60_000_000;     // console silence => hang (4.8 s)
 Integer wprompt_cap = 60_000_000;      // thin seed: boot ~15-25M incl banner
 Integer watch_cap   = 100_000_000;     // eval is mul-heavy I64 emulation
@@ -50,11 +55,17 @@ typedef Bit #(24) ModelAddr;
 
 import "BDPI" function Bit #(32) c_blob_open ();    // open + return halfword count
 import "BDPI" function Bit #(16) c_blob_half (Bit #(32) idx);
+// Console mode (test/sim_preload.c): with SIM_PASS_STR set, the image is judged on its console
+// (e.g. OpenSBI + Linux to "tick 2"): no prompt/command phases, the sim ends when the string
+// appears.  SIM_MAX_CYCLES overrides the global cap.
+import "BDPI" function ActionValue #(Bit #(8))  c_sim_mode ();
+import "BDPI" function ActionValue #(Bit #(64)) c_sim_max_cycles (Bit #(64) dflt);
+import "BDPI" function ActionValue #(Bit #(8))  c_console (Bit #(8) c);
 
 // ================================================================
 
 typedef enum {P_PRELOAD, P_WARMUP, P_HDR, P_WAITPROMPT, P_CMD, P_WATCH,
-              P_CRASHMD, P_DMI, P_DONE} Phase deriving (Bits, Eq);
+              P_CRASHMD, P_DMI, P_DONE, P_CONSOLE} Phase deriving (Bits, Eq);
 
 typedef enum {D_MAGIC,
               D_RDSTATUS,
@@ -168,6 +179,8 @@ module mkRepl_Boot_Tb (Empty);
    // phase / script
    Reg #(Phase)     phase    <- mkReg (P_PRELOAD);
    Reg #(Bit #(40)) rg_cycle <- mkReg (0);
+   Reg #(Bool)      console_mode <- mkReg (False);
+   Reg #(Bit #(40)) rg_max_cycles <- mkReg (fromInteger (max_cycles));
    Reg #(Bit #(40)) ph_enter <- mkReg (0);
    Reg #(Bit #(32)) ph_idx   <- mkReg (0);
    Reg #(Bit #(32)) warmup   <- mkReg (500_000);
@@ -397,6 +410,11 @@ module mkRepl_Boot_Tb (Empty);
       pl_total  <= n;
       pl_opened <= True;
       $display ("[tb] preload: %0d halfwords", n);
+      let md <- c_sim_mode;
+      let mx <- c_sim_max_cycles (fromInteger (max_cycles));
+      console_mode  <= (md != 0);
+      rg_max_cycles <= truncate (mx);
+      if (md != 0) $display ("[tb] console mode: pass on SIM_PASS_STR, cap %0d cycles", mx);
    endrule
 
    // --------------------------------------------------
@@ -471,7 +489,7 @@ module mkRepl_Boot_Tb (Empty);
       f_rx_host.enq ((ph_idx == 3) ? 8'h80 : 8'h00);
       ph_idx <= ph_idx + 1;
       if (ph_idx == 7) begin
-         phase    <= P_WAITPROMPT;
+         phase    <= console_mode ? P_CONSOLE : P_WAITPROMPT;
          ph_enter <= rg_cycle;
       end
    endrule
@@ -883,6 +901,13 @@ module mkRepl_Boot_Tb (Empty);
                else begin
                   $display ("%c", c);
                   $display ("[tb] txc %02x", c);
+                  if (console_mode) begin
+                     let hit <- c_console (c);
+                     if (hit != 0) begin
+                        $display ("[tb] PASS: SIM_PASS_STR seen at cycle %0d", rg_cycle);
+                        $finish (0);
+                     end
+                  end
                   w_char <= True;
                   // real REPL prompt is "> " at a line start ("\r\n> ");
                   // -- the banner itself contains "> " ("crash> ("), so
@@ -923,7 +948,7 @@ module mkRepl_Boot_Tb (Empty);
       end
       if ((rg_cycle % fromInteger (50_000_000)) == 0)
          $display ("[tb] %0d cycles", rg_cycle);
-      if (rg_cycle > fromInteger (max_cycles)) begin
+      if (rg_cycle > rg_max_cycles) begin
          $display ("[tb] TIMEOUT after %0d cycles", rg_cycle);
          $finish (0);
       end

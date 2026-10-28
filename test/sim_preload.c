@@ -11,6 +11,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 static unsigned char *blob      = NULL;
 static unsigned int   blob_bytes = 0;
@@ -26,8 +27,15 @@ unsigned short c_blob_half (unsigned int idx);
 unsigned int c_blob_open (void)
 {
     if (!blob) {
-        const char *path = "templeos/build/ulx3s_repl.blob.bin";
-        FILE *f = fopen (path, "rb");
+        // $SIM_BLOB, else a local TempleOS build, else the committed prebuilt REPL.
+        const char *path = getenv ("SIM_BLOB");
+        FILE *f = NULL;
+        if (path) f = fopen (path, "rb");
+        else {
+            path = "templeos/build/ulx3s_repl.blob.bin";
+            f = fopen (path, "rb");
+            if (!f) { path = "templeos/prebuilt/ulx3s_repl.blob.bin"; f = fopen (path, "rb"); }
+        }
         if (!f) {
             fprintf (stderr, "[preload] cannot open %s\n", path);
             exit (1);
@@ -56,4 +64,46 @@ unsigned short c_blob_half (unsigned int idx)
     unsigned int lo = (2 * idx     < blob_bytes) ? blob [2 * idx]     : 0;
     unsigned int hi = (2 * idx + 1 < blob_bytes) ? blob [2 * idx + 1] : 0;
     return (unsigned short) (lo | (hi << 8));
+}
+
+// ---- Console mode (Linux / any image that is judged on its console) ----
+// SIM_PASS_STR set: the TB skips the REPL prompt/command phases and feeds every console byte here;
+// the sim ends with a pass once the string has appeared.  SIM_MAX_CYCLES overrides the TB cap.
+unsigned char c_sim_mode (void);
+unsigned long long c_sim_max_cycles (unsigned long long dflt);
+unsigned char c_console (unsigned char c);
+
+static char  *pass_str  = NULL;
+static size_t pass_len  = 0;
+static size_t pass_hit  = 0;     // length of the matched prefix (naive scan, fine for short strings)
+static char  *con       = NULL;
+static size_t con_len   = 0, con_cap = 0;
+
+unsigned char c_sim_mode (void)
+{
+    pass_str = getenv ("SIM_PASS_STR");
+    if (pass_str) pass_len = strlen (pass_str);
+    return pass_str && pass_len ? 1 : 0;
+}
+
+unsigned long long c_sim_max_cycles (unsigned long long dflt)
+{
+    const char *s = getenv ("SIM_MAX_CYCLES");
+    return s ? strtoull (s, NULL, 0) : dflt;
+}
+
+unsigned char c_console (unsigned char c)
+{
+    fputc (c, stdout);
+    if (c == '\n') fflush (stdout);
+    if (con_len + 1 >= con_cap) {
+        con_cap = con_cap ? 2 * con_cap : 65536;
+        con = (char *) realloc (con, con_cap);
+    }
+    con [con_len++] = (char) c;
+    con [con_len] = 0;
+    if (pass_len && con_len >= pass_len
+        && memcmp (con + con_len - pass_len, pass_str, pass_len) == 0)
+        pass_hit = 1;
+    return pass_hit ? 1 : 0;
 }

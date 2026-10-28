@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Resilient DMI client for a crash-looping CPU drowning the UART in spam."""
 import sys, os, time, struct, select
-sys.path.insert(0, '/Users/npe/src/ulx3s-experiments/flute-ulx3s/scripts')
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import dmi as D
 import hw_test_suite as H
 

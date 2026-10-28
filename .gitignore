@@ -20,3 +20,5 @@ __pycache__/
 templeos/build/
 # ---- generated RISCOF config (compliance/run.sh) ----
 compliance/.*.gen
+# ---- bsc -show-schedule output (written next to the sources) ----
+*.sched

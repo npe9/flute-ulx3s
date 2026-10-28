@@ -8,10 +8,12 @@
 #
 # ================================================================
 
-BSC     ?= $(HOME)/src/bsc/inst/bin/bsc
+# Tools: a local ~/src/bsc install and ../bluespec-ulx3s toolchain win when present (existing
+# checkouts keep their exact tools); otherwise everything comes from PATH (the CI image, see ci/).
+BSC     ?= $(firstword $(wildcard $(HOME)/src/bsc/inst/bin/bsc) $(shell command -v bsc))
 YOSYS   ?= yosys
-NEXTPNR ?= $(CURDIR)/../bluespec-ulx3s/toolchain/nextpnr-build/nextpnr-ecp5
-ECPPACK ?= $(CURDIR)/../bluespec-ulx3s/toolchain/prjtrellis-install/bin/ecppack
+NEXTPNR ?= $(firstword $(wildcard $(CURDIR)/../bluespec-ulx3s/toolchain/nextpnr-build/nextpnr-ecp5) nextpnr-ecp5)
+ECPPACK ?= $(firstword $(wildcard $(CURDIR)/../bluespec-ulx3s/toolchain/prjtrellis-install/bin/ecppack) ecppack)
 DEVICE  ?= 85k
 # Seed 3: best of the pipe4 sweep (CACHE_SNAPSHOT netlist) at the enforced
 # 25 MHz constraint.  The pipelined-cache netlist runs ~3 MHz faster than
@@ -23,7 +25,7 @@ RISCV_PREFIX ?= riscv64-unknown-elf-
 # BSC primitive Verilog library (FIFO2, RegFile, ...), excluding
 # file-test harnesses and modules yosys cannot parse (Load BRAMs use
 # $readmemh with empty names; InoutConnect/Probe* use SV interfaces).
-BSC_VERILOG_LIB := $(abspath $(dir $(BSC))../lib/Verilog)
+BSC_VERILOG_LIB := $(abspath $(dir $(realpath $(BSC)))../lib/Verilog)
 BSC_VERILOG_FILES := $(foreach f,$(wildcard $(BSC_VERILOG_LIB)/*.v),\
 	$(if $(findstring Load,$(notdir $f)),,$(if $(findstring InoutConnect,$(notdir $f)),,$(if $(findstring Probe,$(notdir $f)),,$(if $(filter main.v,$(notdir $f)),,$f)))))
 
@@ -175,6 +177,10 @@ $(FORMAL_VERILOG): $(wildcard $(REPO)/src_Core/*/*.bsv)
 
 MANIFEST := $(BUILD)/soc-memory-map.json
 
+# elaboration.log is written by the bsc run that produces $(VERILOG).
+$(BUILD)/elaboration.log: $(VERILOG)
+	@test -f $@
+
 $(MANIFEST): $(BUILD)/elaboration.log scripts/soc_manifest.py
 	python3 scripts/soc_manifest.py $(BUILD)/elaboration.log $@
 
@@ -278,9 +284,11 @@ HELLO_BSVI := test/fn_hello_bytes.bsvi
 $(HELLO_BSVI): sw/hello.bin scripts/bin2hello_bsvi.py
 	python3 scripts/bin2hello_bsvi.py
 
+# SIM_BOOT_PROBES= (empty) turns off the per-cycle / per-beat probe logging (GBs per run; CI).
+SIM_BOOT_PROBES ?= -D TB_PROBES -D SDCAP_PROBES
 sim-boot: $(ROM_BSVI) $(HELLO_BSVI)
 	mkdir -p $(BUILD)/bsc-sim-boot $(BUILD)/sim-boot
-	$(BSC) -u -sim -g mkSoC_Boot_Tb $(BSC_FLAGS) $(SIM_DEFINES) -D TB_PROBES -D SDCAP_PROBES \
+	$(BSC) -u -sim -g mkSoC_Boot_Tb $(BSC_FLAGS) $(SIM_DEFINES) $(SIM_BOOT_PROBES) \
 	    -p $(BSC_PATH):test -bdir $(BUILD)/bsc-sim-boot -simdir $(BUILD)/sim-boot \
 	    test/SoC_Boot_Tb.bsv
 	$(BSC) -sim -e mkSoC_Boot_Tb -bdir $(BUILD)/bsc-sim-boot \
@@ -308,9 +316,11 @@ sim-gate:
 	if [ "$$t1" = "0" ]; then echo "sim-gate: FAIL (boot did not reach TIMEOUT end)"; exit 1; fi; \
 	echo "sim-gate: PASS"
 
+# SIM_REPL_PROBES= (empty): no UART / SDRAM-model / capture probes (CI; the console is still logged).
+SIM_REPL_PROBES ?= -D UART_PROBES -D MDL_PROBES -D SDCAP_PROBES
 sim-repl: $(ROM_BSVI)
 	mkdir -p $(BUILD)/bsc-sim-repl $(BUILD)/sim-repl
-	$(BSC) -u -sim -g mkRepl_Boot_Tb $(BSC_FLAGS) $(SIM_DEFINES) -D UART_PROBES -D MDL_PROBES -D SDCAP_PROBES \
+	$(BSC) -u -sim -g mkRepl_Boot_Tb $(BSC_FLAGS) $(SIM_DEFINES) $(SIM_REPL_PROBES) \
 	    -p $(BSC_PATH):test -bdir $(BUILD)/bsc-sim-repl -simdir $(BUILD)/sim-repl \
 	    test/Repl_Boot_Tb.bsv
 	$(BSC) -sim -e mkRepl_Boot_Tb -bdir $(BUILD)/bsc-sim-repl \

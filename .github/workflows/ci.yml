@@ -1,0 +1,228 @@
+# CI for the ULX3S Flute SoC: build from a clean public checkout, then boot the SoC in simulation.
+#   verilog    bsc -> build/verilog_all.v (the netlist every sim and the bitstream use)
+#   bluesim    Bluesim boot of hello.bin and of the TempleOS HolyC REPL (make sim-gate)
+#   strict     Verilator strict-BRAM J1 boot gate + cache/AMO tests (the trusted functional gates)
+#   linux-sw   OpenSBI + Linux + /init (only on branches whose SoC has S-mode)
+#   linux      Linux boot to user space in the Verilator harness (same condition)
+#   bitstream  yosys + nextpnr at the 25 MHz constraint (fails if timing fails)
+# Toolchain: ci/Dockerfile, published as ghcr.io/<owner>/flute-ci:<hash of the Dockerfile>.
+name: ci
+
+on:
+  push:
+    branches: [main, linux-isa, memlat, ci]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash   # -eo pipefail: a failing sim piped into tee still fails the step
+
+jobs:
+  setup:
+    runs-on: ubuntu-24.04
+    outputs:
+      image: ${{ steps.s.outputs.image }}
+      linux: ${{ steps.s.outputs.linux }}
+      makeflags: ${{ steps.s.outputs.makeflags }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: s
+        run: |
+          owner=$(echo "${{ github.repository_owner }}" | tr A-Z a-z)
+          echo "image=ghcr.io/$owner/flute-ci:$(sha256sum ci/Dockerfile | cut -c1-12)" >> "$GITHUB_OUTPUT"
+          if grep -q -- '-D ISA_PRIV_S' Makefile && [ -d linux-sw ]; then
+            echo linux=true; echo "makeflags=FP=1 FPU_TRIM=1"     # the shipped Linux configuration
+          else
+            echo linux=false; echo makeflags=
+          fi >> "$GITHUB_OUTPUT"
+
+  image:
+    needs: setup
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push the toolchain image if this Dockerfile is new
+        run: |
+          img=${{ needs.setup.outputs.image }}
+          if docker manifest inspect "$img" > /dev/null 2>&1; then echo "have $img"; exit 0; fi
+          docker build -t "$img" ci/
+          docker push "$img"
+
+  verilog:
+    needs: [setup, image]
+    runs-on: ubuntu-24.04
+    container:
+      image: ${{ needs.setup.outputs.image }}
+      credentials: { username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}" }
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - run: make -j4 ${{ needs.setup.outputs.makeflags }} build/verilog_all.v
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verilog
+          path: |
+            build/verilog_all.v
+            build/soc-memory-map.json
+          if-no-files-found: error
+
+  bluesim:
+    needs: [setup, image]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    container:
+      image: ${{ needs.setup.outputs.image }}
+      credentials: { username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}" }
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - run: ci/bluesim_gate.sh
+        env:
+          MAKEFLAGS: ${{ needs.setup.outputs.makeflags }}
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bluesim-logs
+          path: build/ci/*.log
+
+  strict:
+    needs: [setup, verilog]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    container:
+      image: ${{ needs.setup.outputs.image }}
+      credentials: { username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}" }
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - uses: actions/download-artifact@v4
+        with: { name: verilog, path: build }
+      - name: J1 strict boot (boot ROM -> UART load -> hello from SDRAM)
+        run: |
+          sim/strict_bram/run.sh --strict=error 2>&1 | tee build/j1.log
+          grep -q "RESULT: PASS" build/j1.log
+      - name: cache test
+        run: |
+          TB_TX_TRACE=1 sim/strict_bram/run.sh --strict=warn "$PWD/test/cache_test.bin" > build/cache.log 2>&1 || true
+          ci/check_txtrace.py build/cache.log
+      - name: AMO test
+        run: |
+          TB_TX_TRACE=1 sim/strict_bram/run.sh --strict=warn "$PWD/test/amo_test.bin" > build/amo.log 2>&1 || true
+          ci/check_txtrace.py build/amo.log
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: strict-logs
+          path: build/*.log
+
+  bitstream:
+    needs: [setup, verilog]
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    container:
+      image: ${{ needs.setup.outputs.image }}
+      credentials: { username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}" }
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - uses: actions/download-artifact@v4
+        with: { name: verilog, path: build }
+      - run: touch build/verilog_all.v && make -o build/verilog_all.v bitstream 2>&1 | tee build/pnr.log
+      - run: grep -E "Max frequency for clock" build/pnr.log | tail -3
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bitstream
+          path: build/ulx3s_top.bit
+
+  linux-sw:
+    needs: [setup, image]
+    if: needs.setup.outputs.linux == 'true'
+    runs-on: ubuntu-24.04
+    container:
+      image: ${{ needs.setup.outputs.image }}
+      credentials: { username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}" }
+    steps:
+      - uses: actions/checkout@v4
+      - id: key
+        run: echo "key=linux-sw-${{ hashFiles('linux-sw/**') }}" >> "$GITHUB_OUTPUT"
+      - id: cache
+        uses: actions/cache@v4
+        with:
+          path: linux-sw/out-fp
+          key: ${{ steps.key.outputs.key }}
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: linux-sw/build-native.sh fp
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-sw
+          path: linux-sw/out-fp/fw_payload.bin
+
+  linux:
+    needs: [setup, verilog, linux-sw]
+    if: needs.setup.outputs.linux == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    container:
+      image: ${{ needs.setup.outputs.image }}
+      credentials: { username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}" }
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - uses: actions/download-artifact@v4
+        with: { name: verilog, path: build }
+      - uses: actions/download-artifact@v4
+        with: { name: linux-sw, path: linux-sw/out-fp }
+      - name: Build the Linux harness (strict BRAM, no coverage)
+        run: |
+          cd sim/linux_bram
+          TB_NOCOV=1 TB_ISA=1 TB_HELLO_DEADLINE=1 BUILD_DIR=obj_dir_lx ./run.sh --strict=warn \
+            "$GITHUB_WORKSPACE/linux-sw/out-fp/fw_payload.bin" > ../../build/lx-build.log 2>&1 || true
+          test -x obj_dir_lx/Vsv_tb_top || { tail -40 ../../build/lx-build.log; exit 1; }
+      - name: Boot OpenSBI + Linux to user space (/init "tick 2", FP context check)
+        run: |
+          BUILD_DIR=obj_dir_lx sim/linux_bram/linux_run.py linux-sw/out-fp/fw_payload.bin 2>&1 | tee build/linux.log
+          grep -a "tick 2" build/linux.log | grep -q "fp ok"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-logs
+          path: build/*.log
+
+  bluesim-linux:
+    needs: [setup, linux-sw]
+    if: needs.setup.outputs.linux == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    container:
+      image: ${{ needs.setup.outputs.image }}
+      credentials: { username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}" }
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - uses: actions/download-artifact@v4
+        with: { name: linux-sw, path: linux-sw/out-fp }
+      - name: Bluesim boot of OpenSBI + Linux to /init "tick 2"
+        run: |
+          mkdir -p build/ci
+          SIM_BLOB=linux-sw/out-fp/fw_payload.bin SIM_PASS_STR="tick 2" SIM_MAX_CYCLES=1500000000 \
+            make ${{ needs.setup.outputs.makeflags }} sim-repl > build/ci/bluesim-linux.log 2>&1 || true
+          grep -a "\[tb\] PASS" build/ci/bluesim-linux.log
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bluesim-linux-log
+          path: build/ci/bluesim-linux.log

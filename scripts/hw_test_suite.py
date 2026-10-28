@@ -40,6 +40,8 @@ PORT = '/dev/cu.usbserial-120001'
 BAUD = 625000
 BITSTREAM = 'build/ulx3s_top.bit'
 BLOB = 'templeos/build/ulx3s_repl.blob.bin'
+if not os.path.exists(BLOB):              # no local TempleOS build: the committed image
+    BLOB = 'templeos/prebuilt/ulx3s_repl.blob.bin'
 CHUNK = 256
 
 results = []  # (level, name, status, detail)

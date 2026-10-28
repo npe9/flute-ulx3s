@@ -88,11 +88,12 @@ def main() -> int:
         top_v = (args.flute / "src/Top.v")
         if top_v.exists():
             txt = top_v.read_text(errors="replace")
-            if "12.5 MHz" not in txt:
-                errors.append("src/Top.v no longer mentions 12.5 MHz — "
-                              "clock story changed?")
-            if str(clk) not in txt.replace("_", "") and clk != 12_500_000:
-                errors.append(f"manifest clk {clk} != src/Top.v expectation")
+            # Top.v documents the two system clocks it can produce: the raw 25 MHz board clock
+            # and the 32.142857 MHz PLL output (make SYS_PLL=1).
+            known = {25_000_000: "25 MHz", 32_142_857: "32.142857"}
+            if clk not in known or known[clk] not in txt:
+                errors.append(f"manifest clk {clk} is not a clock src/Top.v documents "
+                              f"({', '.join(known.values())}) — clock story changed?")
 
     # Guest map cross-check: the REPL's MEM_* must agree with the
     # elaborated hardware.  Drift here = build failure, not a silent lie.

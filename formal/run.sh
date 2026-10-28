@@ -12,7 +12,7 @@
 set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 RF=${RISCV_FORMAL:-$HOME/src/riscv-formal}
-BSCLIB=${BSC_LIB:-$HOME/src/bsc/inst/lib/Verilog}
+BSCLIB=$("$ROOT/scripts/bsc_lib.sh") || exit 1
 # Gate depths (2026-10-17, 1KB caches + 16-entry BTB: first retirement at BMC step 52, 4th at 58):
 # the smoke set finishes in ~4 min with these; raise them only after a geometry change (run `cover` first).
 : "${ISA:=rv32imc}" "${INSN_DEPTH:=62}" "${REG_DEPTH:=75}" "${PC_DEPTH:=75}" "${COVER_DEPTH:=60}" "${LIVE_START:=55}" "${LIVE_DEPTH:=75}" "${JOBS:=4}"
