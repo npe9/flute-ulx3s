@@ -10,7 +10,7 @@ name: ci
 
 on:
   push:
-    branches: [main, linux-isa, memlat, ci]
+    branches: [main, linux-isa, memlat, ci, 'ci-*']
   pull_request:
   workflow_dispatch:
 
@@ -99,9 +99,14 @@ jobs:
           path: build/ci/*.log
 
   strict:
+    # One job per test (each is a long single-threaded Verilator run with coverage).
     needs: [setup, verilog]
     runs-on: ubuntu-24.04
-    timeout-minutes: 180
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      matrix:
+        test: [j1, cache, amo]
     container:
       image: ${{ needs.setup.outputs.image }}
       credentials: { username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}" }
@@ -111,21 +116,21 @@ jobs:
       - uses: actions/download-artifact@v4
         with: { name: verilog, path: build }
       - name: J1 strict boot (boot ROM -> UART load -> hello from SDRAM)
+        if: matrix.test == 'j1'
         run: |
-          sim/strict_bram/run.sh --strict=error 2>&1 | tee build/j1.log
+          stdbuf -oL -eL sim/strict_bram/run.sh --strict=error 2>&1 | tee build/j1.log
           grep -q "RESULT: PASS" build/j1.log
-      - name: cache test
+          grep -a "hello banner at cycle" build/j1.log
+      - name: ${{ matrix.test }} test (T...D over the UART, no M)
+        if: matrix.test != 'j1'
         run: |
-          TB_TX_TRACE=1 sim/strict_bram/run.sh --strict=warn "$PWD/test/cache_test.bin" > build/cache.log 2>&1 || true
-          ci/check_txtrace.py build/cache.log
-      - name: AMO test
-        run: |
-          TB_TX_TRACE=1 sim/strict_bram/run.sh --strict=warn "$PWD/test/amo_test.bin" > build/amo.log 2>&1 || true
-          ci/check_txtrace.py build/amo.log
+          TB_NOCOV=1 BUILD_DIR=obj_dir_nocov TB_TX_TRACE=1 TB_HELLO_DEADLINE=70000000 stdbuf -oL -eL sim/strict_bram/run.sh --strict=warn \
+            "$PWD/test/${{ matrix.test }}_test.bin" > build/${{ matrix.test }}.log 2>&1 || true
+          ci/check_txtrace.py build/${{ matrix.test }}.log
       - if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: strict-logs
+          name: strict-${{ matrix.test }}-logs
           path: build/*.log
 
   bitstream:
