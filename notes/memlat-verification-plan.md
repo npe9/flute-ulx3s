@@ -99,6 +99,14 @@ cost-to-value; items 1-3 are one file each.
 - m15 (Flute: mtime Bresenham accumulator under SYS_CLK_HZ): m15p seeds 36.41/35.99/37.57/
   38.94 MHz (worst 12% margin), LUT4 59,205. Board build/m15p/ulx3s_top-m15p-s4.bit (md5
   04a0e097): 30-min soak tick 1751, 0 bad, uptime 1775 s in 1779 s wall. Item 8 PLL: PASS.
+- m15 gates (2026-10-28): riscv-formal smoke 10/10 PASS (no FP; covers deferred SH/M/X
+  launch). F2 8 seeds identical on non-PLL build/m15 (the strict sim's UART monitor assumes
+  25 MHz, so PLL netlists garble the banner -- run sims on the non-PLL build). Sim cache /
+  AMO print T..D (run.sh FAIL is the expected missing-hello scoreboard check, same as E20).
+  Board m15p: cache PASS, AMO PASS, bench 69/1/2 at 32.14 MHz (perf cycles rate ok); the one
+  FAIL is `Reg misa` hard-coded to main's 0x40101105 vs linux-isa 0x4014112f (ACDFIMSU),
+  i.e. the suite needs a per-config misa. A first bench run showed a second FAIL that was
+  not captured and did not recur. Custody restored (e8521522).
 - m5 board boot + 30-min soak (first board run of consecutive ACT -> READ).
 - PLL build (`make SYS_PLL=1`, 32.14 MHz) of m5: seeds, boot, soak. Only place the real
   tRCD / CAS margins are exercised. Bitstreams named *.bit; restore the custody bit after.
