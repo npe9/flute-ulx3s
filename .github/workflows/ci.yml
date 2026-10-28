@@ -11,6 +11,7 @@ name: ci
 on:
   push:
     branches: [main, linux-isa, memlat, ci, 'ci-*']
+    paths-ignore: ['**.md', 'notes/**']   # docs-only pushes do not cancel a multi-hour run
   pull_request:
   workflow_dispatch:
 
@@ -119,16 +120,18 @@ jobs:
         if: matrix.test == 'j1'
         run: |
           # The benign BTB cross-port census is 1 on macOS/clang and 0 on this Linux/gcc build
-          # (x-initial state differs; hello lands 271 cycles later): waive the census-alive check
-          # here only. Every hazard bin must still be 0 and --strict=error must not fire.
-          J1_WAIVE_BTB_CENSUS=1 stdbuf -oL -eL sim/strict_bram/run.sh --strict=error 2>&1 | tee build/j1.log
+          # (unpinned Verilator seed: hello lands 271 cycles later): waive the census-alive check
+          # here only. Every hazard bin must still be 0 and --strict=error must not fire. Seed 1:
+          # Verilator's default seed 0 means a fresh system-random seed per run; pinned, cycle counts
+          # are comparable across pushes.
+          J1_WAIVE_BTB_CENSUS=1 stdbuf -oL -eL sim/strict_bram/run.sh --strict=error +verilator+seed+1 2>&1 | tee build/j1.log
           grep -q "RESULT: PASS" build/j1.log
           grep -a "hello banner at cycle" build/j1.log
       - name: ${{ matrix.test }} test (T...D over the UART, no M)
         if: matrix.test != 'j1'
         run: |
           TB_NOCOV=1 BUILD_DIR=obj_dir_nocov TB_TX_TRACE=1 TB_HELLO_DEADLINE=70000000 stdbuf -oL -eL sim/strict_bram/run.sh --strict=warn \
-            "$PWD/test/${{ matrix.test }}_test.bin" > build/${{ matrix.test }}.log 2>&1 || true
+            "$PWD/test/${{ matrix.test }}_test.bin" +verilator+seed+1 > build/${{ matrix.test }}.log 2>&1 || true
           ci/check_txtrace.py build/${{ matrix.test }}.log
       - if: always()
         uses: actions/upload-artifact@v4
