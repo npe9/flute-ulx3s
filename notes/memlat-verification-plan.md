@@ -75,7 +75,11 @@ cost-to-value; items 1-3 are one file each.
   ticking. In sim: a DMI-driven sysbus test in strict_bram if the JTAG TB supports it (check).
 - Interleaved masters: I$ + D$ interleave in every Linux boot already.
 
-## 7. Vendor SDRAM model (gap 4) -- USER DECISION: which model
+## 7. Vendor SDRAM model (gap 4) -- raw test DONE (92d9b71; Micron MT48LC16M16A2, Icarus)
+- 2026-10-28 rerun: `RAW=1 VENDOR=1` (25 MHz) 6000 requests, 3868 chunks, 0 mismatches,
+  sdram_chk 0 errors, no model ERROR/violation; `RAW_PLL=1 TCK_PS=31111` 4110 chunks, same.
+  linux_bram with the vendor model not done (Verilator mis-sequences the model; Icarus is too
+  slow for a Linux boot).
 - W9825G6KH-6: 256 Mb x16, 4 banks x 8192 rows x 512 cols. Candidate: Micron MT48LC16M16A2
   Verilog model (same organization, has its own timing checks; -75 grade ~ -6 here). Verify
   the organization and timing parameters before use. Download into its own empty directory.
