@@ -362,14 +362,16 @@ module mkRepl_Boot_Tb (Empty);
             n_beat = m_beat + 1;
       end
 
-      if (m_cmd_d1 == m_cmd_act) begin
-         m_open_row [m_ba_d1] <= m_a_d1 [12:0];
+      // ACTIVATE takes effect at once: a WRITE may follow it in the next cycle (tRCD = 1 cycle)
+      // and addresses its first beat in that same cycle, from cur_ba/cur_a and the open row.
+      if (cur_cmd == m_cmd_act) begin
+         m_open_row [cur_ba] <= cur_a [12:0];
 `ifdef MDL_PROBES
-         $display ("%0t MDLCMd ACT bank=%0h row=%0h", $time, m_ba_d1, m_a_d1 [12:0]);
+         $display ("%0t MDLCMd ACT bank=%0h row=%0h", $time, cur_ba, cur_a [12:0]);
 `endif
       end
 
-      else if (m_cmd_d1 == m_cmd_read) begin
+      if (m_cmd_d1 == m_cmd_read) begin
          m_bank  <= m_ba_d1;
          m_col   <= m_a_d1 [8:0];
          // Real W9825G6KH: first beat driven 2 cycles after the READ cmd
