@@ -1,6 +1,6 @@
 # CI for the ULX3S Flute SoC: build from a clean public checkout, then boot the SoC in simulation.
 #   verilog    bsc -> build/verilog_all.v (the netlist every sim and the bitstream use)
-#   bluesim    Bluesim boot of hello.bin and of the TempleOS HolyC REPL (make sim-gate)
+#   bluesim    Bluesim boot of hello.bin and of the TempleOS HolyC REPL (ci/bluesim_gate.sh)
 #   strict     Verilator strict-BRAM J1 boot gate + cache/AMO tests (the trusted functional gates)
 #   linux-sw   OpenSBI + Linux + /init (only on branches whose SoC has S-mode)
 #   linux      Linux boot to user space in the Verilator harness (same condition)
