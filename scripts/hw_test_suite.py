@@ -12,6 +12,7 @@ Levels:
   partial  -- known-thin upstream behavior (documented, tracked as WARN)
 
 Usage: python3 scripts/hw_test_suite.py [--quick]
+       EXPECT_HZ=32142857 EXPECT_MISA=4014112f ...   (linux-isa SYS_PLL=1 build)
 """
 
 import argparse
@@ -28,6 +29,9 @@ import time
 # System clock the bitstream under test runs at (SoC Info CPU_HZ): 25 MHz raw board
 # clock by default, EXPECT_HZ=32142857 for a `make SYS_PLL=1` bitstream.
 EXPECT_HZ = int(os.environ.get('EXPECT_HZ', '25000000'))
+# misa of the bitstream under test: main (ACIMU) by default, EXPECT_MISA=4014112f for the
+# linux-isa build (ACDFIMSU).
+EXPECT_MISA = os.environ.get('EXPECT_MISA', '40101105').lower()
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dmi import DMI  # noqa: E402
@@ -283,7 +287,7 @@ def main():
     check_repl('required', 'Reg mstatus', fd, 'Reg("mstatus");',
                expect=('mstatus', 'MIE'))
     check_repl('required', 'Reg misa', fd, 'Reg("misa");',
-               expect=('misa', '40101105'))
+               expect=('misa', EXPECT_MISA))
     r = check_repl('required', 'MemMap live header', fd, 'MemMap;',
                    expect=('SoC info (live @ C0003000): ver=1',
                            'PLIC              RESERVED VOID',
