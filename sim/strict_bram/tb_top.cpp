@@ -412,7 +412,7 @@ int main(int argc, char** argv) {
 
     // ---- summary ---------------------------------------------------
     top->final();
-#ifdef VM_COVERAGE
+#if VM_COVERAGE
     VerilatedCov::write();   // filename from +verilator+coverage+file+
 #endif
     if (stage == ST_PASS) {
