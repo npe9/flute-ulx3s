@@ -70,7 +70,7 @@ source and boots them to user space in Verilator and in Bluesim.
 | Boot ROM loads hello over the UART | `make sim-boot` | 70M | 8 min / 40 min |
 | TempleOS HolyC REPL, `1+1;` -> `=2` | `ci/bluesim_gate.sh` (both sims, TempleOS built from source) | ~73M to the prompt | 11 min incl. build (was 22) / 1h50m (before the C array) |
 | Strict-BRAM Verilator boot (J1) | `sim/strict_bram/run.sh --strict=error` | 52M | 38 min / 2h50m |
-| Linux to `/init` (`linux-isa`) | `SIM_BLOB=linux-sw/out-fp/fw_payload.bin SIM_PASS_STR="tick 2" make FP=1 FPU_TRIM=1 sim-repl` | 122M | 18 min incl. build / 1h49m (at 139M, before the C array) |
+| Linux to `/init` (`linux-isa`) | `SIM_PTY=0 SIM_BLOB=linux-sw/out-fp/fw_payload.bin SIM_PASS_STR="tick 2" make FP=1 FPU_TRIM=1 sim-board` | 122M | 18 min incl. build / 1h49m (at 139M, before the C array) |
 
 **Virtual board:** `make sim-board` builds `test/ULX3S_Sim.bsv` -- `mkULX3S_Top`, the netlist
 the FPGA gets, with the board's SDRAM, UART, LEDs and BTN1 modelled around it (shared pieces in
@@ -91,9 +91,10 @@ CI checks DMI, LEDs and BTN1 on every push (`ci/board_dmi_smoke.sh`).
 `SIM_PTY=0 make sim-board` prints the console on stdout instead (with `SIM_PASS_STR` ending the
 run), for scripts.
 
-`SIM_BLOB` (any image to preload at 0x80000000), `SIM_PASS_STR` (stop when the UART prints it)
-and `SIM_MAX_CYCLES` turn `make sim-repl` into a general console runner; `ci/console_text.py`
-prints the decoded UART text of its log. Bluesim's BRAM model is idealized (see AGENTS.md), so
+`SIM_BLOB` (any image to preload at 0x80000000), `SIM_PASS_STR` (stop when the UART prints it),
+`SIM_MAX_CYCLES` and `SIM_CONSOLE_LOG` (the UART text, contiguous, in a file) turn
+`SIM_PTY=0 make sim-board` into a general console runner (`make sim-repl` takes the same
+variables; `ci/console_text.py` decodes the UART text from its log). Bluesim's BRAM model is idealized (see AGENTS.md), so
 the strict Verilator harness stays the functional gate of record.
 
 ```bash
