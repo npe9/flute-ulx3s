@@ -208,6 +208,8 @@ jobs:
           BUILD_DIR=obj_dir_lx sim/linux_bram/linux_run.py "$GITHUB_WORKSPACE/linux-sw/out-fp/fw_payload.bin" 2>&1 | tee build/linux.log || true
           grep -a -q 'ISA PASS (TX saw "tick 2")' build/linux.log
           grep -a "tick 1" build/linux.log | grep -q "fp ok"
+      - name: Verilator virtual board (same binary, UART on a pty) answers DMI
+        run: BOARD=verilator BUILD_DIR=obj_dir_lx ci/board_dmi_smoke.sh
       - if: always()
         uses: actions/upload-artifact@v4
         with:

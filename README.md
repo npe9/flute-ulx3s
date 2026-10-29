@@ -85,6 +85,10 @@ The UART debug bridge works over the same pty: `python3 scripts/dmi.py -p build/
 A second pty holds the board controls: `cat build/sim-ctl` prints `leds XX` on every LED change,
 and `printf 1 > build/sim-ctl` / `printf 0 > build/sim-ctl` press and release BTN1.
 CI checks DMI, LEDs and BTN1 on every push (`ci/board_dmi_smoke.sh`).
+`make FP=1 FPU_TRIM=1 sim-board-verilator` is the same board on the Verilator strict-BRAM Linux
+harness (UART pty only, no board controls): `SIM_BLOB=$PWD/linux-sw/out-fp/fw_payload.bin` boots
+Linux to `/init` "tick 2" in 9 min on an M-series Mac (Bluesim: ~15), and the GitHub runner runs
+Verilator ~5x faster than Bluesim; without `SIM_BLOB` the boot ROM waits for `loader.py --sim`.
 
 `SIM_BLOB` (any image to preload at 0x80000000), `SIM_PASS_STR` (stop when the UART prints it)
 and `SIM_MAX_CYCLES` turn `make sim-repl` into a general console runner; `ci/console_text.py`

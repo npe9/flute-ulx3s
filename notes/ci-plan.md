@@ -61,7 +61,11 @@ and stretches its timeouts x200; ~0.2 s per command); CI runs `ci/board_dmi_smok
 version, halt in the ROM, SDRAM poke/readback over the system bus, resume) in the bluesim job.
 Board controls on a second pty (`build/sim-ctl`): `leds XX cycle N` lines out, `1`/`0` in for
 BTN1 (polled every 4096 cycles); the CI smoke writes the GPIO LEDs and reads BTN1 back over DMI.
-Next: the factored `mkULX3S_Sim` top below.
+`make sim-board-verilator` (linux-isa): the Verilator strict-BRAM Linux harness with `TB_PTY=1`
+(`linux_run.py --board`), UART on the same pty (shared `test/sim_pty.h`); Linux "tick 2" in
+538 s locally (~227K cycles/s vs Bluesim ~145K); CI's linux job runs the DMI smoke on it.
+Next: the factored `mkULX3S_Sim` top below; board controls and a main-branch variant for the
+Verilator board.
 
 
 A Bluesim (and optionally Verilator) executable that behaves like the board from the host's point

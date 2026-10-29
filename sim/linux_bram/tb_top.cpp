@@ -48,6 +48,7 @@
 #include "verilated_vcd_c.h"
 #endif
 #include "svdpi.h"
+#include "../../test/sim_pty.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -79,6 +80,10 @@ static int tx_echo = 0;              // TB_ECHO=1: copy TX bytes to stdout as th
 static const char* isa_pass_str = nullptr;   // TB_PASS_STR: in TB_ISA mode, pass when TX contains this
 static unsigned long long progress_every = 0; // TB_PROGRESS=N: print cycle + wall time every N cycles
 static int perf_on = 0;              // TB_PERF=1 (trace builds): per-phase I/D-side cycle accounting at each progress tick
+// TB_PTY=1 (`make sim-board-verilator`): the virtual board -- the UART is bridged to a host pty
+// ($SIM_PTY_LINK) and the sim runs until killed.  With TB_ISA the preloaded image is started as
+// usual first; without it the boot ROM waits for scripts/loader.py --sim.
+static int pty_fd = -1;
 static void poll_tx() {
     int avail = sv_tx_avail();
     while ((int)tx_polled < avail) {
@@ -87,6 +92,7 @@ static void poll_tx() {
         tx_log += (char)(b & 0xFF);
         if (tx_trace) printf("[tb] tx 0x%02x at cycle %llu\n", b & 0xFF, (unsigned long long)g_cycle);
         if (tx_echo) { fputc(b & 0xFF, stdout); if ((b & 0xFF) == '\n') fflush(stdout); }
+        if (pty_fd >= 0) { unsigned char c = (unsigned char)b; (void)!write(pty_fd, &c, 1); }
         tx_stream.push_back(b & 0xFF);
         tx_polled++;
     }
@@ -111,6 +117,7 @@ enum Stage {
     ST_READBACK,     // wait for ']' of the head/tail readback
     ST_HELLO,        // wait for hello banner + first tick line
     ST_ISA,          // TB_ISA: image preloaded, jumped; wait for tohost
+    ST_BOARD,        // TB_PTY: host pty <-> UART, until killed
     ST_PASS,
     ST_FAIL
 };
@@ -317,6 +324,13 @@ int main(int argc, char** argv) {
     isa_pass_str = getenv("TB_PASS_STR");
     if (const char* pe = getenv("TB_PROGRESS")) progress_every = strtoull(pe, nullptr, 10);
     if (const char* pf = getenv("TB_PERF")) perf_on = atoi(pf);
+    const char* pt = getenv("TB_PTY");
+    if (pt && atoi(pt)) {
+        pty_fd = sim_pty_make("SIM_PTY_LINK", "sim-tty", "UART (picocom, scripts/loader.py --sim, scripts/dmi.py)");
+        if (pty_fd < 0) return 2;
+        const char* ia = getenv("TB_ISA");
+        if (!(ia && atoi(ia))) stage = ST_BOARD;   // nothing preloaded: the ROM waits for a loader
+    }
 
     printf("[tb] image: %s\n", image_path);
     if (env_strict) printf("[tb] STRICT_BRAM=%s\n", env_strict);
@@ -367,6 +381,7 @@ int main(int argc, char** argv) {
     if (const char* hd = getenv("TB_HELLO_DEADLINE")) hello_deadline = strtoull(hd, nullptr, 10);  // override for short diagnostic runs
     if (const char* ia = getenv("TB_ISA")) isa_mode = (atoi(ia) != 0);
     vluint64_t overall_deadline  = 900000000;
+    if (pty_fd >= 0) overall_deadline = ~0ULL;
 
     int dpi_ready = 0;
 #if VM_TRACE_VCD
@@ -424,7 +439,7 @@ int main(int argc, char** argv) {
                 if (isa_mode) {    // jump to the preloaded image (count 0: no load)
                     std::vector<uint8_t> hdr = { 0x00, 0x00, 0x00, 0x80, 0, 0, 0, 0 };
                     send_bytes(hdr);
-                    new_stage(ST_ISA);
+                    new_stage(pty_fd >= 0 ? ST_BOARD : ST_ISA);
                     break;
                 }
                 // loader header: u32le dst, u32le len (chunked path:
@@ -547,6 +562,14 @@ int main(int argc, char** argv) {
                            g_tohost, g_tohost >> 1, (unsigned long long)g_cycle);
                     fail("tohost reports failure");
                 }
+            }
+            break;
+
+          case ST_BOARD:
+            if ((g_cycle & 63) == 0) {     // a byte takes 400 cycles on the wire; the driver queues
+                unsigned char buf[64];
+                ssize_t n = read(pty_fd, buf, sizeof buf);
+                for (ssize_t i = 0; i < n; i++) send_byte(buf[i]);
             }
             break;
 

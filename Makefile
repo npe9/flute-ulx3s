@@ -116,7 +116,7 @@ ROM_BSVI := $(REPO)/src_Testbench/SoC/fn_read_ROM_RV32.bsvi
 
 # ================================================================
 
-.PHONY: all compile bootrom synth bitstream sw program run clean dbg-% sim-boot sim-repl sim-board sim-dmi-tb sim-gate
+.PHONY: all compile bootrom synth bitstream sw program run clean dbg-% sim-boot sim-repl sim-board sim-board-verilator sim-dmi-tb sim-gate
 
 all: bitstream sw
 
@@ -323,6 +323,15 @@ sim-gate:
 # takes 400 cycles, so typing is slow but usable.
 sim-board:
 	SIM_PTY=1 $(MAKE) SIM_REPL_PROBES= sim-repl
+
+# sim-board-verilator: the same virtual board (UART on build/sim-tty) on the Verilator strict-BRAM
+# Linux harness (sim/linux_bram, no coverage) -- several times faster than Bluesim.  SIM_BLOB is
+# the image to preload and start (default none: the boot ROM waits for scripts/loader.py --sim).
+sim-board-verilator: $(SYNTH_VERILOG)
+	cd sim/linux_bram && TB_NOCOV=1 TB_HELLO_DEADLINE=1 BUILD_DIR=obj_dir_board ./run.sh \
+	    --strict=warn ../../sw/hello.bin > ../../$(BUILD)/board-verilator-build.log 2>&1 || true
+	@test -x sim/linux_bram/obj_dir_board/Vsv_tb_top || { tail -40 $(BUILD)/board-verilator-build.log; exit 1; }
+	BUILD_DIR=obj_dir_board sim/linux_bram/linux_run.py --board $${SIM_BLOB:-none}
 
 # SIM_REPL_PROBES= (empty): no UART / SDRAM-model / capture probes (CI; the console is still logged).
 # bsc -u does not see -D changes, so the probe-free build (sim-board, CI) gets its own dirs and

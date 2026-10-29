@@ -5,16 +5,24 @@
 # (build/sim-ctl): a GPIO LED write shows up as "leds XX", and BTN1 pressed there reads back
 # through the GPIO button register.  Uses the probe-free REPL
 # TB build that ci/bluesim_gate.sh already made.  Log: build/ci/sim-board.log.
+# BOARD=verilator: the Verilator board (sim/linux_bram/linux_run.py --board none) on the already
+# built $BUILD_DIR (default obj_dir_lx); it has no board-controls pty, so DMI checks only.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p build/ci
 rm -f build/sim-tty build/sim-ctl
 set -m                      # the sim gets its own process group, so one kill stops make + the sim
-SIM_BLOB=none make sim-board > build/ci/sim-board.log 2>&1 &
+if [ "${BOARD:-bluesim}" = verilator ]; then
+    BUILD_DIR="${BUILD_DIR:-obj_dir_lx}" sim/linux_bram/linux_run.py --board none > build/ci/sim-board.log 2>&1 &
+    link=build/sim-tty
+else
+    SIM_BLOB=none make sim-board > build/ci/sim-board.log 2>&1 &
+    link=build/sim-ctl      # linked after build/sim-tty
+fi
 sim=$!
 trap 'kill -TERM -- -$sim 2>/dev/null' EXIT
 deadline=$((SECONDS + 3600))
-until [ -e build/sim-ctl ]; do                # linked after build/sim-tty
+until [ -e $link ]; do
     if ! kill -0 $sim 2>/dev/null || [ $SECONDS -gt $deadline ]; then
         tail -20 build/ci/sim-board.log; echo "board smoke: FAIL (no pty)"; exit 1
     fi
@@ -27,7 +35,7 @@ sys.path.insert(0, "scripts")
 import dmi as D
 
 GPIO_LEDS, GPIO_BTN1 = 0xC0002000, 0xC0002004
-ctl = os.open("build/sim-ctl", os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+ctl = os.open("build/sim-ctl", os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK) if os.path.exists("build/sim-ctl") else None
 
 def ctl_wait(text, timeout=120):
     buf, t0 = b"", time.time()
@@ -48,6 +56,10 @@ try:
     v = d.mem_read32(0x80020000)
     print(f"SDRAM 0x80020000 = {v:#010x}")
     assert v == 0xCAFEF00D, "system-bus readback mismatch"
+    if ctl is None:
+        d.resume()
+        print("board smoke: PASS (no board controls on this board)")
+        sys.exit(0)
     d.mem_write32(GPIO_LEDS, 0x5A)          # LED7 also shows SDRAM init_done: 0x5A -> 0xDA
     assert ctl_wait(b"leds da"), "LED write not reported on build/sim-ctl"
     print("LEDs 0x5a -> 'leds da' on build/sim-ctl")
