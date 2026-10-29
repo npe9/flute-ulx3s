@@ -2,6 +2,7 @@
 // Host pseudo-terminals for the virtual boards: Bluesim (test/sim_preload.c, `make sim-board`)
 // and Verilator (sim/linux_bram/tb_top.cpp, `make sim-board-verilator`).
 // ================================================================
+// Needs _GNU_SOURCE defined before the first system header on glibc (C; g++ defines it).
 #ifndef SIM_PTY_H
 #define SIM_PTY_H
 
