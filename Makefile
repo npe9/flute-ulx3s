@@ -98,7 +98,7 @@ ROM_BSVI := $(REPO)/src_Testbench/SoC/fn_read_ROM_RV32.bsvi
 
 # ================================================================
 
-.PHONY: all compile bootrom synth bitstream sw program run clean dbg-% sim-boot sim-repl sim-dmi-tb sim-gate
+.PHONY: all compile bootrom synth bitstream sw program run clean dbg-% sim-boot sim-repl sim-board sim-dmi-tb sim-gate
 
 all: bitstream sw
 
@@ -297,6 +297,13 @@ sim-gate:
 	if [ "$$e1" != "0" ] || [ "$$e2" != "0" ]; then echo "sim-gate: FAIL (ERROR)"; exit 1; fi; \
 	if [ "$$t1" = "0" ]; then echo "sim-gate: FAIL (boot did not reach TIMEOUT end)"; exit 1; fi; \
 	echo "sim-gate: PASS"
+
+# sim-board: the Bluesim SoC as a virtual board.  Preloads SIM_BLOB (default: the TempleOS REPL)
+# into SDRAM, jumps to it, and bridges the UART to a host pty (link build/sim-tty); attach with
+# `picocom build/sim-tty`.  Runs until killed (or SIM_MAX_CYCLES).  ~200K cycles/s: a byte
+# takes 400 cycles, so typing is slow but usable.
+sim-board:
+	SIM_PTY=1 $(MAKE) SIM_REPL_PROBES= sim-repl
 
 # SIM_REPL_PROBES= (empty): no UART / SDRAM-model / capture probes (CI; the console is still logged).
 SIM_REPL_PROBES ?= -D UART_PROBES -D MDL_PROBES -D SDCAP_PROBES

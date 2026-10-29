@@ -62,6 +62,9 @@ import "BDPI" function Bit #(16) c_blob_half (Bit #(32) idx);
 import "BDPI" function ActionValue #(Bit #(8))  c_sim_mode ();
 import "BDPI" function ActionValue #(Bit #(64)) c_sim_max_cycles (Bit #(64) dflt);
 import "BDPI" function ActionValue #(Bit #(8))  c_console (Bit #(8) c);
+// Interactive board mode (SIM_PTY=1, `make sim-board`): UART <-> host pty (test/sim_preload.c).
+import "BDPI" function ActionValue #(Bit #(16)) c_pty_getc ();
+import "BDPI" function Action c_pty_putc (Bit #(8) c);
 
 // ================================================================
 
@@ -181,6 +184,7 @@ module mkRepl_Boot_Tb (Empty);
    Reg #(Phase)     phase    <- mkReg (P_PRELOAD);
    Reg #(Bit #(40)) rg_cycle <- mkReg (0);
    Reg #(Bool)      console_mode <- mkReg (False);
+   Reg #(Bool)      pty_on       <- mkReg (False);
    Reg #(Bit #(40)) rg_max_cycles <- mkReg (fromInteger (max_cycles));
    Reg #(Bit #(40)) ph_enter <- mkReg (0);
    Reg #(Bit #(32)) ph_idx   <- mkReg (0);
@@ -422,8 +426,10 @@ module mkRepl_Boot_Tb (Empty);
       let md <- c_sim_mode;
       let mx <- c_sim_max_cycles (fromInteger (max_cycles));
       console_mode  <= (md != 0);
+      pty_on        <= (md [1] == 1);
       rg_max_cycles <= truncate (mx);
-      if (md != 0) $display ("[tb] console mode: pass on SIM_PASS_STR, cap %0d cycles", mx);
+      if (md [0] == 1) $display ("[tb] console mode: pass on SIM_PASS_STR, cap %0d cycles", mx);
+      if (md [1] == 1) $display ("[tb] interactive mode: UART bridged to a host pty");
    endrule
 
    // --------------------------------------------------
@@ -490,6 +496,12 @@ module mkRepl_Boot_Tb (Empty);
          ph_idx <= 0;
          $display ("[tb] sending zero-length header (jump to 0x80000000)");
       end
+   endrule
+
+   // Interactive mode: host pty -> UART RX (polled every 64 cycles; a byte takes 400).
+   rule rl_pty_rx (phase == P_CONSOLE && pty_on && f_rx_host.notFull && (rg_cycle [5:0] == 0));
+      let v <- c_pty_getc;
+      if (v [8] == 1) f_rx_host.enq (v [7:0]);
    endrule
 
    rule rl_feed_hdr (phase == P_HDR && f_rx_host.notFull);
@@ -908,8 +920,12 @@ module mkRepl_Boot_Tb (Empty);
                   end
                end
                else begin
-                  $display ("%c", c);
-                  $display ("[tb] txc %02x", c);
+                  if (pty_on)
+                     c_pty_putc (c);
+                  else begin
+                     $display ("%c", c);
+                     $display ("[tb] txc %02x", c);
+                  end
                   if (console_mode) begin
                      let hit <- c_console (c);
                      if (hit != 0) begin

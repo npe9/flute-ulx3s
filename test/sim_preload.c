@@ -12,6 +12,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <termios.h>
 
 static unsigned char *blob      = NULL;
 static unsigned int   blob_bytes = 0;
@@ -79,17 +82,59 @@ static size_t pass_hit  = 0;     // length of the matched prefix (naive scan, fi
 static char  *con       = NULL;
 static size_t con_len   = 0, con_cap = 0;
 
+// Interactive board mode (SIM_PTY=1, `make sim-board`): the SoC's UART is bridged to a host
+// pseudo-terminal; attach with `picocom build/sim-tty` (or screen).  The link path is
+// $SIM_PTY_LINK (default build/sim-tty).
+static int pty_fd = -1, pty_slave = -1;
+
+static int pty_open (void)
+{
+    int fd = posix_openpt (O_RDWR | O_NOCTTY);
+    if (fd < 0 || grantpt (fd) || unlockpt (fd)) { perror ("[sim] posix_openpt"); return 0; }
+    const char *name = ptsname (fd);
+    // Keep our own slave open in raw mode: the line discipline stays raw for whoever attaches,
+    // and the master never sees EIO between clients.
+    pty_slave = open (name, O_RDWR | O_NOCTTY);
+    struct termios t;
+    if (pty_slave >= 0 && tcgetattr (pty_slave, &t) == 0) { cfmakeraw (&t); tcsetattr (pty_slave, TCSANOW, &t); }
+    fcntl (fd, F_SETFL, fcntl (fd, F_GETFL) | O_NONBLOCK);
+    const char *link = getenv ("SIM_PTY_LINK");
+    if (!link) link = "build/sim-tty";
+    unlink (link);
+    if (symlink (name, link) != 0) link = name;
+    fprintf (stderr, "[sim] UART on %s -- attach with: picocom %s\n", name, link);
+    pty_fd = fd;
+    return 1;
+}
+
+// bit 0: SIM_PASS_STR set (console mode, pass on the string); bit 1: SIM_PTY (interactive).
 unsigned char c_sim_mode (void)
 {
     pass_str = getenv ("SIM_PASS_STR");
     if (pass_str) pass_len = strlen (pass_str);
-    return pass_str && pass_len ? 1 : 0;
+    const char *p = getenv ("SIM_PTY");
+    int pty = p && *p && strcmp (p, "0") != 0 && pty_open ();
+    return (pass_str && pass_len ? 1 : 0) | (pty ? 2 : 0);
 }
 
 unsigned long long c_sim_max_cycles (unsigned long long dflt)
 {
     const char *s = getenv ("SIM_MAX_CYCLES");
-    return s ? strtoull (s, NULL, 0) : dflt;
+    if (s) return strtoull (s, NULL, 0);
+    return pty_fd >= 0 ? 0xFFFFFFFFFFULL : dflt;    // interactive: run until killed
+}
+
+// Next host byte for the UART RX line: 0x100 | byte, or 0 when none is waiting.
+unsigned short c_pty_getc (void)
+{
+    unsigned char b;
+    return (pty_fd >= 0 && read (pty_fd, &b, 1) == 1) ? (unsigned short) (0x100 | b) : 0;
+}
+
+// A byte the SoC transmitted (dropped when nobody drains the pty and its buffer is full).
+void c_pty_putc (unsigned char c)
+{
+    if (pty_fd >= 0) (void) write (pty_fd, &c, 1);
 }
 
 unsigned char c_console (unsigned char c)

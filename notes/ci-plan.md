@@ -47,7 +47,15 @@ same flows on every push so local changes cannot silently break the system or th
   a BSV LFSR for the ring-oscillator TRNG (`BSIM_TRNG`). Image: `ghcr.io/npe9/flute-ci`
   (public). Pushes cancel a branch's running CI (`cancel-in-progress`), docs-only pushes skip it.
 
-## 3. Virtual ULX3S: a BSV board simulator for users without hardware -- planned
+## 3. Virtual ULX3S: a BSV board simulator for users without hardware -- first slice done
+
+Done (2026-10-29): `make sim-board` -- Repl_Boot_Tb's preload + jump, with the UART bridged to a
+host pty (`SIM_PTY=1`, link `build/sim-tty`); `ci/board_smoke.py` typed `1+1;` -> `=2` and
+`(2+3)*4;` -> `=20` into the TempleOS REPL through it. Next: a C-backed (calloc) SDRAM array so
+preload stops costing 16M cycles of zero-fill; the real UART loader path over the pty (no
+preload) for `scripts/loader.py`; DMI over the same pty; LEDs/buttons; the factored
+`mkULX3S_Sim` top below.
+
 
 A Bluesim (and optionally Verilator) executable that behaves like the board from the host's point
 of view, so the normal tools work against it unchanged: `scripts/loader.py`, `picocom`,
