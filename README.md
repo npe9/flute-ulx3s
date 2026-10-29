@@ -70,10 +70,11 @@ source and boots them to user space in Verilator and in Bluesim.
 | Linux to `/init`, strict Verilator (no coverage) | see the `linux` job in `.github/workflows/ci.yml` (`sim/linux_bram`) | 122M | — / 21 min |
 | Linux to `/init`, Bluesim | `SIM_BLOB=linux-sw/out-fp/fw_payload.bin SIM_PASS_STR="tick 2" make FP=1 FPU_TRIM=1 sim-repl` | 122M | 18 min incl. build / 1h49m (at 139M, before the C array) |
 
-**Virtual board:** `make sim-board` preloads the image, starts it, and bridges the SoC's UART
-to a host pty: attach with `picocom build/sim-tty` and type at the TempleOS REPL (or, on
+**Virtual board:** `make sim-board` builds `test/ULX3S_Sim.bsv` -- `mkULX3S_Top`, the netlist
+the FPGA gets, with the board's SDRAM, UART, LEDs and BTN1 modelled around it (shared pieces in
+`test/Board_Models.bsv`) -- preloads the image, starts it, and bridges the SoC's UART to a host pty: attach with `picocom build/sim-tty` and type at the TempleOS REPL (or, on
 `linux-isa`, `SIM_BLOB=linux-sw/out-fp/fw_payload.bin make FP=1 FPU_TRIM=1 sim-board` for the
-Linux console). It runs until killed; at ~200K cycles/s a keystroke takes a few ms of host time
+Linux console). It runs until killed; at ~150K cycles/s a keystroke takes a few ms of host time
 and the prompt appears ~10 min after start (the SDRAM model is a calloc'd C array, preloaded at
 time 0).
 `ci/board_smoke.py` drives it like a user (wait for the prompt, type `1+1;`, expect `=2`).
@@ -85,6 +86,8 @@ The UART debug bridge works over the same pty: `python3 scripts/dmi.py -p build/
 A second pty holds the board controls: `cat build/sim-ctl` prints `leds XX` on every LED change,
 and `printf 1 > build/sim-ctl` / `printf 0 > build/sim-ctl` press and release BTN1.
 CI checks DMI, LEDs and BTN1 on every push (`ci/board_dmi_smoke.sh`).
+`SIM_PTY=0 make sim-board` prints the console on stdout instead (with `SIM_PASS_STR` ending the
+run), for scripts.
 `make FP=1 FPU_TRIM=1 sim-board-verilator` is the same board on the Verilator strict-BRAM Linux
 harness (UART pty only, no board controls): `SIM_BLOB=$PWD/linux-sw/out-fp/fw_payload.bin` boots
 Linux to `/init` "tick 2" in 9 min on an M-series Mac (Bluesim: ~15), and the GitHub runner runs

@@ -317,12 +317,23 @@ sim-gate:
 	if [ "$$t1" = "0" ]; then echo "sim-gate: FAIL (boot did not reach TIMEOUT end)"; exit 1; fi; \
 	echo "sim-gate: PASS"
 
-# sim-board: the Bluesim SoC as a virtual board.  Preloads SIM_BLOB (default: the TempleOS REPL)
-# into SDRAM, jumps to it, and bridges the UART to a host pty (link build/sim-tty); attach with
-# `picocom build/sim-tty`.  Runs until killed (or SIM_MAX_CYCLES).  ~200K cycles/s: a byte
-# takes 400 cycles, so typing is slow but usable.
-sim-board:
-	SIM_PTY=1 $(MAKE) SIM_REPL_PROBES= sim-repl
+# sim-board: the virtual ULX3S (test/ULX3S_Sim.bsv): mkULX3S_Top with the board's SDRAM, UART,
+# LEDs and BTN1 modelled.  Preloads SIM_BLOB (default: the TempleOS REPL) into SDRAM and jumps to
+# it (SIM_BLOB=none: the boot ROM waits for scripts/loader.py --sim).  SIM_PTY=1 (the default
+# here) bridges the UART to a host pty (link build/sim-tty; attach with `picocom build/sim-tty`)
+# and the board controls to build/sim-ctl, and runs until killed (or SIM_MAX_CYCLES).
+# SIM_PTY=0: console on stdout, SIM_PASS_STR ends the run.  ~150K cycles/s: a byte takes 400
+# cycles, so typing is slow but usable.
+# Shares the probe-free objects of sim-repl (same flags): the SoC is compiled once for both.
+SIM_PTY ?= 1
+sim-board: $(ROM_BSVI)
+	mkdir -p $(BUILD)/bsc-sim-repl-np $(BUILD)/sim-repl-np
+	$(BSC) -u -sim -g mkULX3S_Sim $(BSC_FLAGS) $(SIM_DEFINES) \
+	    -p $(BSC_PATH):test -bdir $(BUILD)/bsc-sim-repl-np -simdir $(BUILD)/sim-repl-np \
+	    test/ULX3S_Sim.bsv
+	$(BSC) -sim -e mkULX3S_Sim -bdir $(BUILD)/bsc-sim-repl-np \
+	    -simdir $(BUILD)/sim-repl-np -o $(BUILD)/ulx3s_sim test/sim_preload.c
+	SIM_PTY=$(SIM_PTY) PATH="$(abspath $(dir $(BSC))):$$PATH" $(BUILD)/ulx3s_sim
 
 # sim-board-verilator: the same virtual board (UART on build/sim-tty) on the Verilator strict-BRAM
 # Linux harness (sim/linux_bram, no coverage) -- several times faster than Bluesim.  SIM_BLOB is
@@ -334,7 +345,7 @@ sim-board-verilator: $(SYNTH_VERILOG)
 	BUILD_DIR=obj_dir_board sim/linux_bram/linux_run.py --board $${SIM_BLOB:-none}
 
 # SIM_REPL_PROBES= (empty): no UART / SDRAM-model / capture probes (CI; the console is still logged).
-# bsc -u does not see -D changes, so the probe-free build (sim-board, CI) gets its own dirs and
+# bsc -u does not see -D changes, so the probe-free build (CI) gets its own dirs and
 # executable (-np) and never reuses probed objects.
 SIM_REPL_PROBES ?= -D UART_PROBES -D MDL_PROBES -D SDCAP_PROBES
 REPL_NP := $(if $(strip $(SIM_REPL_PROBES)),,-np)

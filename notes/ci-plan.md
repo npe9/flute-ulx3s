@@ -64,8 +64,14 @@ BTN1 (polled every 4096 cycles); the CI smoke writes the GPIO LEDs and reads BTN
 `make sim-board-verilator` (linux-isa): the Verilator strict-BRAM Linux harness with `TB_PTY=1`
 (`linux_run.py --board`), UART on the same pty (shared `test/sim_pty.h`); Linux "tick 2" in
 538 s locally (~227K cycles/s vs Bluesim ~145K); CI's linux job runs the DMI smoke on it.
-Next: the factored `mkULX3S_Sim` top below; board controls and a main-branch variant for the
-Verilator board.
+Factored top (2026-10-29): `make sim-board` now builds `test/ULX3S_Sim.bsv` (`mkULX3S_Sim`:
+`mkULX3S_Top` + SDRAM model + UART/pty bridge + LEDs/BTN1, no test script); the SDRAM model, the
+clock/baud constants and the BDPI imports moved to `test/Board_Models.bsv`, shared with
+`Repl_Boot_Tb` (the extraction is cycle-exact: same REPL TX frames at the same cycles on main;
+Linux "tick 2" at the same cycle here). `SIM_PTY=0` sends the console to stdout and
+`SIM_PASS_STR` ends the run, so the gates can move onto the board top. Next: bluesim_gate /
+bluesim-linux as thin scripts over `mkULX3S_Sim` (keeping Repl_Boot_Tb's DMI dump-on-hang); board
+controls and a main-branch variant for the Verilator board.
 
 
 A Bluesim (and optionally Verilator) executable that behaves like the board from the host's point
