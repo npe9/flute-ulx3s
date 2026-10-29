@@ -71,6 +71,9 @@ import "BDPI" function ActionValue #(Bit #(8))  c_console (Bit #(8) c);
 // Interactive board mode (SIM_PTY=1, `make sim-board`): UART <-> host pty (test/sim_preload.c).
 import "BDPI" function ActionValue #(Bit #(16)) c_pty_getc ();
 import "BDPI" function Action c_pty_putc (Bit #(8) c);
+// Board controls pty (sim-board): LED changes out, BTN1 level in.
+import "BDPI" function ActionValue #(Bit #(8)) c_ctl_btn (Bit #(8) cur);
+import "BDPI" function Action c_ctl_leds (Bit #(8) leds, Bit #(64) cycle);
 
 // ================================================================
 
@@ -251,6 +254,7 @@ module mkRepl_Boot_Tb (Empty);
    Reg #(Bit #(16)) tx_frame_age <- mkReg (0);
 
    Reg #(Bit #(8)) prev_leds <- mkReg (8'hFF);
+   Reg #(Bit #(1)) rg_btn1   <- mkReg (0);
 
    // blob preload (c_mem_load, at time 0)
    Reg #(Bool)      pl_opened <- mkReg (False);
@@ -942,13 +946,22 @@ module mkRepl_Boot_Tb (Empty);
 
    rule rl_pins;
       dut.serial_rxd (rg_rxd);
-      dut.btn1 (1'b0);
+      dut.btn1 (rg_btn1);
+      // BTN1 from the board-controls pty, polled every 4096 cycles (~20 ms of host time).  Here,
+      // not in a rule of its own: bsc orders imported actions as conflicting, and a separate rule
+      // firing when rg_cycle[11:0] == 0 blocked this one -- rg_cycle stopped and the TB froze.
+      if (pty_on && (rg_cycle [11:0] == 0)) begin
+         let b <- c_ctl_btn (zeroExtend (rg_btn1));
+         if (b [0] != rg_btn1) $display ("[tb] BTN1 = %0d (cycle %0d)", b [0], rg_cycle);
+         rg_btn1 <= b [0];
+      end
       rg_cycle <= rg_cycle + 1;
       quiet <= (w_char ? 0 : quiet + 1);
       let l = dut.leds;
       if (l != prev_leds) begin
          prev_leds <= l;
          $display ("[tb] LEDs = %02x (cycle %0d)", l, rg_cycle);
+         if (pty_on) c_ctl_leds (l, zeroExtend (rg_cycle));
       end
       if ((rg_cycle % fromInteger (50_000_000)) == 0)
          $display ("[tb] %0d cycles", rg_cycle);

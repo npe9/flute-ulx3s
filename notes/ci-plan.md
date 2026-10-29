@@ -59,7 +59,9 @@ boot ROM loader protocol over the pty (verified: 308-byte hello loaded, banner p
 `scripts/dmi.py -p build/sim-tty ...`: the UART debug bridge over the same pty (dmi.py sees a pty
 and stretches its timeouts x200; ~0.2 s per command); CI runs `ci/board_dmi_smoke.sh` (DM
 version, halt in the ROM, SDRAM poke/readback over the system bus, resume) in the bluesim job.
-Next: LEDs/buttons; the factored `mkULX3S_Sim` top below.
+Board controls on a second pty (`build/sim-ctl`): `leds XX cycle N` lines out, `1`/`0` in for
+BTN1 (polled every 4096 cycles); the CI smoke writes the GPIO LEDs and reads BTN1 back over DMI.
+Next: the factored `mkULX3S_Sim` top below.
 
 
 A Bluesim (and optionally Verilator) executable that behaves like the board from the host's point

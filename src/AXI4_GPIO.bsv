@@ -98,7 +98,9 @@ module mkAXI4_GPIO (AXI4_GPIO_IFC);
       else if (byte_addr [2:0] == 3'b000)
 	 rdata = zeroExtend (rg_leds);
       else if (byte_addr [2:0] == 3'b100)
-	 rdata = zeroExtend (rg_btn1);
+	 // a 64-bit fabric carries the word at +4 in lanes [63:32] (as SoC_Info does); the low
+	 // lane always read 0 -- found by the virtual board's BTN1 smoke
+	 rdata = zeroExtend (rg_btn1) << ((valueOf (Wd_Data) == 64) ? 32 : 0);
 
       let rdr = AXI4_Rd_Data {rid:   rda.arid,
 			      rdata: rdata,
