@@ -65,7 +65,13 @@ Green on GitHub and fast-forwarded (2026-10-29): `main` = b8d3423 (run 408806701
 = 96a3949 (run 40880673599, adds `make sim-board-verilator` and its DMI smoke in the linux job).
 Note: this includes an RTL fix (`AXI4_GPIO` BTN1 read lane on the 64-bit bus), so `main` no
 longer matches the board's custody bitstream until it is rebuilt.
-Next: the factored `mkULX3S_Sim` top below.
+Factored top (2026-10-29): `make sim-board` now builds `test/ULX3S_Sim.bsv` (`mkULX3S_Sim`:
+`mkULX3S_Top` + SDRAM model + UART/pty bridge + LEDs/BTN1, no test script); the SDRAM model, the
+clock/baud constants and the BDPI imports moved to `test/Board_Models.bsv`, shared with
+`Repl_Boot_Tb` (the extraction is cycle-exact: same 25,399 TX frames at the same cycles in the REPL
+gate). `SIM_PTY=0` sends the console to stdout and `SIM_PASS_STR` ends the run, so the gates can
+move onto the board top. Next: bluesim_gate / bluesim-linux as thin scripts over `mkULX3S_Sim`
+(keeping Repl_Boot_Tb's DMI dump-on-hang), then a Verilator build of the same top.
 
 
 A Bluesim (and optionally Verilator) executable that behaves like the board from the host's point

@@ -3,8 +3,8 @@
 # the UART as on the board), then scripts/dmi.py over the pty: debug module version, halt with
 # dpc inside the boot ROM, a system-bus SDRAM write/readback, resume; then the board controls
 # (build/sim-ctl): a GPIO LED write shows up as "leds XX", and BTN1 pressed there reads back
-# through the GPIO button register.  Uses the probe-free REPL
-# TB build that ci/bluesim_gate.sh already made.  Log: build/ci/sim-board.log.
+# through the GPIO button register.  The board top (test/ULX3S_Sim.bsv) reuses the probe-free
+# SoC objects that ci/bluesim_gate.sh's sim-repl already built.  Log: build/ci/sim-board.log.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p build/ci
