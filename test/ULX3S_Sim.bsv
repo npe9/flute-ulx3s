@@ -6,7 +6,8 @@
 //           TempleOS REPL) placed in it at time 0, or SIM_BLOB=none to load over the UART.
 //   UART    the FTDI pins, 8N1 at the SoC's baud.  SIM_PTY=1: bridged to a host pty
 //           (build/sim-tty) for loader.py --sim, dmi.py, picocom.  Otherwise the console goes
-//           to stdout, and SIM_PASS_STR ends the run when it appears (CI).
+//           to stdout (and, contiguous, to SIM_CONSOLE_LOG), and SIM_PASS_STR ends the run
+//           when it appears (CI).
 //   LEDs    changes printed; with SIM_PTY=1 also "leds XX cycle N" lines on build/sim-ctl.
 //   BTN1    '1' / '0' on build/sim-ctl press / release it.
 //
@@ -156,10 +157,10 @@ module mkULX3S_Sim (Empty);
             n_active = False;
             let c = tx_sh;
             if (pty_on) c_pty_putc (c);
-            else if (! pass_on) $write ("%c", c);    // with a pass string, c_console echoes it
-            if (pass_on) begin
+            else begin
+               // c_console echoes to stdout (and SIM_CONSOLE_LOG) and matches SIM_PASS_STR
                let hit <- c_console (c);
-               if (hit != 0) begin
+               if (pass_on && (hit != 0)) begin
                   $display ("\n[board] PASS: SIM_PASS_STR seen at cycle %0d", rg_cycle);
                   $finish (0);
                end

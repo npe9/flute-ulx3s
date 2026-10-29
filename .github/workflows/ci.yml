@@ -4,6 +4,7 @@
 #   strict     Verilator strict-BRAM J1 boot gate + cache/AMO tests (the trusted functional gates)
 #   linux-sw   OpenSBI + Linux + /init (only on branches whose SoC has S-mode)
 #   linux      Linux boot to user space in the Verilator harness (same condition)
+#   bluesim-linux  the same Linux boot on the Bluesim virtual board (make sim-board, SIM_PTY=0)
 #   bitstream  yosys + nextpnr at the 25 MHz constraint (fails if timing fails)
 # Toolchain: ci/Dockerfile, published as ghcr.io/<owner>/flute-ci:<hash of the Dockerfile>.
 name: ci
@@ -229,15 +230,16 @@ jobs:
         with: { submodules: recursive }
       - uses: actions/download-artifact@v4
         with: { name: linux-sw, path: linux-sw/out-fp }
-      - name: Bluesim boot of OpenSBI + Linux to /init "tick 2" (139M cycles locally)
+      - name: Virtual board (Bluesim mkULX3S_Sim) boots OpenSBI + Linux to /init "tick 2" (122M cycles)
         run: |
           mkdir -p build/ci
-          SIM_BLOB=linux-sw/out-fp/fw_payload.bin SIM_PASS_STR="tick 2" SIM_MAX_CYCLES=300000000 \
-            make ${{ needs.setup.outputs.makeflags }} SIM_REPL_PROBES= sim-repl > build/ci/bluesim-linux.log 2>&1 || true
-          grep -a "\[tb\] PASS" build/ci/bluesim-linux.log
-          ci/console_text.py build/ci/bluesim-linux.log | grep -a "tick 1" | grep -q "fp ok"
+          SIM_PTY=0 SIM_BLOB=linux-sw/out-fp/fw_payload.bin SIM_PASS_STR="tick 2" SIM_MAX_CYCLES=300000000 \
+            SIM_CONSOLE_LOG=build/ci/bluesim-linux-console.txt \
+            make ${{ needs.setup.outputs.makeflags }} sim-board > build/ci/bluesim-linux.log 2>&1 || true
+          grep -a "\[board\] PASS" build/ci/bluesim-linux.log
+          grep -a "tick 1" build/ci/bluesim-linux-console.txt | grep -q "fp ok"
       - if: always()
         uses: actions/upload-artifact@v4
         with:
           name: bluesim-linux-log
-          path: build/ci/bluesim-linux.log
+          path: build/ci/bluesim-linux*

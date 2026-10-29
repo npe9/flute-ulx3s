@@ -69,9 +69,11 @@ Factored top (2026-10-29): `make sim-board` now builds `test/ULX3S_Sim.bsv` (`mk
 clock/baud constants and the BDPI imports moved to `test/Board_Models.bsv`, shared with
 `Repl_Boot_Tb` (the extraction is cycle-exact: same REPL TX frames at the same cycles on main;
 Linux "tick 2" at the same cycle here). `SIM_PTY=0` sends the console to stdout and
-`SIM_PASS_STR` ends the run, so the gates can move onto the board top. Next: bluesim_gate /
-bluesim-linux as thin scripts over `mkULX3S_Sim` (keeping Repl_Boot_Tb's DMI dump-on-hang); board
-controls and a main-branch variant for the Verilator board.
+`SIM_PASS_STR` ends the run, so the gates can move onto the board top. CI's bluesim-linux job now
+boots Linux on the board top (`SIM_PTY=0 make sim-board`, console text in `SIM_CONSOLE_LOG`; tick 2
+at the same 122,123,883 cycles). Next: the REPL gate stays on Repl_Boot_Tb (its DMI dump-on-hang
+is the only diagnostic when the REPL stalls) until the board top has an equivalent; board controls
+and a main-branch variant for the Verilator board.
 
 
 A Bluesim (and optionally Verilator) executable that behaves like the board from the host's point

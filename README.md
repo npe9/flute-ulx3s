@@ -68,7 +68,7 @@ source and boots them to user space in Verilator and in Bluesim.
 | TempleOS HolyC REPL, `1+1;` -> `=2` | `ci/bluesim_gate.sh` (both sims, TempleOS built from source) | ~73M to the prompt | 11 min incl. build (main) / 1h22m (before the C array) |
 | Strict-BRAM Verilator boot (J1, with coverage) | `sim/strict_bram/run.sh --strict=error` | 54M | — / 4h35m |
 | Linux to `/init`, strict Verilator (no coverage) | see the `linux` job in `.github/workflows/ci.yml` (`sim/linux_bram`) | 122M | — / 21 min |
-| Linux to `/init`, Bluesim | `SIM_BLOB=linux-sw/out-fp/fw_payload.bin SIM_PASS_STR="tick 2" make FP=1 FPU_TRIM=1 sim-repl` | 122M | 18 min incl. build / 1h49m (at 139M, before the C array) |
+| Linux to `/init`, Bluesim | `SIM_PTY=0 SIM_BLOB=linux-sw/out-fp/fw_payload.bin SIM_PASS_STR="tick 2" make FP=1 FPU_TRIM=1 sim-board` | 122M | 18 min incl. build / 1h49m (at 139M, before the C array) |
 
 **Virtual board:** `make sim-board` builds `test/ULX3S_Sim.bsv` -- `mkULX3S_Top`, the netlist
 the FPGA gets, with the board's SDRAM, UART, LEDs and BTN1 modelled around it (shared pieces in
@@ -93,9 +93,10 @@ harness (UART pty only, no board controls): `SIM_BLOB=$PWD/linux-sw/out-fp/fw_pa
 Linux to `/init` "tick 2" in 9 min on an M-series Mac (Bluesim: ~15), and the GitHub runner runs
 Verilator ~5x faster than Bluesim; without `SIM_BLOB` the boot ROM waits for `loader.py --sim`.
 
-`SIM_BLOB` (any image to preload at 0x80000000), `SIM_PASS_STR` (stop when the UART prints it)
-and `SIM_MAX_CYCLES` turn `make sim-repl` into a general console runner; `ci/console_text.py`
-prints the decoded UART text of its log. Bluesim's BRAM model is idealized (see AGENTS.md), so
+`SIM_BLOB` (any image to preload at 0x80000000), `SIM_PASS_STR` (stop when the UART prints it),
+`SIM_MAX_CYCLES` and `SIM_CONSOLE_LOG` (the UART text, contiguous, in a file) turn
+`SIM_PTY=0 make sim-board` into a general console runner (`make sim-repl` takes the same
+variables; `ci/console_text.py` decodes the UART text from its log). Bluesim's BRAM model is idealized (see AGENTS.md), so
 the strict Verilator harness stays the functional gate of record.
 
 ```bash

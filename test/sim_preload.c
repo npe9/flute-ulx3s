@@ -135,6 +135,8 @@ void c_mem_wr (unsigned int addr, unsigned short data)
 // ---- Console mode (Linux / any image that is judged on its console) ----
 // SIM_PASS_STR set: the TB skips the REPL prompt/command phases and feeds every console byte here;
 // the sim ends with a pass once the string has appeared.  SIM_MAX_CYCLES overrides the TB cap.
+// SIM_CONSOLE_LOG=<file>: the console bytes also go there, contiguous (on stdout they interleave
+// with the SoC's own $display lines).
 unsigned char c_sim_mode (void);
 unsigned long long c_sim_max_cycles (unsigned long long dflt);
 unsigned char c_console (unsigned char c);
@@ -144,6 +146,7 @@ static size_t pass_len  = 0;
 static size_t pass_hit  = 0;     // length of the matched prefix (naive scan, fine for short strings)
 static char  *con       = NULL;
 static size_t con_len   = 0, con_cap = 0;
+static FILE  *con_log   = NULL;
 
 // Interactive board mode (SIM_PTY=1, `make sim-board`): the SoC's UART is bridged to a host
 // pseudo-terminal; attach with `picocom build/sim-tty` (or screen).  The link path is
@@ -166,6 +169,8 @@ unsigned char c_sim_mode (void)
 {
     pass_str = getenv ("SIM_PASS_STR");
     if (pass_str) pass_len = strlen (pass_str);
+    const char *cl = getenv ("SIM_CONSOLE_LOG");
+    if (cl && *cl && ! (con_log = fopen (cl, "w"))) perror (cl);
     const char *p = getenv ("SIM_PTY");
     int pty = p && *p && strcmp (p, "0") != 0 && pty_open ();
     const char *b = getenv ("SIM_BLOB");
@@ -218,6 +223,10 @@ unsigned char c_console (unsigned char c)
 {
     fputc (c, stdout);
     if (c == '\n') fflush (stdout);
+    if (con_log) {
+        fputc (c, con_log);
+        if (c == '\n') fflush (con_log);
+    }
     if (con_len + 1 >= con_cap) {
         con_cap = con_cap ? 2 * con_cap : 65536;
         con = (char *) realloc (con, con_cap);
