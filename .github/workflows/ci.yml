@@ -120,10 +120,10 @@ jobs:
         if: matrix.test == 'j1'
         run: |
           # The benign BTB cross-port census is 1 on macOS/clang and 0 on this Linux/gcc build
-          # (unpinned Verilator seed: hello lands 271 cycles later): waive the census-alive check
-          # here only. Every hazard bin must still be 0 and --strict=error must not fire. Seed 1:
-          # Verilator's default seed 0 means a fresh system-random seed per run; pinned, cycle counts
-          # are comparable across pushes.
+          # (hello lands 271 cycles later than on macOS, the same on every runner): waive the
+          # census-alive check
+          # here only. Every hazard bin must still be 0 and --strict=error must not fire. The seed
+          # is pinned anyway (Verilator's 0 = system-random); runner results were already identical.
           J1_WAIVE_BTB_CENSUS=1 stdbuf -oL -eL sim/strict_bram/run.sh --strict=error +verilator+seed+1 2>&1 | tee build/j1.log
           grep -q "RESULT: PASS" build/j1.log
           grep -a "hello banner at cycle" build/j1.log
