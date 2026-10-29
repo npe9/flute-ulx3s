@@ -61,6 +61,10 @@ and stretches its timeouts x200; ~0.2 s per command); CI runs `ci/board_dmi_smok
 version, halt in the ROM, SDRAM poke/readback over the system bus, resume) in the bluesim job.
 Board controls on a second pty (`build/sim-ctl`): `leds XX cycle N` lines out, `1`/`0` in for
 BTN1 (polled every 4096 cycles); the CI smoke writes the GPIO LEDs and reads BTN1 back over DMI.
+Green on GitHub and fast-forwarded (2026-10-29): `main` = b8d3423 (run 40880670118), `linux-isa`
+= 96a3949 (run 40880673599, adds `make sim-board-verilator` and its DMI smoke in the linux job).
+Note: this includes an RTL fix (`AXI4_GPIO` BTN1 read lane on the 64-bit bus), so `main` no
+longer matches the board's custody bitstream until it is rebuilt.
 Next: the factored `mkULX3S_Sim` top below.
 
 
