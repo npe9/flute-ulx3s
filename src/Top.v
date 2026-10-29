@@ -3,7 +3,7 @@
 //
 // The board clock is 25 MHz.  Default build: the system clock is the raw
 // board clock.  `make SYS_PLL=1`: the system clock is 32.14 MHz from the
-// ECP5 PLL (see below).  SDRAM/UART timing parameters derive from
+// ECP5 PLL (see below); `make SYS_PLL=50`: 50 MHz.  SDRAM/UART timing parameters derive from
 // sys_clk_hz in src/ULX3S_Top.bsv (SYS_CLK_HZ define in the PLL build).
 module ulx3s_top(
     input  wire        CLK,         // 25 MHz, G2
@@ -42,17 +42,25 @@ module ulx3s_top(
     // E8d fmax: 13.6%, inside the 12% rule.
     wire sys_clk;
     wire pll_locked;
+`ifdef SYS_PLL_50
+    // `make SYS_PLL=50`: 50 MHz = 25 MHz x 2 (VCO 600 MHz, CLKOP_DIV 12; ecppll -i 25 -o 50).
+    localparam PLL_CLKI_DIV = 1, PLL_CLKFB_DIV = 2, PLL_CLKOP_DIV = 12, PLL_CLKOP_CPHASE = 5;
+    (* FREQUENCY_PIN_CLKI="25" *)
+    (* FREQUENCY_PIN_CLKOP="50" *)
+`else
+    localparam PLL_CLKI_DIV = 7, PLL_CLKFB_DIV = 9, PLL_CLKOP_DIV = 19, PLL_CLKOP_CPHASE = 9;
     (* FREQUENCY_PIN_CLKI="25" *)
     (* FREQUENCY_PIN_CLKOP="32.142857" *)
+`endif
     (* ICP_CURRENT="12" *) (* LPF_RESISTOR="8" *) (* MFG_ENABLE_FILTEROPAMP="1" *) (* MFG_GMCREF_SEL="2" *)
     EHXPLLL #(
         .PLLRST_ENA("DISABLED"), .INTFB_WAKE("DISABLED"), .STDBY_ENABLE("DISABLED"),
         .DPHASE_SOURCE("DISABLED"),
         .OUTDIVIDER_MUXA("DIVA"), .OUTDIVIDER_MUXB("DIVB"),
         .OUTDIVIDER_MUXC("DIVC"), .OUTDIVIDER_MUXD("DIVD"),
-        .CLKI_DIV(7), .CLKOP_ENABLE("ENABLED"), .CLKOP_DIV(19),
-        .CLKOP_CPHASE(9), .CLKOP_FPHASE(0),
-        .FEEDBK_PATH("CLKOP"), .CLKFB_DIV(9)
+        .CLKI_DIV(PLL_CLKI_DIV), .CLKOP_ENABLE("ENABLED"), .CLKOP_DIV(PLL_CLKOP_DIV),
+        .CLKOP_CPHASE(PLL_CLKOP_CPHASE), .CLKOP_FPHASE(0),
+        .FEEDBK_PATH("CLKOP"), .CLKFB_DIV(PLL_CLKFB_DIV)
     ) sys_pll (
         .RST(1'b0), .STDBY(1'b0), .CLKI(CLK),
         .CLKOP(sys_clk), .CLKFB(sys_clk),
