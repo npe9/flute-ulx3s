@@ -68,15 +68,16 @@ source and boots them to user space in Verilator and in Bluesim.
 | What | Command | Cycles | Time (M-series Mac / GitHub runner) |
 |---|---|---|---|
 | Boot ROM loads hello over the UART | `make sim-boot` | 70M | 8 min / 40 min |
-| TempleOS HolyC REPL, `1+1;` -> `=2` | `ci/bluesim_gate.sh` (both sims, TempleOS built from source) | ~89M to the prompt | 22 min / 1h50m |
+| TempleOS HolyC REPL, `1+1;` -> `=2` | `ci/bluesim_gate.sh` (both sims, TempleOS built from source) | ~73M to the prompt | 11 min incl. build (was 22) / 1h50m (before the C array) |
 | Strict-BRAM Verilator boot (J1) | `sim/strict_bram/run.sh --strict=error` | 52M | 38 min / 2h50m |
-| Linux to `/init` (`linux-isa`) | `SIM_BLOB=linux-sw/out-fp/fw_payload.bin SIM_PASS_STR="tick 2" make FP=1 FPU_TRIM=1 sim-repl` | 139M | 18 min / 1h49m |
+| Linux to `/init` (`linux-isa`) | `SIM_BLOB=linux-sw/out-fp/fw_payload.bin SIM_PASS_STR="tick 2" make FP=1 FPU_TRIM=1 sim-repl` | 122M | 18 min incl. build / 1h49m (at 139M, before the C array) |
 
 **Virtual board:** `make sim-board` preloads the image, starts it, and bridges the SoC's UART
 to a host pty: attach with `picocom build/sim-tty` and type at the TempleOS REPL (or, on
 `linux-isa`, `SIM_BLOB=linux-sw/out-fp/fw_payload.bin make FP=1 FPU_TRIM=1 sim-board` for the
 Linux console). It runs until killed; at ~200K cycles/s a keystroke takes a few ms of host time
-and the prompt appears ~25 min after start (16 min of it zero-filling the SDRAM model).
+and the prompt appears ~10 min after start (the SDRAM model is a calloc'd C array, preloaded at
+time 0).
 `ci/board_smoke.py` drives it like a user (wait for the prompt, type `1+1;`, expect `=2`).
 
 `SIM_BLOB` (any image to preload at 0x80000000), `SIM_PASS_STR` (stop when the UART prints it)
