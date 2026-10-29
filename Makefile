@@ -336,7 +336,7 @@ sim-repl: $(ROM_BSVI)
 	    test/Repl_Boot_Tb.bsv
 	$(BSC) -sim -e mkRepl_Boot_Tb -bdir $(BUILD)/bsc-sim-repl$(REPL_NP) \
 	    -simdir $(BUILD)/sim-repl$(REPL_NP) -o $(BUILD)/repl_boot_tb$(REPL_NP) test/sim_preload.c
-	PATH="$(abspath $(dir $(BSC))):$$PATH" $(BUILD)/repl_boot_tb
+	PATH="$(abspath $(dir $(BSC))):$$PATH" $(BUILD)/repl_boot_tb$(REPL_NP)
 
 # sim-dmi-tb: unit test for the Uart_DMI_Bridge pass-through path --
 # bare 0xDB losslessness (incl. consecutive), partial-magic mismatch
