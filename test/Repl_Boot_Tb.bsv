@@ -2,10 +2,10 @@
 // Repl_Boot_Tb: full-system Bluesim run of the 2.9 MB TempleOS HolyC
 // REPL blob on mkULX3S_Top -- no hardware, no UART byte-drop problem.
 //
-//   1. preloads the behavioral W9825G6KH SDRAM model from
-//      templeos/build/ulx3s_repl.blob.bin over BDPI.  The controller
-//      maps AXI 0x80000000+X to model halfword index X>>1, so this is a
-//      linear poke of blob bytes {2i+1,2i} LE into model_mem[i].
+//   1. preloads the behavioral W9825G6KH SDRAM model (its array is in C,
+//      test/sim_preload.c) from $SIM_BLOB or the TempleOS REPL blob at
+//      time 0, placing each halfword where the controller's bank/row/col
+//      mapping puts AXI 0x80000000+X (see sdram_map).
 //   2. lets the boot ROM run, then sends the loader header
 //      {addr=0x80000000, len=0}; per boot_loader.c a zero length makes
 //      it jump straight to the kernel without loading.
@@ -22,7 +22,6 @@
 package Repl_Boot_Tb;
 
 import Vector   :: *;
-import RegFile  :: *;
 import FIFOF    :: *;
 import ConfigReg :: *;
 
@@ -44,7 +43,9 @@ Integer quiet_max   = 60_000_000;     // console silence => hang (4.8 s)
 Integer wprompt_cap = 200_000_000;     // REPL reaches its prompt ~72M cycles after the jump (2026-10-28)
 Integer watch_cap   = 100_000_000;     // eval is mul-heavy I64 emulation
 Integer dmi_timeout = 5_000_000;      // per-request response timeout
-Integer preload_end = 16777216;       // zero-fill the whole 24-bit model
+// SDRAM model address mapping for c_mem_load (test/sim_preload.c): 0 = bank in byte offset
+// [10:9], 1 = this (memlat) controller's line-in-one-bank mapping.
+Bit #(8) sdram_map = 1;
 
 Bit #(4) m_cmd_act   = 4'b0011;
 Bit #(4) m_cmd_read  = 4'b0101;
@@ -56,6 +57,11 @@ typedef Bit #(24) ModelAddr;
 
 import "BDPI" function Bit #(32) c_blob_open ();    // open + return halfword count
 import "BDPI" function Bit #(16) c_blob_half (Bit #(32) idx);
+// The SDRAM model's array lives in C (calloc: reads of never-written memory are zero, as on a
+// freshly-zeroed board, and the blob is placed there at time 0 instead of over 16M cycles).
+import "BDPI" function ActionValue #(Bit #(32)) c_mem_load (Bit #(8) map);   // blob -> array; halfwords
+import "BDPI" function Bit #(16) c_mem_rd (Bit #(32) addr);
+import "BDPI" function Action    c_mem_wr (Bit #(32) addr, Bit #(16) data);
 // Console mode (test/sim_preload.c): with SIM_PASS_STR set, the image is judged on its console
 // (e.g. OpenSBI + Linux to "tick 2"): no prompt/command phases, the sim ends when the string
 // appears.  SIM_MAX_CYCLES overrides the global cap.
@@ -245,10 +251,9 @@ module mkRepl_Boot_Tb (Empty);
 
    Reg #(Bit #(8)) prev_leds <- mkReg (8'hFF);
 
-   // blob preload (poked from rl_model, the model_mem writer)
+   // blob preload (c_mem_load, at time 0)
    Reg #(Bool)      pl_opened <- mkReg (False);
    Reg #(Bool)      pl_done   <- mkReg (False);
-   Reg #(Bit #(32)) pl_idx    <- mkReg (0);
    Reg #(Bit #(32)) pl_total  <- mkReg (0);
    Reg #(Bit #(32)) pl_dump_i <- mkReg (0);
 
@@ -256,7 +261,8 @@ module mkRepl_Boot_Tb (Empty);
    // Behavioral SDRAM model (identical to SoC_Boot_Tb;
    // per-beat prints gated behind TB_PROBES)
 
-   RegFile #(ModelAddr, Bit #(16)) model_mem <- mkRegFile (0, 16777215);
+   // model_mem: the C array behind c_mem_rd / c_mem_wr (one writer: rl_model)
+   function Bit #(16) mem_rd (ModelAddr a) = c_mem_rd (zeroExtend (a));
 
    Reg #(Bit #(4))  m_cmd_d1  <- mkReg (4'b0111);
    Reg #(Bit #(13)) m_a_d1    <- mkReg (0);
@@ -308,7 +314,7 @@ module mkRepl_Boot_Tb (Empty);
       if (m_cas_cnt != 0)
          n_cas_cnt = m_cas_cnt - 1;
       else if (m_reading) begin
-         n_dq      = model_mem.sub (m_addr ());
+         n_dq      = mem_rd (m_addr ());
          n_drive   = True;
 `ifdef MDL_WATCH
          if (m_watch (m_addr ()))
@@ -330,42 +336,17 @@ module mkRepl_Boot_Tb (Empty);
 
       Bool wr_new = (cur_cmd == m_cmd_write);
 
-      // Blob preload owns the model write port until done.  The memlat
-      // controller (src/Sdram_Controller.bsv) puts each 64-byte line in one
-      // bank and row: line l = byte >> 6, bank = l[1:0], row = l[18:6],
-      // col = {l[5:2], burst, beat}.  In halfword index terms:
-      //   model_addr = {idx[6:5] (bank), idx[23:11] (row), idx[10:7], idx[4:0] (col)}
-      // After the blob, keep writing ZEROS to the end of the model:
-      // Bluesim's RegFile malloc is NOT zeroed, so never-written SDRAM
-      // reads as heap garbage (observed 0xaaaaaaaa) that varies RUN TO
-      // RUN -- the REPL boot (memfs slot scan, stack-edge reads) is
-      // nondeterministic against it.  Zeroing once makes sim boots
-      // reproducible (and matches a freshly-zeroed model).
-      if (pl_opened && ! pl_done) begin
-         Bit #(32) p_addr = ((pl_idx & 32'h0000_0060) << 17)
-                          | ((pl_idx >> 2) & 32'h003F_FE00)
-                          | ((pl_idx >> 2) & 32'h0000_01E0)
-                          | (pl_idx & 32'h0000_001F);
-         Bit #(16) p_data = (pl_idx < pl_total) ? c_blob_half (pl_idx) : 16'h0;
-         model_mem.upd (truncate (p_addr), p_data);
-         if (pl_idx [19:0] == 0)
-            $display ("[tb] preload %0d / %0d halfwords (zero-fill to %0h)",
-                      pl_idx, pl_total, fromInteger (preload_end));
-         if (pl_idx + 1 >= fromInteger (preload_end))
-            pl_done <= True;
-         pl_idx <= pl_idx + 1;
-      end
-      else if (wr_new || m_writing) begin
+      if (wr_new || m_writing) begin
          Bit #(2)  w_bank = wr_new ? cur_ba : m_wr_bank;
          Bit #(9)  w_col  = wr_new ? cur_a [8:0] : m_wr_col;
          Bit #(4)  w_beat = wr_new ? 0 : m_beat;
          ModelAddr w_addr = { w_bank, m_open_row [w_bank], w_col } + extend (w_beat);
          if (cur_dqm != 2'b11) begin
-            Bit #(16) d_old = model_mem.sub (w_addr);
+            Bit #(16) d_old = mem_rd (w_addr);
             Bit #(16) d_new = cur_dq;
             Bit #(16) merged = zeroExtend ((cur_dqm [1] == 1'b1) ? d_old [15:8] : d_new [15:8]) << 8
                              | zeroExtend ((cur_dqm [0] == 1'b1) ? d_old [7:0]  : d_new [7:0]);
-            model_mem.upd (w_addr, merged);
+            c_mem_wr (zeroExtend (w_addr), merged);
 `ifdef MDL_WATCH
             if (m_watch (w_addr))
                $display ("[mdl] cyc %0d WR %h <- %h (old %h dqm %b beat %0d new %0d)", rg_cycle, m_byte (w_addr), merged, d_old, cur_dqm, w_beat, wr_new);
@@ -403,7 +384,7 @@ module mkRepl_Boot_Tb (Empty);
          // Real W9825G6KH: first beat driven 2 cycles after the READ cmd
          // is clocked in, i.e. during this decode cycle; the controller
          // (registered cmd, t_cas_first=3) samples it at end of cycle.
-         n_dq      = model_mem.sub ({ m_ba_d1, m_open_row [m_ba_d1], m_a_d1 [8:0] });
+         n_dq      = mem_rd ({ m_ba_d1, m_open_row [m_ba_d1], m_a_d1 [8:0] });
 `ifdef MDL_WATCH
          if (m_watch ({ m_ba_d1, m_open_row [m_ba_d1], m_a_d1 [8:0] }))
             $display ("[mdl] cyc %0d RD %h <- %h (beat 0)", rg_cycle, m_byte ({ m_ba_d1, m_open_row [m_ba_d1], m_a_d1 [8:0] }), n_dq);
@@ -435,19 +416,14 @@ module mkRepl_Boot_Tb (Empty);
    endrule
 
    // --------------------------------------------------
-   // Phase 1: preload the blob into the SDRAM model.
-   //
-   // The pokes happen INSIDE rl_model below: it is the only other writer
-   // of model_mem, and two writers would conflict (rl_model fires every
-   // cycle and would starve a separate preload rule).  While preloading,
-   // DUT writes to the model are dropped -- the only early SDRAM traffic
-   // is the boot ROM's probe word at 0x81FFFF00, whose loss is cosmetic
-   // (the T<h> readback banner prints zeros).
+   // Phase 1: preload the blob into the SDRAM model, in C, before the
+   // controller has finished its power-up sequence.
 
    rule rl_preload_open (! pl_opened);
-      let n     = c_blob_open ();
+      let n <- c_mem_load (sdram_map);
       pl_total  <= n;
       pl_opened <= True;
+      pl_done   <= True;
       $display ("[tb] preload: %0d halfwords", n);
       let md <- c_sim_mode;
       let mx <- c_sim_max_cycles (fromInteger (max_cycles));
@@ -498,17 +474,16 @@ module mkRepl_Boot_Tb (Empty);
       phase <= P_WARMUP;
    endrule
 
-   // post-preload model readback: read model_mem[0] 32 times, then
-   // model_mem[1..31] once each (one sub per rule -- RegFile read ports).
-   // If sub(0) flips between values, the port sharing itself is broken.
+   // post-preload model readback: model address 0 32 times, then 1..31 once each (the low
+   // column addresses of bank 0 / row 0 hold blob halfwords 0..31 under both mappings).
 `ifdef MDL_PROBES
    rule rl_pl_dump (pl_done && (pl_dump_i < 64));
       if (pl_dump_i < 32)
          $display ("[tb] rdback sub(0) #%0d = %04x (blob[0] = %04x)",
-                   pl_dump_i, model_mem.sub (0), c_blob_half (0));
+                   pl_dump_i, mem_rd (0), c_blob_half (0));
       else
          $display ("[tb] rdback sub(%0d) = %04x (blob[%0d] = %04x)",
-                   pl_dump_i - 32, model_mem.sub (truncate (pl_dump_i - 32)),
+                   pl_dump_i - 32, mem_rd (truncate (pl_dump_i - 32)),
                    pl_dump_i - 32, c_blob_half (pl_dump_i - 32));
       pl_dump_i <= pl_dump_i + 1;
    endrule

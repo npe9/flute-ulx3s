@@ -51,8 +51,10 @@ same flows on every push so local changes cannot silently break the system or th
 
 Done (2026-10-29): `make sim-board` -- Repl_Boot_Tb's preload + jump, with the UART bridged to a
 host pty (`SIM_PTY=1`, link `build/sim-tty`); `ci/board_smoke.py` typed `1+1;` -> `=2` and
-`(2+3)*4;` -> `=20` into the TempleOS REPL through it. Next: a C-backed (calloc) SDRAM array so
-preload stops costing 16M cycles of zero-fill; the real UART loader path over the pty (no
+`(2+3)*4;` -> `=20` into the TempleOS REPL through it. The SDRAM model's array is
+now in C (`c_mem_load/rd/wr`, calloc'd, blob placed at time 0 with the controller's mapping):
+16M fewer cycles per boot (Linux "tick 2" at 122.1M, as in Verilator; REPL make + run 11 min).
+Next: the real UART loader path over the pty (no
 preload) for `scripts/loader.py`; DMI over the same pty; LEDs/buttons; the factored
 `mkULX3S_Sim` top below.
 

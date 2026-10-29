@@ -1,5 +1,6 @@
 // ================================================================
-// BDPI blob preload for Repl_Boot_Tb (Bluesim).
+// BDPI helpers for Repl_Boot_Tb (Bluesim): blob preload, the SDRAM model's array, console
+// mode, and the host pty of the virtual board.
 //
 // Loads templeos/build/ulx3s_repl.blob.bin into memory once, then serves
 // 16-bit halfwords: halfword i = blob bytes {2i+1, 2i} little-endian,
@@ -67,6 +68,61 @@ unsigned short c_blob_half (unsigned int idx)
     unsigned int lo = (2 * idx     < blob_bytes) ? blob [2 * idx]     : 0;
     unsigned int hi = (2 * idx + 1 < blob_bytes) ? blob [2 * idx + 1] : 0;
     return (unsigned short) (lo | (hi << 8));
+}
+
+// ---- SDRAM model array (W9825G6KH: 4 banks x 8192 rows x 512 cols x 16 bits) ----
+// The TB's model addresses it as {bank, row, col}.  calloc: never-written memory reads as zero
+// on every run (Bluesim's RegFile malloc was not zeroed, and zero-filling it cost 16M cycles).
+unsigned int   c_mem_load (unsigned char map);
+unsigned short c_mem_rd (unsigned int addr);
+void           c_mem_wr (unsigned int addr, unsigned short data);
+
+#define MEM_HALVES (1u << 24)
+static unsigned short *mem = NULL;
+
+static void mem_alloc (void)
+{
+    if (!mem && !(mem = (unsigned short *) calloc (MEM_HALVES, sizeof *mem))) {
+        fprintf (stderr, "[preload] cannot allocate the SDRAM model\n");
+        exit (1);
+    }
+}
+
+// Model address of blob halfword idx (= byte offset from 0x80000000 / 2) under the controller's
+// mapping.  map 0: bank = byte[10:9]:  {idx[10:9], idx[23:11], idx[8:0]}.
+// map 1 (memlat controller, each 64-byte line in one bank/row):
+//                                      {idx[6:5], idx[23:11], idx[10:7], idx[4:0]}.
+static unsigned int mem_map (unsigned char map, unsigned int idx)
+{
+    if (map == 0)
+        return ((idx & 0x600) << 13) | ((idx >> 2) & 0x3FFE00) | (idx & 0x1FF);
+    return ((idx & 0x60) << 17) | ((idx >> 2) & 0x3FFE00) | ((idx >> 2) & 0x1E0) | (idx & 0x1F);
+}
+
+// Places the blob in the model; returns its halfword count.
+unsigned int c_mem_load (unsigned char map)
+{
+    unsigned int n = c_blob_open (), i;
+    mem_alloc ();
+    if (n > MEM_HALVES) {
+        fprintf (stderr, "[preload] blob larger than the 32 MB SDRAM\n");
+        exit (1);
+    }
+    for (i = 0; i < n; i++)
+        mem [mem_map (map, i) & (MEM_HALVES - 1)] = c_blob_half (i);
+    return n;
+}
+
+unsigned short c_mem_rd (unsigned int addr)
+{
+    mem_alloc ();
+    return mem [addr & (MEM_HALVES - 1)];
+}
+
+void c_mem_wr (unsigned int addr, unsigned short data)
+{
+    mem_alloc ();
+    mem [addr & (MEM_HALVES - 1)] = data;
 }
 
 // ---- Console mode (Linux / any image that is judged on its console) ----
