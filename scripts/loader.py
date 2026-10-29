@@ -7,6 +7,10 @@ and relays any subsequent output (the program's own UART output) to
 stdout until idle.
 
 Uses only the Python standard library (termios + select).
+
+--sim talks to the virtual board instead (`SIM_BLOB=none make sim-board`, port build/sim-tty):
+no baud setup or flush (the banner may already be waiting in the pty), and every timeout is
+stretched for a simulation running ~1/125 of real time.
 """
 
 import argparse
@@ -20,8 +24,21 @@ import time
 BANNER = b"boot loader\r\n"
 
 
-def open_serial(path, baud):
+# Timeout multiplier: 1 on the board, SIM_SCALE with --sim.
+SIM_SCALE = 200
+scale = 1
+
+
+def open_serial(path, baud, sim=False):
     fd = os.open(path, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+    if sim:
+        # A pty: no line speed, and a flush would discard the banner the sim already sent.
+        attrs = termios.tcgetattr(fd)
+        attrs[3] &= ~(termios.ICANON | termios.ECHO | termios.ISIG | termios.IEXTEN)
+        attrs[0] &= ~(termios.IXON | termios.IXOFF | termios.ICRNL | termios.INLCR | termios.IGNCR)
+        attrs[1] &= ~termios.OPOST
+        termios.tcsetattr(fd, termios.TCSANOW, attrs)
+        return fd
     baud_const = {
         9600: termios.B9600,
         19200: termios.B19200,
@@ -103,7 +120,7 @@ def load_blob(fd, blob, dst=0x80000000):
             buf = b''
             t0 = time.time()
             ok = False
-            while time.time() - t0 < 2.5:
+            while time.time() - t0 < 2.5 * scale:
                 d = read_avail(fd, 0.1)
                 if d:
                     buf += d
@@ -124,20 +141,27 @@ def main():
     ap.add_argument("-p", "--port", default="/dev/cu.usbserial-120001")
     ap.add_argument("-b", "--baud", type=int, default=625000)
     ap.add_argument("-a", "--addr", default="0x80000000")
-    ap.add_argument("-t", "--idle-timeout", type=float, default=5.0,
-                    help="seconds of UART silence before exiting (0 = forever)")
+    ap.add_argument("-t", "--idle-timeout", type=float, default=None,
+                    help="seconds of UART silence before exiting (0 = forever; default 5; 600 with --sim, which covers the boot ROM's post-load repair window, ~60M cycles)")
+    ap.add_argument("--sim", action="store_true",
+                    help="virtual board (make sim-board): pty, timeouts x%d" % SIM_SCALE)
     args = ap.parse_args()
+    global scale
+    if args.sim:
+        scale = SIM_SCALE
+    if args.idle_timeout is None:
+        args.idle_timeout = 600.0 if args.sim else 5.0
 
     with open(args.image, "rb") as f:
         payload = f.read()
     dst = int(args.addr, 0)
 
-    fd = open_serial(args.port, args.baud)
+    fd = open_serial(args.port, args.baud, args.sim)
 
     # Wait for the boot loader banner (board may have just been reset).
     sys.stderr.write("loader: waiting for boot banner on %s ...\n" % args.port)
     buf = b""
-    deadline = time.time() + 20
+    deadline = time.time() + 20 * scale
     while BANNER not in buf:
         if time.time() > deadline:
             sys.stderr.write("loader: TIMEOUT waiting for banner\n")

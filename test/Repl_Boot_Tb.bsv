@@ -191,6 +191,7 @@ module mkRepl_Boot_Tb (Empty);
    Reg #(Bit #(40)) rg_cycle <- mkReg (0);
    Reg #(Bool)      console_mode <- mkReg (False);
    Reg #(Bool)      pty_on       <- mkReg (False);
+   Reg #(Bool)      no_preload   <- mkReg (False);   // SIM_BLOB=none: the host loads over the UART
    Reg #(Bit #(40)) rg_max_cycles <- mkReg (fromInteger (max_cycles));
    Reg #(Bit #(40)) ph_enter <- mkReg (0);
    Reg #(Bit #(32)) ph_idx   <- mkReg (0);
@@ -404,9 +405,11 @@ module mkRepl_Boot_Tb (Empty);
       let mx <- c_sim_max_cycles (fromInteger (max_cycles));
       console_mode  <= (md != 0);
       pty_on        <= (md [1] == 1);
+      no_preload    <= (md [2] == 1);
       rg_max_cycles <= truncate (mx);
       if (md [0] == 1) $display ("[tb] console mode: pass on SIM_PASS_STR, cap %0d cycles", mx);
       if (md [1] == 1) $display ("[tb] interactive mode: UART bridged to a host pty");
+      if (md [2] == 1) $display ("[tb] SIM_BLOB=none: no preload; the boot ROM waits for a loader");
    endrule
 
    // --------------------------------------------------
@@ -446,7 +449,7 @@ module mkRepl_Boot_Tb (Empty);
    // length makes the boot ROM jump to the kernel without loading.
 
    rule rl_ph_preload (phase == P_PRELOAD && pl_done);
-      phase <= P_WARMUP;
+      phase <= no_preload ? P_CONSOLE : P_WARMUP;
    endrule
 
    // post-preload model readback: model address 0 32 times, then 1..31 once each (the low

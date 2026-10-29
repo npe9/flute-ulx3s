@@ -54,9 +54,9 @@ host pty (`SIM_PTY=1`, link `build/sim-tty`); `ci/board_smoke.py` typed `1+1;` -
 `(2+3)*4;` -> `=20` into the TempleOS REPL through it. The SDRAM model's array is
 now in C (`c_mem_load/rd/wr`, calloc'd, blob placed at time 0 with the controller's mapping):
 16M fewer cycles per boot (Linux "tick 2" at 122.1M, as in Verilator; REPL make + run 11 min).
-Next: the real UART loader path over the pty (no
-preload) for `scripts/loader.py`; DMI over the same pty; LEDs/buttons; the factored
-`mkULX3S_Sim` top below.
+`SIM_BLOB=none make sim-board` + `scripts/loader.py --sim -p build/sim-tty sw/hello.bin`: the real
+boot ROM loader protocol over the pty (verified: 308-byte hello loaded, banner printed).
+Next: DMI over the same pty; LEDs/buttons; the factored `mkULX3S_Sim` top below.
 
 
 A Bluesim (and optionally Verilator) executable that behaves like the board from the host's point

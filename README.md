@@ -79,6 +79,9 @@ Linux console). It runs until killed; at ~200K cycles/s a keystroke takes a few 
 and the prompt appears ~10 min after start (the SDRAM model is a calloc'd C array, preloaded at
 time 0).
 `ci/board_smoke.py` drives it like a user (wait for the prompt, type `1+1;`, expect `=2`).
+With `SIM_BLOB=none` nothing is preloaded and the boot ROM waits on the UART as on the board, so
+the normal loader works: `python3 scripts/loader.py --sim -p build/sim-tty sw/hello.bin`
+(chunked, ACK-paced load; hello prints ~5 min later, after the ROM's post-load repair window).
 
 `SIM_BLOB` (any image to preload at 0x80000000), `SIM_PASS_STR` (stop when the UART prints it)
 and `SIM_MAX_CYCLES` turn `make sim-repl` into a general console runner; `ci/console_text.py`
