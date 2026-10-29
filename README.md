@@ -70,6 +70,13 @@ source and boots them to user space in Verilator and in Bluesim.
 | Linux to `/init`, strict Verilator (no coverage) | see the `linux` job in `.github/workflows/ci.yml` (`sim/linux_bram`) | 122M | — / 21 min |
 | Linux to `/init`, Bluesim | `SIM_BLOB=linux-sw/out-fp/fw_payload.bin SIM_PASS_STR="tick 2" make FP=1 FPU_TRIM=1 sim-repl` | 139M | 18 min / 1h49m |
 
+**Virtual board:** `make sim-board` preloads the image, starts it, and bridges the SoC's UART
+to a host pty: attach with `picocom build/sim-tty` and type at the TempleOS REPL (or, on
+`linux-isa`, `SIM_BLOB=linux-sw/out-fp/fw_payload.bin make FP=1 FPU_TRIM=1 sim-board` for the
+Linux console). It runs until killed; at ~200K cycles/s a keystroke takes a few ms of host time
+and the prompt appears ~25 min after start (16 min of it zero-filling the SDRAM model).
+`ci/board_smoke.py` drives it like a user (wait for the prompt, type `1+1;`, expect `=2`).
+
 `SIM_BLOB` (any image to preload at 0x80000000), `SIM_PASS_STR` (stop when the UART prints it)
 and `SIM_MAX_CYCLES` turn `make sim-repl` into a general console runner; `ci/console_text.py`
 prints the decoded UART text of its log. Bluesim's BRAM model is idealized (see AGENTS.md), so
