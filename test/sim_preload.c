@@ -17,6 +17,8 @@
 #include <unistd.h>
 #include <termios.h>
 
+#include "sim_pty.h"
+
 static unsigned char *blob      = NULL;
 static unsigned int   blob_bytes = 0;
 
@@ -147,31 +149,11 @@ static size_t con_len   = 0, con_cap = 0;
 // release BTN1:  cat build/sim-ctl;  printf 1 > build/sim-ctl.
 static int pty_fd = -1, ctl_fd = -1;
 
-// Opens a pty, links it at $env (or dflt), returns the non-blocking master (-1 on failure).
-static int pty_make (const char *env, const char *dflt, const char *what)
-{
-    int fd = posix_openpt (O_RDWR | O_NOCTTY);
-    if (fd < 0 || grantpt (fd) || unlockpt (fd)) { perror ("[sim] posix_openpt"); return -1; }
-    const char *name = ptsname (fd);
-    // Keep our own slave open in raw mode (never closed): the line discipline stays raw for
-    // whoever attaches, and the master never sees EIO between clients.
-    int slave = open (name, O_RDWR | O_NOCTTY);
-    struct termios t;
-    if (slave >= 0 && tcgetattr (slave, &t) == 0) { cfmakeraw (&t); tcsetattr (slave, TCSANOW, &t); }
-    fcntl (fd, F_SETFL, fcntl (fd, F_GETFL) | O_NONBLOCK);
-    const char *link = getenv (env);
-    if (!link) link = dflt;
-    unlink (link);
-    if (symlink (name, link) != 0) link = name;
-    fprintf (stderr, "[sim] %s: %s (%s)\n", what, link, name);
-    return fd;
-}
-
 static int pty_open (void)
 {
-    pty_fd = pty_make ("SIM_PTY_LINK", "build/sim-tty", "UART (picocom, scripts/loader.py --sim, scripts/dmi.py)");
+    pty_fd = sim_pty_make ("SIM_PTY_LINK", "build/sim-tty", "UART (picocom, scripts/loader.py --sim, scripts/dmi.py)");
     if (pty_fd < 0) return 0;
-    ctl_fd = pty_make ("SIM_CTL_LINK", "build/sim-ctl", "board controls (cat: LED changes; write 1/0: press/release BTN1)");
+    ctl_fd = sim_pty_make ("SIM_CTL_LINK", "build/sim-ctl", "board controls (cat: LED changes; write 1/0: press/release BTN1)");
     return 1;
 }
 
