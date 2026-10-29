@@ -30,9 +30,11 @@ unsigned short c_blob_half (unsigned int idx);
 // pair in one rule can execute in the wrong order.)
 unsigned int c_blob_open (void)
 {
+    const char *path = getenv ("SIM_BLOB");
+    if (path && strcmp (path, "none") == 0)
+        return 0;                       // nothing preloaded: the boot ROM waits for a loader
     if (!blob) {
         // $SIM_BLOB, else a local TempleOS build, else the committed prebuilt REPL.
-        const char *path = getenv ("SIM_BLOB");
         FILE *f = NULL;
         if (path) f = fopen (path, "rb");
         else {
@@ -163,14 +165,17 @@ static int pty_open (void)
     return 1;
 }
 
-// bit 0: SIM_PASS_STR set (console mode, pass on the string); bit 1: SIM_PTY (interactive).
+// bit 0: SIM_PASS_STR set (console mode, pass on the string); bit 1: SIM_PTY (interactive);
+// bit 2: SIM_BLOB=none (no preload and no jump header: the host's loader talks to the boot ROM).
 unsigned char c_sim_mode (void)
 {
     pass_str = getenv ("SIM_PASS_STR");
     if (pass_str) pass_len = strlen (pass_str);
     const char *p = getenv ("SIM_PTY");
     int pty = p && *p && strcmp (p, "0") != 0 && pty_open ();
-    return (pass_str && pass_len ? 1 : 0) | (pty ? 2 : 0);
+    const char *b = getenv ("SIM_BLOB");
+    int none = b && strcmp (b, "none") == 0;
+    return (pass_str && pass_len ? 1 : 0) | (pty ? 2 : 0) | (none ? 4 : 0);
 }
 
 unsigned long long c_sim_max_cycles (unsigned long long dflt)
