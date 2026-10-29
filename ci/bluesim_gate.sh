@@ -1,8 +1,9 @@
 #!/bin/bash
 # Bluesim boot gate: (1) boot ROM loads sw/hello.bin over the simulated UART into the SDRAM model
 # and hello prints its banner; (2) the TempleOS HolyC REPL image (preloaded) reaches its prompt
-# and answers '1+1;' with 2.  Judged on the decoded UART TX stream, not on exit codes (Bluesim
-# $finish exits 0 either way).  Logs: build/ci/.
+# and answers '1+1;' with 2; (3) the virtual board (make sim-board) answers DMI over its pty.
+# Judged on the decoded UART TX stream, not on exit codes (Bluesim $finish exits 0 either way).
+# Logs: build/ci/.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p build/ci
@@ -22,7 +23,7 @@ print('sim-boot console:', repr(txt[-200:]))
 ok = 'Hello from Flute' in txt
 print('sim-boot:', 'PASS' if ok else 'FAIL (no hello banner)'); sys.exit(0 if ok else 1)
 PY
-make sim-repl > build/ci/sim-repl.log 2>&1
+make SIM_REPL_PROBES= sim-repl > build/ci/sim-repl.log 2>&1
 python3 - build/ci/sim-repl.log <<'PY' || exit 1
 import re, sys
 log = open(sys.argv[1], encoding='latin-1').read()
@@ -35,4 +36,5 @@ print(f'prompt={prompt} answered={answered}')
 ok = prompt and answered
 print('sim-repl:', 'PASS' if ok else 'FAIL'); sys.exit(0 if ok else 1)
 PY
+ci/board_dmi_smoke.sh || exit 1
 echo "bluesim gate: PASS"

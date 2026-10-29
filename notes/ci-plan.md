@@ -56,7 +56,10 @@ now in C (`c_mem_load/rd/wr`, calloc'd, blob placed at time 0 with the controlle
 16M fewer cycles per boot (Linux "tick 2" at 122.1M, as in Verilator; REPL make + run 11 min).
 `SIM_BLOB=none make sim-board` + `scripts/loader.py --sim -p build/sim-tty sw/hello.bin`: the real
 boot ROM loader protocol over the pty (verified: 308-byte hello loaded, banner printed).
-Next: DMI over the same pty; LEDs/buttons; the factored `mkULX3S_Sim` top below.
+`scripts/dmi.py -p build/sim-tty ...`: the UART debug bridge over the same pty (dmi.py sees a pty
+and stretches its timeouts x200; ~0.2 s per command); CI runs `ci/board_dmi_smoke.sh` (DM
+version, halt in the ROM, SDRAM poke/readback over the system bus, resume) in the bluesim job.
+Next: LEDs/buttons; the factored `mkULX3S_Sim` top below.
 
 
 A Bluesim (and optionally Verilator) executable that behaves like the board from the host's point
