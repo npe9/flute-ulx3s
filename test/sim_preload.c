@@ -10,6 +10,9 @@
 // Path is relative to the sim working directory (flute-ulx3s).
 // ================================================================
 
+// glibc declares posix_openpt / ptsname (sim_pty.h) and cfmakeraw only with _GNU_SOURCE; without
+// it ptsname is implicitly int and its pointer is truncated (segfault on the Linux CI runner).
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
