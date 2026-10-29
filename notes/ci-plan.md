@@ -4,7 +4,7 @@ Goal: anyone can clone the repo, build it, and boot the SoC (hello, the TempleOS
 the `linux-isa` branch) without the board or any machine-local paths. GitHub Actions runs the
 same flows on every push so local changes cannot silently break the system or the build.
 
-## 1. Remove local dependencies -- in progress (branch `ci`)
+## 1. Remove local dependencies -- done
 
 - Tools from PATH (`bsc`, `verilator`, `yosys`, `nextpnr-ecp5`, `ecppack`,
   `riscv64-unknown-elf-gcc`); the old `~/src` / `../bluespec-ulx3s` locations are used only
@@ -16,7 +16,7 @@ same flows on every push so local changes cannot silently break the system or th
   (`SAIL_DIR`), RISCOF, TestRIG, testfloat, the SVA yosys. Not part of public CI.
 - Prebuilt REPL image (`templeos/prebuilt/`) as the fallback when the submodule is absent.
 
-## 2. CI image and workflow -- in progress
+## 2. CI image and workflow -- done
 
 - `ci/Dockerfile`: Ubuntu 24.04, bsc 2025.01.1, Verilator v5.052 (pinned: the strict harness's
   x-initial/seed behaviour is version-sensitive), oss-cad-suite 2026-10-01, RISC-V bare-metal and
@@ -39,8 +39,13 @@ same flows on every push so local changes cannot silently break the system or th
   strict J1 38 min (hello banner at 52.19M cycles, coverage on). GitHub's 4-core runner is
   ~5x slower: J1 needs ~3 h, so strict tests run as a j1/cache/amo matrix, cache/AMO without
   coverage (`TB_NOCOV=1`; their verdict is the UART trace, J1's includes the hazard bins).
-- Status: local gates pass on `ci` (Bluesim hello + REPL, J1) and `ci-linux` (Bluesim Linux);
-  GitHub runs in progress. Then: merge `ci` -> `main`, `ci-linux` -> `linux-isa`.
+- Status (2026-10-29): done. All jobs green on GitHub -- `main` at 3aac963 (run 40752521072:
+  verilog, Bluesim hello + TempleOS REPL from source, J1, cache, AMO, bitstream 44.63 MHz) and
+  `linux-isa` at 33bebdb (run 40775810813: the same plus linux-sw from kernel.org source,
+  Verilator Linux to /init in 21 min, Bluesim Linux in 1h49m). Stopgaps: J1's BTB census-alive
+  check is waived in CI (census 1 locally, 0 on the runner; seed now pinned), and Bluesim uses
+  a BSV LFSR for the ring-oscillator TRNG (`BSIM_TRNG`). Image: `ghcr.io/npe9/flute-ci`
+  (public). Pushes cancel a branch's running CI (`cancel-in-progress`), docs-only pushes skip it.
 
 ## 3. Virtual ULX3S: a BSV board simulator for users without hardware -- planned
 
