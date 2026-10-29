@@ -14,6 +14,7 @@ a response).
 
 Usage:
     python3 dmi.py -p /dev/cu.usbserial-120001 <command> [args]
+    python3 dmi.py -p build/sim-tty <command> [args]     # the virtual board (make sim-board)
 
 Commands:
     info                dmstatus / dmcontrol / hartinfo
@@ -71,8 +72,28 @@ AC_WRITE = (2 << 20) | (1 << 17) | (1 << 16)
 CSR_DPC = 0x7B1
 
 
+# Virtual board (`make sim-board`, port build/sim-tty): the UART is a pty and the SoC runs at
+# ~1/125 of real time, so every timeout is stretched by SCALE.  A pty slave is never the FTDI
+# cable, so the port name decides; FLUTE_SIM=1 forces it.
+SIM_SCALE = 200
+SCALE = 1
+
+
+def sim_port(path):
+    real = os.path.realpath(path)
+    return os.environ.get("FLUTE_SIM") == "1" or real.startswith(("/dev/ttys", "/dev/pts/"))
+
+
 def open_serial(path, baud):
     fd = os.open(path, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+    if sim_port(path):
+        # no line speed on a pty, and no flush (console bytes may be waiting)
+        attrs = termios.tcgetattr(fd)
+        attrs[3] &= ~(termios.ICANON | termios.ECHO | termios.ISIG | termios.IEXTEN)
+        attrs[0] &= ~(termios.IXON | termios.IXOFF | termios.ICRNL | termios.INLCR | termios.IGNCR)
+        attrs[1] &= ~termios.OPOST
+        termios.tcsetattr(fd, termios.TCSANOW, attrs)
+        return fd
     baud_const = {
         9600: termios.B9600,
         19200: termios.B19200,
@@ -120,6 +141,9 @@ def read_exact(fd, n, timeout):
 
 class DMI:
     def __init__(self, port, baud=625000):
+        global SCALE
+        if sim_port(port):
+            SCALE = SIM_SCALE
         self.fd = open_serial(port, baud)
         self.armed = False
         self.buf = b""
@@ -154,7 +178,7 @@ class DMI:
     def req(self, op, addr, data, _reattempts=2):
         os.write(self.fd, bytes([op, addr & 0x7F]) + struct.pack(">I", data & 0xFFFFFFFF))
         try:
-            return self._response(op, 2.0)
+            return self._response(op, 2.0 * SCALE)
         except TimeoutError:
             if _reattempts <= 0:
                 raise
@@ -169,7 +193,7 @@ class DMI:
             # by one, so drop whatever arrived before the retry.
             sys.stderr.write("dmi: op %r addr %#x timed out; retrying (%d left)\n"
                              % (chr(op), addr, _reattempts))
-            time.sleep(2.2)
+            time.sleep(2.2 * SCALE)
             self.buf = b""
             while select.select([self.fd], [], [], 0)[0]:
                 if not os.read(self.fd, 4096):
@@ -219,6 +243,8 @@ class DMI:
         silence (or when `timeout` elapses), so callers don't burn the
         whole window when the output they want has already landed.
         """
+        timeout *= SCALE
+        idle *= SCALE
         deadline = time.monotonic() + timeout
         out = b""
         quiet_deadline = None
@@ -283,7 +309,7 @@ class DMI:
 
     def halt(self, timeout=2.0):
         self.wr(DM_DMCONTROL, 0x80000001)           # haltreq | dmactive
-        deadline = time.monotonic() + timeout
+        deadline = time.monotonic() + timeout * SCALE
         while not self.halted():
             if time.monotonic() > deadline:
                 raise TimeoutError("hart did not halt")
@@ -291,7 +317,7 @@ class DMI:
 
     def resume(self, timeout=2.0):
         self.wr(DM_DMCONTROL, 0x40000001)           # resumereq | dmactive
-        deadline = time.monotonic() + timeout
+        deadline = time.monotonic() + timeout * SCALE
         while True:
             st = self.rd(DM_DMSTATUS)
             if st & 0x10000:                        # anyresumeack

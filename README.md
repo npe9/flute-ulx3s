@@ -80,6 +80,9 @@ time 0).
 With `SIM_BLOB=none` nothing is preloaded and the boot ROM waits on the UART as on the board, so
 the normal loader works: `python3 scripts/loader.py --sim -p build/sim-tty sw/hello.bin`
 (chunked, ACK-paced load; hello prints ~5 min later, after the ROM's post-load repair window).
+The UART debug bridge works over the same pty: `python3 scripts/dmi.py -p build/sim-tty regs`
+(also `halt`, `pc`, `mem`, `poke`, ...; dmi.py stretches its timeouts when the port is a pty).
+CI checks this on every push (`ci/board_dmi_smoke.sh`).
 
 `SIM_BLOB` (any image to preload at 0x80000000), `SIM_PASS_STR` (stop when the UART prints it)
 and `SIM_MAX_CYCLES` turn `make sim-repl` into a general console runner; `ci/console_text.py`

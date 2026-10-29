@@ -325,14 +325,17 @@ sim-board:
 	SIM_PTY=1 $(MAKE) SIM_REPL_PROBES= sim-repl
 
 # SIM_REPL_PROBES= (empty): no UART / SDRAM-model / capture probes (CI; the console is still logged).
+# bsc -u does not see -D changes, so the probe-free build (sim-board, CI) gets its own dirs and
+# executable (-np) and never reuses probed objects.
 SIM_REPL_PROBES ?= -D UART_PROBES -D MDL_PROBES -D SDCAP_PROBES
+REPL_NP := $(if $(strip $(SIM_REPL_PROBES)),,-np)
 sim-repl: $(ROM_BSVI)
-	mkdir -p $(BUILD)/bsc-sim-repl $(BUILD)/sim-repl
+	mkdir -p $(BUILD)/bsc-sim-repl$(REPL_NP) $(BUILD)/sim-repl$(REPL_NP)
 	$(BSC) -u -sim -g mkRepl_Boot_Tb $(BSC_FLAGS) $(SIM_DEFINES) $(SIM_REPL_PROBES) \
-	    -p $(BSC_PATH):test -bdir $(BUILD)/bsc-sim-repl -simdir $(BUILD)/sim-repl \
+	    -p $(BSC_PATH):test -bdir $(BUILD)/bsc-sim-repl$(REPL_NP) -simdir $(BUILD)/sim-repl$(REPL_NP) \
 	    test/Repl_Boot_Tb.bsv
-	$(BSC) -sim -e mkRepl_Boot_Tb -bdir $(BUILD)/bsc-sim-repl \
-	    -simdir $(BUILD)/sim-repl -o $(BUILD)/repl_boot_tb test/sim_preload.c
+	$(BSC) -sim -e mkRepl_Boot_Tb -bdir $(BUILD)/bsc-sim-repl$(REPL_NP) \
+	    -simdir $(BUILD)/sim-repl$(REPL_NP) -o $(BUILD)/repl_boot_tb$(REPL_NP) test/sim_preload.c
 	PATH="$(abspath $(dir $(BSC))):$$PATH" $(BUILD)/repl_boot_tb
 
 # sim-dmi-tb: unit test for the Uart_DMI_Bridge pass-through path --
