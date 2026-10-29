@@ -142,26 +142,36 @@ static size_t con_len   = 0, con_cap = 0;
 
 // Interactive board mode (SIM_PTY=1, `make sim-board`): the SoC's UART is bridged to a host
 // pseudo-terminal; attach with `picocom build/sim-tty` (or screen).  The link path is
-// $SIM_PTY_LINK (default build/sim-tty).
-static int pty_fd = -1, pty_slave = -1;
+// $SIM_PTY_LINK (default build/sim-tty).  A second pty, the board controls ($SIM_CTL_LINK,
+// default build/sim-ctl), reports "leds XX" on every LED change and takes '1' / '0' to press /
+// release BTN1:  cat build/sim-ctl;  printf 1 > build/sim-ctl.
+static int pty_fd = -1, ctl_fd = -1;
+
+// Opens a pty, links it at $env (or dflt), returns the non-blocking master (-1 on failure).
+static int pty_make (const char *env, const char *dflt, const char *what)
+{
+    int fd = posix_openpt (O_RDWR | O_NOCTTY);
+    if (fd < 0 || grantpt (fd) || unlockpt (fd)) { perror ("[sim] posix_openpt"); return -1; }
+    const char *name = ptsname (fd);
+    // Keep our own slave open in raw mode (never closed): the line discipline stays raw for
+    // whoever attaches, and the master never sees EIO between clients.
+    int slave = open (name, O_RDWR | O_NOCTTY);
+    struct termios t;
+    if (slave >= 0 && tcgetattr (slave, &t) == 0) { cfmakeraw (&t); tcsetattr (slave, TCSANOW, &t); }
+    fcntl (fd, F_SETFL, fcntl (fd, F_GETFL) | O_NONBLOCK);
+    const char *link = getenv (env);
+    if (!link) link = dflt;
+    unlink (link);
+    if (symlink (name, link) != 0) link = name;
+    fprintf (stderr, "[sim] %s: %s (%s)\n", what, link, name);
+    return fd;
+}
 
 static int pty_open (void)
 {
-    int fd = posix_openpt (O_RDWR | O_NOCTTY);
-    if (fd < 0 || grantpt (fd) || unlockpt (fd)) { perror ("[sim] posix_openpt"); return 0; }
-    const char *name = ptsname (fd);
-    // Keep our own slave open in raw mode: the line discipline stays raw for whoever attaches,
-    // and the master never sees EIO between clients.
-    pty_slave = open (name, O_RDWR | O_NOCTTY);
-    struct termios t;
-    if (pty_slave >= 0 && tcgetattr (pty_slave, &t) == 0) { cfmakeraw (&t); tcsetattr (pty_slave, TCSANOW, &t); }
-    fcntl (fd, F_SETFL, fcntl (fd, F_GETFL) | O_NONBLOCK);
-    const char *link = getenv ("SIM_PTY_LINK");
-    if (!link) link = "build/sim-tty";
-    unlink (link);
-    if (symlink (name, link) != 0) link = name;
-    fprintf (stderr, "[sim] UART on %s -- attach with: picocom %s\n", name, link);
-    pty_fd = fd;
+    pty_fd = pty_make ("SIM_PTY_LINK", "build/sim-tty", "UART (picocom, scripts/loader.py --sim, scripts/dmi.py)");
+    if (pty_fd < 0) return 0;
+    ctl_fd = pty_make ("SIM_CTL_LINK", "build/sim-ctl", "board controls (cat: LED changes; write 1/0: press/release BTN1)");
     return 1;
 }
 
@@ -190,6 +200,27 @@ unsigned short c_pty_getc (void)
 {
     unsigned char b;
     return (pty_fd >= 0 && read (pty_fd, &b, 1) == 1) ? (unsigned short) (0x100 | b) : 0;
+}
+
+// Board controls: the BTN1 level after the bytes waiting on the control pty ('1' press, '0'
+// release, anything else ignored); `cur` when nothing changed it.
+// Byte-wide arguments are taken as unsigned int and masked: Bluesim passes Bit#(8) sign-extended
+// (observed "leds ffffff80" on arm64), and with an unsigned char parameter the compiler drops the
+// mask as a no-op.
+unsigned char c_ctl_btn (unsigned int cur)
+{
+    cur &= 1;
+    unsigned char b;
+    while (ctl_fd >= 0 && read (ctl_fd, &b, 1) == 1)
+        if (b == '0' || b == '1') cur = b - '0';
+    return cur;
+}
+
+void c_ctl_leds (unsigned int leds, unsigned long long cycle)
+{
+    char line [48];
+    int n = snprintf (line, sizeof line, "leds %02x cycle %llu\r\n", leds & 0xFFu, cycle);
+    if (ctl_fd >= 0) (void) write (ctl_fd, line, n);
 }
 
 // A byte the SoC transmitted (dropped when nobody drains the pty and its buffer is full).
