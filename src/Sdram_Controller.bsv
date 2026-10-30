@@ -109,25 +109,27 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
    Reg #(Bit #(16)) rg_pwrcnt    <- mkReg (fromInteger (t_powerup));
    Reg #(Bit #(16)) rg_ref_cnt   <- mkReg (fromInteger (refresh_div));
 
-   // Latched current request
+   // Latched current request.  E38b: data/address flops are not reset
+   // (read only in the states a request moved them into); the reset net
+   // reaches only control state.
    Reg #(Bool)      rg_req_write  <- mkReg (False);
-   Reg #(Bit #(64)) rg_req_addr   <- mkReg (0);
-   Reg #(Bit #(256)) rg_req_data  <- mkReg (0);
-   Reg #(Bit #(32)) rg_req_byteen <- mkReg (0);
+   Reg #(Bit #(64)) rg_req_addr   <- mkRegU;
+   Reg #(Bit #(256)) rg_req_data  <- mkRegU;
+   Reg #(Bit #(32)) rg_req_byteen <- mkRegU;
    Reg #(Bool)      rg_phase      <- mkReg (False);    // second burst
    Reg #(Bit #(4))  rg_beat       <- mkReg (0);
 
    // Read-data assembly (16 halfword beats)
-   Vector #(16, Reg #(Bit #(16))) rg_rdata <- replicateM (mkReg (16'h0));
+   Vector #(16, Reg #(Bit #(16))) rg_rdata <- replicateM (mkRegU);
 
    // Pin registers
    Reg #(Bit #(4))  rg_cmd      <- mkReg (cmd_nop);    // command output (updated by state rules)
    Reg #(Bit #(13)) rg_a        <- mkReg (0);
    Reg #(Bit #(2))  rg_ba       <- mkReg (0);
    Reg #(Bit #(2))  rg_dqm      <- mkReg (2'b11);
-   Reg #(Bit #(16)) rg_dq_out   <- mkReg (0);
+   Reg #(Bit #(16)) rg_dq_out   <- mkRegU;    // driven only while rg_dq_oe
    Reg #(Bit #(1))  rg_dq_oe    <- mkReg (0);
-   Reg #(Bit #(16)) rg_dq_in    <- mkReg (0);
+   Reg #(Bit #(16)) rg_dq_in    <- mkRegU;
 
    Reg #(Bool) rg_inited     <- mkReg (False);
    Reg #(Bool) rg_cmd_valid  <- mkReg (False);

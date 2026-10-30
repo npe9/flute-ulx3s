@@ -47,7 +47,7 @@ module mkJtag_Control_Adapter (Jtag_Control_Adapter_IFC);
    // Latched DMI inputs.  The source drives all signals in the same
    // cycle, so we capture them when req_valid is asserted.
    Reg #(Bit #(7))  rg_addr <- mkReg (0);
-   Reg #(Bit #(32)) rg_data <- mkReg (0);
+   Reg #(Bit #(32)) rg_data <- mkRegU;    // E38b: latched with req_valid, not reset
    Reg #(Bit #(2))  rg_op   <- mkReg (0);
 
    Bit #(2) dmi_op_nop   = 0;

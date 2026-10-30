@@ -139,7 +139,7 @@ module mkUart_DMI_Bridge (Uart_DMI_Bridge_IFC);
    Reg #(Bit #(3))  rg_cnt       <- mkReg (0);    // frame byte 0..5
    Reg #(Bit #(8))  rg_op        <- mkReg (0);
    Reg #(Bit #(7))  rg_addr      <- mkReg (0);
-   Reg #(Bit #(32)) rg_data      <- mkReg (0);
+   Reg #(Bit #(32)) rg_data      <- mkRegU;    // E38b: frame data, not reset
    Reg #(Bit #(2))  rg_dmi_op    <- mkReg (0);
    Reg #(Bit #(26)) rg_idle_cnt  <- mkReg (0);
 
