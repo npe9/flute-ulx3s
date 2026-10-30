@@ -104,7 +104,7 @@ jobs:
     # One job per test (each is a long single-threaded Verilator run with coverage).
     needs: [setup, verilog]
     runs-on: ubuntu-24.04
-    timeout-minutes: 340
+    timeout-minutes: 355   # J1 with coverage: 4h35m-5h40m on linux-isa (runner-dependent); cap is 360
     strategy:
       fail-fast: false
       matrix:
