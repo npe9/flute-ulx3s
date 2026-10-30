@@ -120,6 +120,10 @@ if [[ "${VERILATOR_TRACE:-0}" == "1" ]]; then COMMON_FLAGS+=(--trace --trace-dep
 # UART_CPB=<n>: UART agent bit period in clocks for a netlist built at another clock
 # (clk_hz / 625000 rounded down: 51 for the SYS_PLL=1 netlist).  Part of the build too.
 if [[ -n "${UART_CPB:-}" ]]; then COMMON_FLAGS+=(-DUART_CPB=$UART_CPB); fi
+# BSV_POSITIVE_RESET (default 1): simulate the netlist the way the Makefile synthesizes
+# it since E35 (active-high bsc reset, Top.v's registered reset through a DCCA).
+# BSV_POSITIVE_RESET=0 takes Top.v's active-low path.  Part of the build too.
+if [[ "${BSV_POSITIVE_RESET:-1}" == "1" ]]; then COMMON_FLAGS+=(-DBSV_POSITIVE_RESET); fi
 
 if [[ "$LINT_ONLY" == "1" ]]; then
     verilator --lint-only "${COMMON_FLAGS[@]}" "${FILES[@]}"

@@ -73,6 +73,11 @@ YOSYS_DEFS  := -DSYS_PLL -DSYS_PLL_50
 else
 YOSYS_DEFS  :=
 endif
+# E35: synthesize the bsc netlist with an active-high reset so its flops take
+# it directly on LSR, and src/Top.v drives it from a register through a DCCA
+# onto a global net (~3.8K LSR sinks off general routing).  Synthesis only;
+# sim/strict_bram/run.sh matches it by default (BSV_POSITIVE_RESET=1).
+YOSYS_DEFS  += -DBSV_POSITIVE_RESET
 
 # Sim builds omit the JTAG TAP (the Bluesim top is the BSV module
 # itself); the UART DMI bridge provides debug access in simulation too.
