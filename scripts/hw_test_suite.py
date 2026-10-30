@@ -516,7 +516,7 @@ def main():
             b = dmi.mem_read32(PERF_CNT[3])
             return b - a
         dmi_check('perf count write-clear + cycles counting', _clear,
-                  lambda d: 3_000_000 <= d <= 10_000_000)
+                  lambda d: 0.12 * EXPECT_HZ <= d <= 0.4 * EXPECT_HZ)   # 0.25 s + DMI latency
         # restore defaults so later sections see a clean block
         dmi.mem_write32(PERF_SEL[1], 0)
         dmi.mem_write32(PERF_SEL[3], 0)
