@@ -85,7 +85,13 @@ module ulx3s_top(
             power_on_reset <= power_on_reset + 1'b1;
     end
 
-    wire rst_n = (&power_on_reset) & ~BTN1;
+    // E34: registered.  As a wire from the BTN1 pad it fed ~3.8K sinks
+    // across the die on general routing (fanout census, E32), with no
+    // synchronizer on the async button.  One cycle later, same behavior:
+    // BTN1 also clears power_on_reset.
+    reg rst_n = 1'b0;
+    always @(posedge sys_clk)
+        rst_n <= (&power_on_reset) & ~BTN1;
 
     // SDRAM clock: forward the system clock through an ECP5 DDR output
     // cell so it uses the dedicated IOLOGIC clock path.
