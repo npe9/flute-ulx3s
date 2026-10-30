@@ -93,6 +93,22 @@ module ulx3s_top(
     always @(posedge sys_clk)
         rst_n <= (&power_on_reset) & ~BTN1;
 
+`ifdef BSV_POSITIVE_RESET
+    // E35: the BSV netlist is synthesized with BSV_POSITIVE_RESET, so its
+    // flops take an active-high reset directly on LSR (no inverter LUT).
+    // Drive it from its own register through a DCCA onto a global net:
+    // ~3.8K LSR sinks leave general routing.  (The RST_N port name is
+    // bsc's; under this define it is active high.)
+    reg sys_rst = 1'b1;
+    always @(posedge sys_clk)
+        sys_rst <= ~((&power_on_reset) & ~BTN1);
+    wire sys_rst_g;
+    DCCA rst_dcc (.CLKI(sys_rst), .CE(1'b1), .CLKO(sys_rst_g));
+    wire top_rst = sys_rst_g;
+`else
+    wire top_rst = rst_n;
+`endif
+
     // SDRAM clock: forward the system clock through an ECP5 DDR output
     // cell so it uses the dedicated IOLOGIC clock path.
     ODDRX1F sdram_clk_oddr (
@@ -121,7 +137,7 @@ module ulx3s_top(
 
     mkULX3S_Top top (
         .CLK(sys_clk),
-        .RST_N(rst_n),
+        .RST_N(top_rst),
         .serial_txd(ftdi_rxd),
         .serial_rxd_v(ftdi_txd),
         .leds(led),
