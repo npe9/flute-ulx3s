@@ -64,7 +64,7 @@ device). SPI x3, I2C, UART1, GPIO, audio and power control all hang off it. The 
 (SDRAM reads) and any DMA engine are AXI masters/slaves of their own.
 
 Address plan (4 KB each, under the peripheral bridge once it exists): `0xC000_4000` spi0 (SD),
-`0xC000_5000` spi1 (flash), `0xC000_6000` i2c0, `0xC000_7000` uart1 (ESP32), `0xC000_8000`
+`0xC000_5000` (free; the flash is chip select 1 of spi0), `0xC000_6000` i2c0, `0xC000_7000` uart1 (ESP32), `0xC000_8000`
 gpio1 (buttons, switches, header pins), `0xC000_9000` audio, `0xC000_A000` spi2 (ADC),
 `0xC000_B000` spi3 (OLED), `0xC000_C000` power/multiboot; framebuffer control at `0xC001_0000`,
 palette-mode pixel RAM at `0xC100_0000`. PLIC sources (16 available): 0 uart0, 1 gpio,
@@ -215,3 +215,19 @@ G3/G4 → `game2d` (G2) → `game3d` (G5, G6).
   card (`mmcblk0: mmc0:0000 asdfg 7.50 GiB`, CRC16 on). Bare-metal `sd_test.bin` PASS on
   hardware at 8.3 MHz SCK. That needs CMD59 (CRC on): this card leaves CSD CRC7 / data CRC16
   empty with CRC off. The sim model always sends valid CRCs, so it can't catch that difference.
+- 2026-11-04: **1b flash boot done (lx38).** A second AXI SPI slave (spi1 at `0xC000_5000`) cost
+  +1.4K LUT4 / +1.2K FF, mostly the 64-bit AXI transactor FIFOs, and routed at
+  52.39 / 52.11 / 49.71 MHz. Fix: the flash is chip select 1 of spi0 (own CS and MISO pins, SCK
+  and MOSI shared; CSDEF has 2 bits so spi-sifive probes `cs=2`; CS 1 ignores CSDEF and is
+  always active low). +292 LUT4 over lx35 (45382 LUT4, 26502 FF); lx38 routes at
+  54.15 / 55.15 / 55.35 MHz. Flash pins R2/W2/V2 (+ W1/Y2
+  held high), clock through `USRMCLK`, `MASTER_SPI_PORT=DISABLE`. Boot ROM: silent probe before
+  the banner (reset, release power-down, JEDEC id and directory magic to the DMI forensic slot),
+  directory at flash `0x400000` (`scripts/mkflashimg.py`), countdown, Fletcher sum, jump.
+  Sim: `sim/common/spi_flash_model.v`, hello from flash at cycle 161.7K; CI Linux job boots it
+  and checks the bad-sum fallback. **Board:** TempleOS and Linux autoboot from flash with
+  nothing sent on the UART; Linux sees `cs=2` and still reads the SD card. The load runs at
+  ~0.58 MB/s at both sckdiv 3 and 1, so the ROM's uncached per-byte loop is the limit
+  (~86 cycles/byte); a burst or DMA read path would help. The lesson for the next peripherals
+  stands: a full AXI4 slave per small device is too expensive; use the register-bus bridge.
+

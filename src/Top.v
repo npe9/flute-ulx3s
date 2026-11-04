@@ -25,6 +25,11 @@ module ulx3s_top(
     output wire        sd_cmd,      //   MOSI, J1
     input  wire        sd_d0,       //   MISO, J3
     output wire        sd_d3,       //   CS (active low), K2
+    output wire        flash_csn,   // configuration flash: CS, R2
+    output wire        flash_mosi,  //   D0, W2
+    input  wire        flash_miso,  //   D1, V2
+    output wire        flash_wpn,   //   write protect (held high), Y2
+    output wire        flash_holdn, //   hold (held high), W1
     output wire        sdram_clk,   // F19
     output wire        sdram_cke,   // F20
     output wire        sdram_cs_n,  // P20
@@ -138,6 +143,13 @@ module ulx3s_top(
     wire        sdram_dq_oe;
     assign sdram_dq = sdram_dq_oe ? sdram_dq_out : 16'hZZZZ;
 
+    // The flash clock is the dedicated CCLK pin (U3), reachable after configuration only
+    // through USRMCLK (the LPF's MASTER_SPI_PORT=DISABLE frees the other flash pins).
+    wire flash_sclk;
+    USRMCLK u_usrmclk (.USRMCLKI(flash_sclk), .USRMCLKTS(1'b0));
+    assign flash_wpn   = 1'b1;
+    assign flash_holdn = 1'b1;
+
     mkULX3S_Top top (
         .CLK(sys_clk),
         .RST_N(top_rst),
@@ -149,6 +161,10 @@ module ulx3s_top(
         .sd_mosi(sd_cmd),
         .sd_cs_n(sd_d3),
         .sd_miso_v(sd_d0),
+        .flash_sclk(flash_sclk),
+        .flash_mosi(flash_mosi),
+        .flash_cs_n(flash_csn),
+        .flash_miso_v(flash_miso),
 `ifdef JTAG_TAP
         .jtag_tclk(jtag_tck),
         .jtag_tms(jtag_tms),

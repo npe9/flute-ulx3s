@@ -356,6 +356,9 @@ module mkSoC_Boot_Tb (Empty);
 `ifdef INCLUDE_SPI0
       dut.sd_miso (1'b1);    // no SD card (yet)
 `endif
+`ifdef INCLUDE_SPI0
+      dut.flash_miso (1'b1); // blank flash: no boot image
+`endif
       rg_cycle <= rg_cycle + 1;
       if (rg_cycle > fromInteger (max_cycles)) begin
          $display ("TIMEOUT after %0d cycles", rg_cycle);

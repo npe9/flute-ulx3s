@@ -1,14 +1,17 @@
 // ================================================================
 // AXI4_SPI: SPI host, register-compatible with the SiFive SPI controller (sifive,spi0), so the
-// stock Linux spi-sifive + mmc_spi drivers run the ULX3S microSD slot in SPI mode.  One chip
-// select, single-lane frames of 8 bits, 8-deep TX and RX FIFOs.  Offsets (32-bit registers;
-// on the 64-bit fabric a register at +4 is in lanes [63:32]):
+// stock Linux spi-sifive + mmc_spi drivers run the ULX3S microSD slot in SPI mode.  Two chip
+// selects, each with its own MISO input (SCK and MOSI go to both devices): CS 0 the microSD
+// slot, CS 1 the configuration flash.  Single-lane frames of 8 bits, 8-deep TX and RX FIFOs.
+// Offsets (32-bit registers; on the 64-bit fabric a register at +4 is in lanes [63:32]):
 //   0x00 SCKDIV   [11:0]  sck = clk / (2 * (div + 1))
 //   0x04 SCKMODE  [0] PHA, [1] POL
-//   0x10 CSID     chip select index (only 0 has a pin)
-//   0x14 CSDEF    [0] inactive level of CS (reset 1: active low); one bit implemented
+//   0x10 CSID     chip select index (0 and 1 have pins; MISO is taken from the selected one)
+//   0x14 CSDEF    [1:0] inactive level per CS (reset 3: active low; spi-sifive probes the CS
+//                 count from it).  CS 1 (the flash) ignores its bit and is always active low,
+//                 so no CSDEF write can leave the flash selected during SD traffic.
 //   0x18 CSMODE   0 AUTO (asserted during each frame), 2 HOLD (asserted from the first frame
-//                 until CSMODE / CSID / CSDEF changes), 3 OFF
+//                 until CSMODE / CSID / the selected CS's CSDEF bit changes), 3 OFF
 //   0x28 DELAY0, 0x2c DELAY1, 0x60 FCTRL, 0x64 FFMT: stored, no effect
 //   0x40 FMT      [1:0] proto (single only), [2] LSB first, [3] DIR (1: RX discarded), [19:16] len
 //   0x48 TXDATA   write: enqueue [7:0]; read: [31] FULL
@@ -48,8 +51,9 @@ interface AXI4_SPI_IFC;
 
    (* always_ready *)   method Bit #(1) sclk;
    (* always_ready *)   method Bit #(1) mosi;
-   (* always_ready *)   method Bit #(1) cs_n;
-   (* always_enabled *) method Action   miso (Bit #(1) v);
+   (* always_ready *)   method Bit #(2) cs_n;
+   (* always_enabled *) method Action   miso0 (Bit #(1) v);
+   (* always_enabled *) method Action   miso1 (Bit #(1) v);
 endinterface
 
 // ================================================================
@@ -68,7 +72,7 @@ module mkAXI4_SPI (AXI4_SPI_IFC);
    Reg #(Bit #(12)) rg_sckdiv  <- mkReg (3);
    Reg #(Bit #(2))  rg_sckmode <- mkReg (0);
    Reg #(Bit #(32)) rg_csid    <- mkReg (0);
-   Reg #(Bit #(1))  rg_csdef   <- mkReg (1);
+   Reg #(Bit #(2))  rg_csdef   <- mkReg (3);
    Reg #(Bit #(2))  rg_csmode  <- mkReg (0);
    Reg #(Bit #(32)) rg_delay0  <- mkReg (32'h0001_0001);
    Reg #(Bit #(32)) rg_delay1  <- mkReg (32'h0000_0001);
@@ -109,11 +113,15 @@ module mkAXI4_SPI (AXI4_SPI_IFC);
    Reg #(Bit #(4))  rg_hold_gen <- mkReg (0);
    Reg #(Bit #(1))  rg_sck    <- mkReg (0);
    Reg #(Bit #(1))  rg_mosi   <- mkReg (1);
-   Reg #(Bit #(1))  rg_cs_n   <- mkReg (1);
-   Reg #(Bit #(1))  rg_miso_q <- mkConfigReg (1); // input flop (ConfigReg: the pin methods stay unordered against the engine)
+   Reg #(Bit #(2))  rg_cs_n   <- mkReg (3);
+   // input flops (ConfigReg: the pin methods stay unordered against the engine)
+   Reg #(Bit #(1))  rg_miso0_q <- mkConfigReg (1);
+   Reg #(Bit #(1))  rg_miso1_q <- mkConfigReg (1);
    Reg #(Bool)      rg_irq    <- mkReg (False);
 
-   Bool cs_sel = (rg_csid == 0);
+   Bool cs_sel0 = (rg_csid == 0);
+   Bool cs_sel1 = (rg_csid == 1);
+   Bit #(1) miso_q = cs_sel1 ? rg_miso1_q : rg_miso0_q;
 
    // ================================================================
    // Engine: one rule, fires every cycle
@@ -158,7 +166,7 @@ module mkAXI4_SPI (AXI4_SPI_IFC);
          Bool capture = (rg_f_pha == 0) ? ((e < 16) && (! leading))         // after the leading edge
                                         : ((e != 0) && leading);            // after the trailing edge
          Bit #(8) sh_rx = rg_sh_rx;
-         if (capture) sh_rx = { sh_rx [6:0], rg_miso_q };
+         if (capture) sh_rx = { sh_rx [6:0], miso_q };
          rg_sh_rx <= sh_rx;
          if (e < 16) begin
             sck = ~ sck;
@@ -193,8 +201,10 @@ module mkAXI4_SPI (AXI4_SPI_IFC);
       rg_mosi  <= mosi;
       rg_tx_rp <= tx_rp;
       rg_rx_wp <= rx_wp;
-      Bool active = cs_sel && (rg_csmode != 3) && (busy || hold);
-      rg_cs_n  <= (active ? (~ rg_csdef) : rg_csdef);
+      Bool active = (rg_csmode != 3) && (busy || hold);
+      Bit #(1) cs0_n = (active && cs_sel0) ? (~ rg_csdef [0]) : rg_csdef [0];
+      Bit #(1) cs1_n = (active && cs_sel1) ? 0 : 1;
+      rg_cs_n  <= { cs1_n, cs0_n };
 
       Bool txwm = (tx_level < zeroExtend (rg_txmark));
       Bool rxwm = (rx_level > zeroExtend (rg_rxmark));
@@ -253,7 +263,7 @@ module mkAXI4_SPI (AXI4_SPI_IFC);
             // selected pin (FE310 manual); spi-sifive rewrites all three per message, and
             // mmc_spi keeps CS asserted across messages (cs_change) between command and data.
             'h10: begin rg_csid   <= w;       if (w != rg_csid)          rg_cs_gen <= rg_cs_gen + 1; end
-            'h14: begin rg_csdef  <= w [0];   if (w [0] != rg_csdef)     rg_cs_gen <= rg_cs_gen + 1; end
+            'h14: begin rg_csdef  <= w [1:0]; if (w [rg_csid [0]] != rg_csdef [rg_csid [0]]) rg_cs_gen <= rg_cs_gen + 1; end
             'h18: begin rg_csmode <= w [1:0]; if (w [1:0] != rg_csmode)  rg_cs_gen <= rg_cs_gen + 1; end
             'h28: rg_delay0  <= w;
             'h2c: rg_delay1  <= w;
@@ -330,9 +340,12 @@ module mkAXI4_SPI (AXI4_SPI_IFC);
 
    method Bit #(1) sclk = rg_sck;
    method Bit #(1) mosi = rg_mosi;
-   method Bit #(1) cs_n = rg_cs_n;
-   method Action miso (Bit #(1) v);
-      rg_miso_q <= v;
+   method Bit #(2) cs_n = rg_cs_n;
+   method Action miso0 (Bit #(1) v);
+      rg_miso0_q <= v;
+   endmethod
+   method Action miso1 (Bit #(1) v);
+      rg_miso1_q <= v;
    endmethod
 endmodule
 

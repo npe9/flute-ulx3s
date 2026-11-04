@@ -31,3 +31,11 @@ module ODDRX1F (
             Q <= D0;
     end
 endmodule
+
+// USRMCLK: drives the configuration-flash clock pin (CCLK) after configuration.  No pin in sim;
+// the bench reads USRMCLKI through a hierarchical reference.
+module USRMCLK (
+    input wire USRMCLKI,
+    input wire USRMCLKTS
+);
+endmodule

@@ -438,7 +438,7 @@ int main(int argc, char** argv) {
                 printf("[tb] banner seen at cycle %llu\n", (unsigned long long)g_cycle);
                 if (isa_mode) {    // jump to the preloaded image (count 0: no load)
                     std::vector<uint8_t> hdr = { 0x00, 0x00, 0x00, 0x80, 0, 0, 0, 0 };
-                    send_bytes(hdr);
+                    if (!getenv("TB_NOLOAD")) send_bytes(hdr);   // TB_NOLOAD: the ROM boots from flash
                     new_stage(pty_fd >= 0 ? ST_BOARD : ST_ISA);
                     break;
                 }

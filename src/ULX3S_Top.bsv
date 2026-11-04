@@ -62,6 +62,15 @@ interface ULX3S_Top_IFC;
    (* always_enabled *) method Action   sd_miso (Bit #(1) v);
 `endif
 
+`ifdef INCLUDE_SPI0
+   // Configuration flash (chip select 1 of the SD host): flash_csn, flash_mosi (D0),
+   // flash_miso (D1); the clock goes to the dedicated CCLK pin through USRMCLK in src/Top.v
+   (* always_ready *)   method Bit #(1) flash_sclk;
+   (* always_ready *)   method Bit #(1) flash_mosi;
+   (* always_ready *)   method Bit #(1) flash_cs_n;
+   (* always_enabled *) method Action   flash_miso (Bit #(1) v);
+`endif
+
 `ifdef JTAG_TAP
    // The J1-header JTAG TAP is kept in the design (unconnected to the
    // debug server; the UART bridge owns server_external_control) purely
@@ -211,6 +220,15 @@ module mkULX3S_Top (ULX3S_Top_IFC);
    method Bit #(1) sd_cs_n = soc_top.sd_cs_n;
    method Action sd_miso (Bit #(1) v);
       soc_top.sd_miso (v);
+   endmethod
+`endif
+
+`ifdef INCLUDE_SPI0
+   method Bit #(1) flash_sclk = soc_top.flash_sclk;
+   method Bit #(1) flash_mosi = soc_top.flash_mosi;
+   method Bit #(1) flash_cs_n = soc_top.flash_cs_n;
+   method Action flash_miso (Bit #(1) v);
+      soc_top.flash_miso (v);
    endmethod
 `endif
 

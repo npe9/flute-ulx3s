@@ -90,6 +90,7 @@ FILES+=("$ROOT/src/ASSIGN1.v"
         ./sdram_timing_check.v
         ./tb_board.v
         ../common/sd_spi_model.v
+        ../common/spi_flash_model.v
         ./board_pins_if.sv
         ./uart_agent.sv
         ./scoreboard.sv

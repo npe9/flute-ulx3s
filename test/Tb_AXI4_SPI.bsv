@@ -43,7 +43,7 @@ module mkTb_AXI4_SPI (Empty);
    (* fire_when_enabled, no_implicit_conditions *)
    rule rl_dev;
       Bit #(1) sck = spi.sclk;
-      Bit #(1) cs  = spi.cs_n;
+      Bit #(1) cs  = spi.cs_n [0];
       if (sck != d_sck_prev) rg_edges <= rg_edges + 1;
       Bit #(8) din = d_in; Bit #(8) dout = d_out; Bit #(4) n = d_n;
       Bit #(1) pv = d_pend_v; Bit #(4) pt = d_pend_t; Bit #(1) pb = d_pend_b;
@@ -75,7 +75,8 @@ module mkTb_AXI4_SPI (Empty);
       d_in <= din; d_out <= dout; d_n <= n; d_miso <= miso;
       d_pend_v <= pv; d_pend_t <= pt; d_pend_b <= pb;
       d_sck_prev <= sck; d_cs_prev <= cs;
-      spi.miso (rg_loop ? spi.mosi : miso);
+      spi.miso0 (rg_loop ? spi.mosi : miso);
+      spi.miso1 (~ spi.mosi);                            // CS 1 device: inverting loopback
    endrule
 
    rule rl_tick; rg_t <= rg_t + 1; endrule
@@ -128,10 +129,10 @@ module mkTb_AXI4_SPI (Empty);
 
    mkAutoFSM (seq
       spi.init (0, truncate (base), truncate (base + 64'h1000));
-      action chk ("cs idle", zeroExtend (spi.cs_n), 1); endaction
-      // CSDEF probe (one CS line)
-      rd ('h14); chk ("csdef reset", rg_r, 1);
-      wr ('h14, 32'hFFFF_FFFF); rd ('h14); chk ("csdef probe", rg_r, 1);
+      action chk ("cs idle", zeroExtend (spi.cs_n), 3); endaction
+      // CSDEF probe (two CS lines)
+      rd ('h14); chk ("csdef reset", rg_r, 3);
+      wr ('h14, 32'hFFFF_FFFF); rd ('h14); chk ("csdef probe", rg_r, 3);
       wr ('h14, 1);
       // init as sifive_spi_init
       wr ('h70, 0); wr ('h50, 1); wr ('h54, 0); wr ('h28, 32'h0001_0001); wr ('h2c, 1); wr ('h60, 0);
@@ -143,11 +144,11 @@ module mkTb_AXI4_SPI (Empty);
       rg_edges <= 0;
       xfer8 (8'h5A);
       action chk ("edges", pack (rg_edges), 128); endaction
-      action chk ("cs held", zeroExtend (spi.cs_n), 0); endaction
+      action chk ("cs held", zeroExtend (spi.cs_n [0]), 0); endaction
       // next message (Linux spi-sifive prepare_message + set_cs): rewriting the same CSDEF,
       // CSID and CSMODE must not end HOLD (mmc_spi keeps CS across command/data messages)
       wr ('h14, 1); wr ('h10, 0); wr ('h18, 2); delay (4);
-      action chk ("cs held across rewrite", zeroExtend (spi.cs_n), 0); endaction
+      action chk ("cs held across rewrite", zeroExtend (spi.cs_n [0]), 0); endaction
       // div 0 (sck = clk/2), device delay 0
       rg_dly <= 0; wr ('h00, 0);
       xfer8 (~ 8'hED);
@@ -160,10 +161,10 @@ module mkTb_AXI4_SPI (Empty);
       rd ('h4c); chk ("dir: rx empty", rg_r, 32'h8000_0000);
       // deselect (AUTO): CS returns to CSDEF
       wr ('h18, 0); delay (4);
-      action chk ("cs released", zeroExtend (spi.cs_n), 1); endaction
+      action chk ("cs released", zeroExtend (spi.cs_n), 3); endaction
       // CS_HIGH device: CSDEF 0 -> idle low, active high
       wr ('h14, 0); delay (4);
-      action chk ("csdef 0 idle", zeroExtend (spi.cs_n), 0); endaction
+      action chk ("csdef 0 idle", zeroExtend (spi.cs_n), 2); endaction    // CS 1 ignores CSDEF
       wr ('h14, 1);
       // mode 3 loopback, div 3, LSB-first
       rg_loop <= True; wr ('h04, 3); wr ('h00, 3); wr ('h40, 32'h0008_0004); wr ('h18, 2);
@@ -183,6 +184,18 @@ module mkTb_AXI4_SPI (Empty);
       rd ('h4c); chk ("irq rx", rg_r, 32'h55);
       delay (4);
       action if (spi.interrupt_req) begin $display ("FAIL irq stuck"); rg_err <= rg_err + 1; end endaction
+      // CS 1 (flash): HOLD on CS 1 only, MISO from the CS 1 input
+      wr ('h70, 0); wr ('h10, 1); wr ('h18, 2); wr ('h00, 1);
+      wr ('h48, 32'h3C); wr ('h48, 32'h0F);
+      wr ('h54, 1);
+      rg_r <= 0;
+      while ((rg_r & 2) == 0) rd ('h74);
+      action chk ("cs1 held", zeroExtend (spi.cs_n), 1); endaction
+      rd ('h4c); chk ("cs1 rx0", rg_r, 32'hC3);
+      rd ('h4c); chk ("cs1 rx1", rg_r, 32'hF0);
+      wr ('h18, 0); delay (4);
+      action chk ("cs1 released", zeroExtend (spi.cs_n), 3); endaction
+      wr ('h10, 0);
       action
          if (rg_err == 0) $display ("Tb_AXI4_SPI: PASS (%0d cycles)", rg_t);
          else $display ("Tb_AXI4_SPI: FAIL (%0d errors)", rg_err);

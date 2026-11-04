@@ -5,7 +5,10 @@ sim: SDRAM preload at 0x80000000 + jump (TB_ISA mode), live UART echo, pass when
 --board: the Verilator virtual board instead -- the UART is bridged to a host pty (build/sim-tty),
 no pass string, runs until killed; IMAGE "none" preloads nothing (the boot ROM waits for
 scripts/loader.py --sim).
-usage: linux_run.py [--board] [--pass STR] [--deadline CYCLES] [--progress N] [--plusarg ARG]... IMAGE.bin
+--flash HEX: boot from the flash model instead (HEX from scripts/mkflashimg.py --hex); IMAGE is
+"none" (nothing preloaded, nothing sent on the UART).
+usage: linux_run.py [--board] [--pass STR] [--deadline CYCLES] [--progress N] [--plusarg ARG]...
+                    [--flash HEX] IMAGE.bin
 (env: BUILD_DIR); --plusarg sd_trace=1 passes +sd_trace=1 to the sim."""
 import argparse, os, subprocess, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -19,6 +22,7 @@ def main():
     ap.add_argument("--progress", type=int, default=10_000_000)
     ap.add_argument("--board", action="store_true", help="virtual board: UART on a host pty")
     ap.add_argument("--plusarg", action="append", default=[], help="extra +ARG for the sim")
+    ap.add_argument("--flash", help="flash model contents (mkflashimg.py --hex); IMAGE must be none")
     a = ap.parse_args()
     sim = os.path.join(HERE, os.environ.get("BUILD_DIR", "obj_dir_lx"), "Vsv_tb_top")
     env = dict(os.environ, TB_HELLO_DEADLINE=str(a.deadline), TB_PROGRESS=str(a.progress))
@@ -29,7 +33,12 @@ def main():
         env["SIM_PTY_LINK"] = os.path.abspath(env["SIM_PTY_LINK"])
     else:
         env.update(TB_ECHO="1", TB_PASS_STR=a.pas)
-    if a.board and a.image == "none":
+    if a.flash:
+        if a.image != "none": sys.exit("--flash: IMAGE must be none")
+        env.update(TB_ISA="1", TB_NOLOAD="1")
+        args += [os.devnull, "+SB_OFF", "+flash_image=" + os.path.abspath(a.flash)]
+        print(f"[linux_run] flash boot from {a.flash}, sim {sim}", flush=True)
+    elif a.board and a.image == "none":
         args += [os.devnull, "+SB_OFF"]
         print(f"[linux_run] virtual board, nothing preloaded, sim {sim}", flush=True)
     else:

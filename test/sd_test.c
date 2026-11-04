@@ -98,9 +98,9 @@ static uint8_t blk [512], blk2 [512];
 int main (void) {
    putc_ ('T'); puts_ ("\r\n");
 
-   // registers: reset values, CSDEF probe (one CS)
-   check (0x01, 1, SPI (CSDEF));
-   SPI (CSDEF) = 0xFFFFFFFF; check (0x02, 1, SPI (CSDEF)); SPI (CSDEF) = 1;
+   // registers: reset values, CSDEF probe (two CS: SD card, configuration flash)
+   check (0x01, 3, SPI (CSDEF));
+   SPI (CSDEF) = 0xFFFFFFFF; check (0x02, 3, SPI (CSDEF)); SPI (CSDEF) = 1;
    check (0x03, 0x80000000u, SPI (RXDATA));
 
    // 400 kHz, mode 0, 8-bit frames; >= 74 clocks with CS deasserted

@@ -189,6 +189,9 @@ module mkULX3S_Sim (Empty);
 `ifdef INCLUDE_SPI0
       dut.sd_miso (1'b1);    // no SD card (yet)
 `endif
+`ifdef INCLUDE_SPI0
+      dut.flash_miso (1'b1); // blank flash: no boot image
+`endif
       if (pty_on && (rg_cycle [11:0] == 0)) begin
          let b <- c_ctl_btn (zeroExtend (rg_btn1));
          if (b [0] != rg_btn1) $display ("[board] BTN1 = %0d (cycle %0d)", b [0], rg_cycle);

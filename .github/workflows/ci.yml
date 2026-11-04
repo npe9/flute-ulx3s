@@ -213,6 +213,14 @@ jobs:
           grep -a -q 'ISA PASS (TX saw "tick 2")' build/linux.log
           grep -a "tick 1" build/linux.log | grep -q "fp ok"
           grep -a -q "sd: sig 000055aa" build/linux.log   # /init read block 0 of mmcblk0 (sim/common/sd_spi_model.v)
+      - name: Boot hello.bin from the configuration flash (sim/common/spi_flash_model.v), and a bad sum falls back
+        run: |
+          python3 scripts/mkflashimg.py --image hello=sw/hello.bin --wait-ms 0 --sckdiv 1 -o build/flash-hello.bin --hex build/flash-hello.hex
+          BUILD_DIR=obj_dir_lx sim/linux_bram/linux_run.py --flash build/flash-hello.hex --pass "tick 00000000" --deadline 20000000 --progress 0 none 2>&1 | tee build/flash.log | grep -a -v STRICT_BRAM | tail -20 || true
+          grep -a -q 'ISA PASS (TX saw "tick 00000000")' build/flash.log
+          python3 -c "import sys; l=open('build/flash-hello.hex').read().split(chr(10)); i=1+0x1010; l[i]='%02x'%(int(l[i],16)^1); open('build/flash-bad.hex','w').write(chr(10).join(l))"
+          BUILD_DIR=obj_dir_lx sim/linux_bram/linux_run.py --flash build/flash-bad.hex --pass "flash: bad sum" --deadline 20000000 --progress 0 none 2>&1 > build/flash-bad.log || true
+          grep -a -q 'ISA PASS (TX saw "flash: bad sum")' build/flash-bad.log
       - name: Verilator virtual board (same binary, UART on a pty) answers DMI
         run: BOARD=verilator BUILD_DIR=obj_dir_lx ci/board_dmi_smoke.sh
       - if: always()

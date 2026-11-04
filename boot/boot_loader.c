@@ -16,6 +16,16 @@
 //     segment), then jumps to <dst>
 // A new transfer can be started by resetting the board (FIRE1).
 //
+// Flash boot: before the banner the ROM reads a boot directory from the
+// configuration flash (chip select 1 of the SD card's SPI host, spi0 @
+// 0xC0004000) at FLASH_DIR_OFF; with
+// none there it prints nothing extra and behaves as above.  With one, it
+// prints a "flash:" line after the first banner, waits the directory's
+// wait_ms watching the UART (any received byte = the load protocol above),
+// then loads the default entry, checks its sum and jumps (no repair
+// window).  A bad sum falls back to the UART loader.  Directory format:
+// scripts/mkflashimg.py.
+//
 // Milestone LEDs (GPIO @ 0xC000_2000, active high):
 //   LED0  FPGA/clock alive (set immediately)
 //   LED1  executing boot ROM
@@ -41,6 +51,11 @@ typedef unsigned char u8;
 
 static volatile u32 *const uart = (volatile u32 *) UART_BASE;
 static volatile u32 *const gpio = (volatile u32 *) GPIO_BASE;
+
+#define SPI0_BASE 0xC0004000ul
+#define SOC_TIMER_HZ (*(volatile u32 *) 0xC0003014ul)
+
+static volatile u32 *const spi = (volatile u32 *) SPI0_BASE;
 
 static void set_leds (u32 v)
 {
@@ -280,6 +295,154 @@ static void __attribute__ ((aligned (4))) trap_handler (void)
         __asm__ volatile ("");
 }
 
+// ---- Configuration flash (SiFive SPI registers, see src/AXI4_SPI.bsv) ----
+#define SPI_SCKDIV  (0x00 / 4)
+#define SPI_CSID    (0x10 / 4)
+#define SPI_CSMODE  (0x18 / 4)
+#define SPI_TXDATA  (0x48 / 4)
+#define SPI_RXDATA  (0x4c / 4)
+
+#define FLASH_DIR_OFF   0x400000ul
+#define FLASH_DIR_MAGIC 0x44424C46ul      // "FLBD"
+#define FLASH_DIR_MAX   8
+
+typedef struct {
+    u32 off, len, dst, entry, sum_a, sum_b;
+    char name [8];
+} Flash_Entry;
+
+typedef struct {
+    u32 magic, version, count, dflt, wait_ms, sckdiv, rsvd [2];
+    Flash_Entry e [FLASH_DIR_MAX];
+} Flash_Dir;
+
+static void delay_us (u32 us)
+{
+    u32 t0 = mtime_lo ();
+    u32 n = (SOC_TIMER_HZ / 1000000) * us;
+    while (mtime_lo () - t0 < n) { }
+}
+
+static u32 spi_xfer (u32 b)
+{
+    spi [SPI_TXDATA] = b;
+    u32 r;
+    while ((int) (r = spi [SPI_RXDATA]) < 0) { }
+    return r & 0xff;
+}
+
+// CS is held from the first byte (CSMODE HOLD) until fl_end writes AUTO.
+static void fl_end (void)
+{
+    spi [SPI_CSMODE] = 0;
+}
+
+// Leave the host as reset left it (CS 0, the SD card's divider) for the
+// next program's SD driver.
+static void fl_release (void)
+{
+    spi [SPI_CSID] = 0;
+    spi [SPI_SCKDIV] = 3;
+}
+
+static void fl_cmd (u32 cmd)
+{
+    spi [SPI_CSMODE] = 2;
+    spi_xfer (cmd);
+}
+
+static void fl_read_start (u32 off)
+{
+    fl_cmd (0x03);
+    spi_xfer (off >> 16);
+    spi_xfer (off >> 8);
+    spi_xfer (off);
+}
+
+// Read n words (little-endian) into dst, up to 8 bytes in flight (the
+// FIFO depth), accumulating the Fletcher-style sum of mkflashimg.py.
+static void fl_read_words (u32 off, volatile u32 *dst, u32 nwords, u32 *sum)
+{
+    u32 n = nwords * 4, sent = 0, got = 0, w = 0;
+    u32 a = sum [0], b = sum [1];
+    fl_read_start (off);
+    while (got < n) {
+	while (sent < n && sent - got < 8) {
+	    spi [SPI_TXDATA] = 0;
+	    sent++;
+	}
+	u32 r = spi [SPI_RXDATA];
+	if ((int) r < 0)
+	    continue;
+	w = (w >> 8) | (r << 24);
+	if ((++got & 3) == 0) {
+	    *dst++ = w;
+	    a += w;
+	    b += a;
+	    if ((got & 0x7FFFF) == 0)
+		putc ('.');
+	}
+    }
+    fl_end ();
+    sum [0] = a;
+    sum [1] = b;
+}
+
+// Silent probe before the banner (the J1 scoreboard and the host loaders
+// expect nothing extra on TX).  Returns the default entry or 0.  The JEDEC
+// id and directory magic go to the forensic slot for DMI inspection.
+static Flash_Entry *flash_probe (Flash_Dir *d)
+{
+    u32 sum [2] = { 0, 0 };
+    Flash_Entry *fe = 0;
+    spi [SPI_CSID] = 1;
+    spi [SPI_SCKDIV] = 3;
+    fl_cmd (0x66); fl_end ();              // reset enable, reset
+    fl_cmd (0x99); fl_end ();
+    delay_us (50);
+    fl_cmd (0xAB); fl_end ();              // release power-down
+    delay_us (10);
+    fl_cmd (0x9F);
+    u32 id = spi_xfer (0) << 16;
+    id |= spi_xfer (0) << 8;
+    id |= spi_xfer (0);
+    fl_end ();
+    foren [12] = id;
+    fl_read_words (FLASH_DIR_OFF, (volatile u32 *) d, 8, sum);
+    foren [13] = d->magic;
+    if (d->magic == FLASH_DIR_MAGIC && d->version == 1
+	&& d->count != 0 && d->count <= FLASH_DIR_MAX && d->dflt < d->count) {
+	fl_read_words (FLASH_DIR_OFF + 32, (volatile u32 *) d->e, d->count * 8, sum);
+	fe = & d->e [d->dflt];
+    }
+    fl_release ();
+    return fe;
+}
+
+static void put_str (const char *p)
+{
+    while (*p)
+	putc (*p++);
+}
+
+static void jump_to (u32 addr)
+{
+    // Make the loaded image visible to the I-cache and memory system
+    __asm__ volatile ("fence");
+    __asm__ volatile ("fence.i");
+
+    // Install a trap handler so we can report the reason if the loaded
+    // image crashes instead of silently restarting at mtvec=0x1000.
+    __asm__ volatile ("csrw mtvec, %0" :: "r" (trap_handler));
+
+    // LED7: jumped to kernel
+    set_leds (0xff);
+    forensic_progress (8);
+
+    void (*entry) (void) = (void (*) (void)) addr;
+    entry ();
+}
+
 void real_start (void)
 {
     // LED0: clock/FPGA alive
@@ -317,6 +480,8 @@ void real_start (void)
     }
 
     static const char banner [] = "\r\nULX3S Flute SoC: boot loader\r\n";
+    Flash_Dir fdir;
+    Flash_Entry *fe = flash_probe (&fdir);
     forensic_progress (2);
 
     // Print the banner, but watch the receiver after every character
@@ -327,6 +492,32 @@ void real_start (void)
 	    if (uart [REG_LSR] & 0x01)
 		goto load_protocol;
 	    putc (*p);
+	}
+	if (fe) {
+	    u32 sum [2] = { 0, 0 };
+	    put_str ("flash: ");
+	    for (int i = 0; i < 8 && fe->name [i]; i++)
+		putc (fe->name [i]);
+	    putc (' '); put_hex_u32 (fe->len);
+	    putc (' '); put_hex_u32 (fe->dst);
+	    put_str (", any byte here = UART load\r\n");
+	    u32 t0 = mtime_lo ();
+	    u32 n = (SOC_TIMER_HZ / 1000) * fdir.wait_ms;
+	    while (mtime_lo () - t0 < n)
+		if (uart [REG_LSR] & 0x01)
+		    goto load_protocol;
+	    set_leds (0x33);
+	    spi [SPI_CSID] = 1;
+	    spi [SPI_SCKDIV] = fdir.sckdiv;
+	    fl_read_words (fe->off, (volatile u32 *) fe->dst, (fe->len + 3) / 4, sum);
+	    fl_release ();
+	    if (sum [0] != fe->sum_a || sum [1] != fe->sum_b) {
+		put_str ("\r\nflash: bad sum\r\n");
+		fe = 0;
+		continue;
+	    }
+	    put_str ("\r\nflash: ok\r\n");
+	    jump_to (fe->entry);
 	}
 	// crude ~0.1 s delay at 12.5 MHz, also polling
 	for (volatile u32 d = 0;
@@ -579,19 +770,6 @@ load_protocol:
 	}
 
 jump_to_kernel:
-	// Make the loaded image visible to the I-cache and memory system
-	__asm__ volatile ("fence");
-	__asm__ volatile ("fence.i");
-
-	// Install a trap handler so we can report the reason if the loaded
-	// image crashes instead of silently restarting at mtvec=0x1000.
-	__asm__ volatile ("csrw mtvec, %0" :: "r" (trap_handler));
-
-	// LED7: jumped to kernel
-	set_leds (0xff);
-	forensic_progress (8);
-
-	void (*entry) (void) = (void (*) (void)) addr;
-	entry ();
+	jump_to (addr);
     }
 }

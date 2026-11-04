@@ -38,6 +38,12 @@ module sim_board (
     wire sd_clk, sd_cmd, sd_cs_n, sd_miso;
     sd_spi_model sd (.clk (clk), .sck (sd_clk), .mosi (sd_cmd), .cs_n (sd_cs_n), .miso (sd_miso));
 
+    // Configuration flash: behavioral SPI NOR (+flash_image=<hex>: contents, else erased).  The
+    // clock has no pin on ulx3s_top (USRMCLK drives CCLK), so it is read through the stub.
+    wire flash_csn, flash_mosi, flash_miso, flash_wpn, flash_holdn;
+    spi_flash_model flash (.clk (clk), .sck (top.u_usrmclk.USRMCLKI), .mosi (flash_mosi),
+                           .cs_n (flash_csn), .miso (flash_miso));
+
     ulx3s_top top (
         .CLK      (clk),
         .BTN1     (btn1),
@@ -55,6 +61,11 @@ module sim_board (
         .sd_cmd      (sd_cmd),
         .sd_d0       (sd_miso),
         .sd_d3       (sd_cs_n),
+        .flash_csn   (flash_csn),
+        .flash_mosi  (flash_mosi),
+        .flash_miso  (flash_miso),
+        .flash_wpn   (flash_wpn),
+        .flash_holdn (flash_holdn),
         .sdram_clk   (sdram_clk_o),
         .sdram_cke   (sdram_cke),
         .sdram_cs_n  (sdram_cs_n),

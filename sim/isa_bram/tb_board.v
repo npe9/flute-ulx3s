@@ -37,6 +37,8 @@ module sim_board (
     // microSD (SPI mode): no card unless a model drives MISO
     wire sd_clk, sd_cmd, sd_cs_n;
     wire sd_miso = 1'b1;
+    wire flash_csn, flash_mosi, flash_wpn, flash_holdn;
+    wire flash_miso = 1'b1;    // erased flash: no boot image
 
     ulx3s_top top (
         .CLK      (clk),
@@ -55,6 +57,11 @@ module sim_board (
         .sd_cmd      (sd_cmd),
         .sd_d0       (sd_miso),
         .sd_d3       (sd_cs_n),
+        .flash_csn   (flash_csn),
+        .flash_mosi  (flash_mosi),
+        .flash_miso  (flash_miso),
+        .flash_wpn   (flash_wpn),
+        .flash_holdn (flash_holdn),
         .sdram_clk   (sdram_clk_o),
         .sdram_cke   (sdram_cke),
         .sdram_cs_n  (sdram_cs_n),

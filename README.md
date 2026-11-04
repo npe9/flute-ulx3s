@@ -552,6 +552,32 @@ diagnostic NAKs, 8 retries per chunk, reprogram-and-restart as the
 bulletproof fallback). `scripts/exp_chunk2.py` is a smaller driver for
 protocol experiments.
 
+### Booting from the configuration flash
+
+Before the banner the ROM reads a boot directory from the configuration flash (chip select 1
+of the SD card's SPI host; flash offset `0x400000`, above the bitstream). With none there
+(erased flash, and all the sim benches by default) nothing changes. With one, the ROM prints
+`flash: <name> <len> <dst>, any byte here = UART load` after the first banner, waits the
+directory's `wait_ms` (any UART byte, e.g. `loader.py`'s header, takes the UART path
+instead), loads the default image, checks its sum and jumps (no repair window). A bad sum
+prints `flash: bad sum` and falls back to the UART loader.
+
+```bash
+python3 scripts/mkflashimg.py --image templeos=templeos/build/ulx3s_repl.blob.bin \
+    --image linux=<linux-sw>/out-fp/fw_payload.bin --default 1 --wait-ms 3000 --sckdiv 1 \
+    -o build/flash.bin
+openFPGALoader -b ulx3s -f --file-type raw -o 0x400000 build/flash.bin   # ~8 min for 9 MB
+# switch the default later by rewriting only the 4 KB directory sector:
+head -c 4096 build/flash-new-default.bin > build/flash-dir.bin
+openFPGALoader -b ulx3s -f --file-type raw -o 0x400000 build/flash-dir.bin
+```
+
+With an image in flash, `loader.py` must start within `wait_ms` of programming the FPGA
+(FIRE1 restarts the countdown). The load runs at ~0.58 MB/s (CPU-bound: TempleOS ~5 s,
+Linux ~11 s). For power-on boot, also write the bitstream at offset 0
+(`openFPGALoader -b ulx3s -f build/ulx3s_top.bit`). The sim flash model is
+`sim/common/spi_flash_model.v` (`linux_run.py --flash <mkflashimg --hex output> none`).
+
 This lets you iterate on RISC-V software without rebuilding the FPGA bitstream:
 a full REPL reload is ~90 s over the UART versus ~7 min for synthesis+P&R.
 
