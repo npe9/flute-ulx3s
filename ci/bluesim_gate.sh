@@ -13,6 +13,10 @@ if [ -f templeos/tos/Makefile ]; then
     make -C templeos holyc repl > build/ci/templeos.log 2>&1 || { tail -30 build/ci/templeos.log; exit 1; }
     echo "templeos: built $(ls -l templeos/build/ulx3s_repl.blob.bin | awk '{print $5}') byte REPL image from source"
 fi
+# AXI4_SPI unit testbench (microSD host).
+make sim-spi-tb > build/ci/spi-tb.log 2>&1
+grep -a "Tb_AXI4_SPI:" build/ci/spi-tb.log | tail -1
+grep -a -q "Tb_AXI4_SPI: PASS" build/ci/spi-tb.log || { tail -30 build/ci/spi-tb.log; exit 1; }
 # bsc -u does not see -D changes: a probe-free build needs its own bdir.
 rm -rf build/bsc-sim-boot build/sim-boot
 make sim-boot SIM_BOOT_PROBES= > build/ci/sim-boot.log 2>&1

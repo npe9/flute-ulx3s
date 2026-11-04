@@ -186,6 +186,9 @@ module mkULX3S_Sim (Empty);
    rule rl_pins;
       dut.serial_rxd (rg_rxd);
       dut.btn1 (rg_btn1);
+`ifdef INCLUDE_SPI0
+      dut.sd_miso (1'b1);    // no SD card (yet)
+`endif
       if (pty_on && (rg_cycle [11:0] == 0)) begin
          let b <- c_ctl_btn (zeroExtend (rg_btn1));
          if (b [0] != rg_btn1) $display ("[board] BTN1 = %0d (cycle %0d)", b [0], rg_cycle);

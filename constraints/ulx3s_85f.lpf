@@ -50,6 +50,17 @@ IOBUF  PORT "led[*]"     PULLMODE=NONE IO_TYPE=LVCMOS33 DRIVE=4 ;
 LOCATE COMP "wifi_en"    SITE "F1" ;
 IOBUF  PORT "wifi_en"    PULLMODE=UP IO_TYPE=LVCMOS33 DRIVE=4 ;
 
+# microSD slot in SPI mode (pins shared with the ESP32, which wifi_en holds in reset).
+# sd_d[1] (H1) and sd_d[2] (K1) are not used in SPI mode and are left out of the design.
+LOCATE COMP "sd_clk"     SITE "H2" ;
+LOCATE COMP "sd_cmd"     SITE "J1" ;
+LOCATE COMP "sd_d0"      SITE "J3" ;
+LOCATE COMP "sd_d3"      SITE "K2" ;
+IOBUF  PORT "sd_clk"     PULLMODE=UP IO_TYPE=LVCMOS33 DRIVE=4 ;
+IOBUF  PORT "sd_cmd"     PULLMODE=UP IO_TYPE=LVCMOS33 DRIVE=4 ;
+IOBUF  PORT "sd_d0"      PULLMODE=UP IO_TYPE=LVCMOS33 ;
+IOBUF  PORT "sd_d3"      PULLMODE=UP IO_TYPE=LVCMOS33 DRIVE=4 ;
+
 # SDR SDRAM (Winbond W9825G6KH-6, 32 MB, 16-bit)
 LOCATE COMP "sdram_clk"  SITE "F19" ;
 LOCATE COMP "sdram_cke"  SITE "F20" ;

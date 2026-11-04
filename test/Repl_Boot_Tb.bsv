@@ -781,6 +781,9 @@ module mkRepl_Boot_Tb (Empty);
    rule rl_pins;
       dut.serial_rxd (rg_rxd);
       dut.btn1 (rg_btn1);
+`ifdef INCLUDE_SPI0
+      dut.sd_miso (1'b1);    // no SD card (yet)
+`endif
       // BTN1 from the board-controls pty, polled every 4096 cycles (~20 ms of host time).  Here,
       // not in a rule of its own: bsc orders imported actions as conflicting, and a separate rule
       // firing when rg_cycle[11:0] == 0 blocked this one -- rg_cycle stopped and the TB froze.

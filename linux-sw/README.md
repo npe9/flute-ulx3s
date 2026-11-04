@@ -4,6 +4,9 @@ OpenSBI 1.9 (FW_PAYLOAD, PLATFORM=generic, RV32) + Linux v6.12 (tinyconfig + 32-
 kernel/flute.config) + a freestanding /init ticker, for the S-mode/Sv32/PMP Flute build.
 
 - `docker/Dockerfile` -> image `flute-rv32-build` (`docker build -t flute-rv32-build docker`).
+  Rebuild the image if `build-fp.sh` stops with `git: command not found`: images built
+  before git was added to the Dockerfile can't fetch OpenSBI (or mount an existing tree and
+  pass `OPENSBI_SRC`).
 - Kernel source: `git archive v6.12` of linux.git into the case-sensitive docker volume
   `flute-linux-src` at `/src/linux`.
 - OpenSBI source: `git archive v1.9` of opensbi.git into `linux-sw/opensbi/` (gitignored).

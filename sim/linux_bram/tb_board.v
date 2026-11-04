@@ -34,6 +34,10 @@ module sim_board (
 
     tri  [15:0] sdram_dq;
 
+    // microSD (SPI mode): behavioral SDHC card (+sd_none: no card, +sd_image=<hex>: contents)
+    wire sd_clk, sd_cmd, sd_cs_n, sd_miso;
+    sd_spi_model sd (.clk (clk), .sck (sd_clk), .mosi (sd_cmd), .cs_n (sd_cs_n), .miso (sd_miso));
+
     ulx3s_top top (
         .CLK      (clk),
         .BTN1     (btn1),
@@ -47,6 +51,10 @@ module sim_board (
         .jtag_tdo (jtag_tdo),
 `endif
         .wifi_en     (wifi_en),
+        .sd_clk      (sd_clk),
+        .sd_cmd      (sd_cmd),
+        .sd_d0       (sd_miso),
+        .sd_d3       (sd_cs_n),
         .sdram_clk   (sdram_clk_o),
         .sdram_cke   (sdram_cke),
         .sdram_cs_n  (sdram_cs_n),

@@ -21,6 +21,10 @@ module ulx3s_top(
     output wire        jtag_tdo,    // J1_7+  (gp[1], A10)
 `endif
     output wire        wifi_en,     // ESP32 hold in reset, F1
+    output wire        sd_clk,      // microSD SPI mode: SCLK, H2
+    output wire        sd_cmd,      //   MOSI, J1
+    input  wire        sd_d0,       //   MISO, J3
+    output wire        sd_d3,       //   CS (active low), K2
     output wire        sdram_clk,   // F19
     output wire        sdram_cke,   // F20
     output wire        sdram_cs_n,  // P20
@@ -141,6 +145,10 @@ module ulx3s_top(
         .serial_rxd_v(ftdi_txd),
         .leds(led),
         .btn1_v(BTN1),
+        .sd_sclk(sd_clk),
+        .sd_mosi(sd_cmd),
+        .sd_cs_n(sd_d3),
+        .sd_miso_v(sd_d0),
 `ifdef JTAG_TAP
         .jtag_tclk(jtag_tck),
         .jtag_tms(jtag_tms),

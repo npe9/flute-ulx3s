@@ -3,11 +3,17 @@
  * switches to the other process, which loads its own), then store them back and compare
  * bit for bit: FP context save/restore across switches.  Each also recomputes a fixed
  * sqrt/div/fma chain in double and single and checks it against its first result.
- * The parent prints "tick N  uptime U s  fp ok" (the sim harness waits for "tick 2"). */
+ * The parent prints "tick N  uptime U s  fp ok" (the sim harness waits for "tick 2").
+ * It also reads block 0 of /dev/mmcblk0 (microSD over spi-sifive + mmc_spi) once the card has
+ * been probed (retried for 30 ticks) and prints "sd: sig XXXX first ..." or "sd: none". */
 #define SYS_write 64
 #define SYS_clone 220
 #define SYS_getpid 172
 #define SYS_clock_gettime64 403
+#define SYS_openat 56
+#define SYS_close 57
+#define SYS_read 63
+#define AT_FDCWD (-100)
 
 typedef unsigned int u32;
 typedef unsigned long long u64;
@@ -88,7 +94,22 @@ static void run(int tag)
 	asm volatile ("fscsr %0" : : "r"(fcsr));
 	u64 d0 = chain_d(tag); u32 s0 = chain_s(tag);
 	struct ts64 one = { 1, 0 }, now;
+	int sd_done = (tag != 1);
 	for (u32 n = 1;; n++) {
+		if (! sd_done) {
+			long fd = sys5(SYS_openat, AT_FDCWD, (long)"/dev/mmcblk0", 0, 0, 0);
+			if (fd >= 0) {
+				static unsigned char blk[512];
+				long r = sys3(SYS_read, fd, (long)blk, 512);
+				sys3(SYS_close, fd, 0, 0);
+				if (r == 512) {
+					puts1("sd: sig "); putx((u32)blk[510] << 8 | blk[511]);
+					puts1(" first "); putx((u32)blk[0] << 24 | blk[1] << 16 | blk[2] << 8 | blk[3]);
+					puts1("\n");
+				} else { puts1("sd: read error\n"); }
+				sd_done = 1;
+			} else if (n >= 30) { puts1("sd: none\n"); sd_done = 1; }
+		}
 		u32 got = fp_roundtrip(a, b, fcsr, &one);
 		int bad = (got != fcsr);
 		for (int i = 0; i < 32; i++)

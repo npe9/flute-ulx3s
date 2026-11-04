@@ -46,6 +46,12 @@
 		reg = <0x80000000 0x02000000>;
 	};
 
+	/* 50 MHz system clock (SYS_PLL=50), feeds the SPI host's divider. */
+	spiclk: spi-clock {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <50000000>;
+	};
 	soc {
 		#address-cells = <1>;
 		#size-cells = <1>;
@@ -77,6 +83,26 @@
 			current-speed = <115200>;
 			interrupt-parent = <&plic0>;
 			interrupts = <1>;
+		};
+		/* SPI host on the microSD slot: src/AXI4_SPI.bsv, SiFive SPI registers.  Its clock is
+		 * the 50 MHz system clock (SYS_PLL=50); sck = clk / (2 * (div + 1)). */
+		spi0: spi@c0004000 {
+			compatible = "sifive,spi0";
+			reg = <0xc0004000 0x1000>;
+			clocks = <&spiclk>;
+			interrupt-parent = <&plic0>;
+			interrupts = <3>;
+			sifive,fifo-depth = <8>;
+			sifive,max-bits-per-word = <8>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			mmc@0 {
+				compatible = "mmc-spi-slot";
+				reg = <0>;
+				spi-max-frequency = <10000000>;
+				voltage-ranges = <3300 3300>;
+				disable-wp;
+			};
 		};
 	};
 };

@@ -57,7 +57,7 @@ DEFINES := -D RV32 -D ISA_I -D ISA_M -D ISA_A -D ISA_C \
            -D ISA_PRIV_M -D ISA_PRIV_U -D ISA_PRIV_S -D SV32 -D SV32_ITLB \
            -D SHIFT_BARREL -D MULT_SYNTH \
            -D Near_Mem_Caches -D FABRIC64 \
-           -D INCLUDE_ACCEL0 \
+           -D INCLUDE_ACCEL0 -D INCLUDE_SPI0 \
            -D INCLUDE_GDB_CONTROL -D JTAG_TAP
 
 # FP=1: F and D extensions (stock Flute FBox).  Off by default: the stock FBox does not fit the
@@ -310,6 +310,19 @@ sim-boot: $(ROM_BSVI) $(HELLO_BSVI)
 	$(BSC) -sim -e mkSoC_Boot_Tb -bdir $(BUILD)/bsc-sim-boot \
 	    -simdir $(BUILD)/sim-boot -o $(BUILD)/soc_boot_tb
 	PATH="$(abspath $(dir $(BSC))):$$PATH" $(BUILD)/soc_boot_tb
+
+# sim-spi-tb: unit testbench for src/AXI4_SPI.bsv (SiFive SPI register contract, mode 0/3,
+# CS hold/auto/off, FIFO watermarks, IRQ) against a mode-0 device model.  Prints
+# "Tb_AXI4_SPI: PASS (<n> cycles)"; Bluesim exits 0 on failure too, so judge on that line.
+.PHONY: sim-spi-tb
+sim-spi-tb:
+	mkdir -p $(BUILD)/bsc-spi-tb
+	$(BSC) -u -sim -g mkTb_AXI4_SPI $(BSC_FLAGS) $(DEFINES) \
+	    -p $(BSC_PATH):test -bdir $(BUILD)/bsc-spi-tb -simdir $(BUILD)/bsc-spi-tb \
+	    test/Tb_AXI4_SPI.bsv
+	$(BSC) -sim -e mkTb_AXI4_SPI -bdir $(BUILD)/bsc-spi-tb \
+	    -simdir $(BUILD)/bsc-spi-tb -o $(BUILD)/spi_tb
+	PATH="$(abspath $(dir $(BSC))):$$PATH" $(BUILD)/spi_tb
 
 # sim-gate: THE checked Bluesim gate.  Runs both sims and greps for
 # ASSERT FAIL (Bluesim $finish AND $fatal both exit 0 — verified on this

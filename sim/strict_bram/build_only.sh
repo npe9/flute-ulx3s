@@ -26,6 +26,7 @@ FILES+=("$ROOT/src/ASSIGN1.v"
         ./ecp5_cells.v
         ./sdram_model.v
         ./tb_board.v
+        ../common/sd_spi_model.v
         ./board_pins_if.sv
         ./uart_agent.sv
         ./scoreboard.sv

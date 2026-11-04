@@ -144,6 +144,10 @@ module mkTb_AXI4_SPI (Empty);
       xfer8 (8'h5A);
       action chk ("edges", pack (rg_edges), 128); endaction
       action chk ("cs held", zeroExtend (spi.cs_n), 0); endaction
+      // next message (Linux spi-sifive prepare_message + set_cs): rewriting the same CSDEF,
+      // CSID and CSMODE must not end HOLD (mmc_spi keeps CS across command/data messages)
+      wr ('h14, 1); wr ('h10, 0); wr ('h18, 2); delay (4);
+      action chk ("cs held across rewrite", zeroExtend (spi.cs_n), 0); endaction
       // div 0 (sck = clk/2), device delay 0
       rg_dly <= 0; wr ('h00, 0);
       xfer8 (~ 8'hED);

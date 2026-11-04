@@ -106,9 +106,97 @@ generated from one table (`MEMMAP` lines in the bsc log already feed `soc-memory
    gate); then the board (TempleOS suite 70/0/2, Linux boot, the new device); restore the custody
    bitstream; push, and fast-forward `linux-isa` after the full gate.
 
+## Phase 5: an SoC family; the game machines are separate SoCs
+
+One Flute core and one IP library, with several SoC builds (`SOC=` profile in the Makefile), each
+optimized for its job:
+
+| SoC | Optimized for | Keeps | Adds |
+|---|---|---|---|
+| `templeos` | TempleOS (M-mode, flat memory) | full ISA, FPU, caches | HDMI framebuffer console, PS/2/USB keyboard, SD |
+| `linux` | Linux (today's linux-isa build) | full ISA, FPU, S-mode + Sv32 MMU, PLIC | SD (done), SPI-flash boot, framebuffer for fbdev |
+| `game2d` | best 2D console we can build | full ISA, FPU; **runs TempleOS** | VDP-2D (tiles/sprites/affine), APU, pads, SD |
+| `game3d` | best 3D console we can build | full ISA, FPU; **runs TempleOS** | geometry unit, rasterizer + texture cache, APU, pads, SD |
+
+Common rules: the ISA (RV32IMAFDC + B/Zk) never changes between profiles. Profiles differ only in
+SoC IP and in privilege/MMU features a profile doesn't need. TempleOS runs on every profile;
+the game SoCs boot it from SD like any other title. Each profile must meet the same closure
+bar (all seeds ≥50 MHz, one ≥55). Shared low-speed devices sit behind the peripheral bridge, so
+adding per-profile IP never widens the main fabric.
+
+### Budget available to a game SoC
+
+Measured on lx33 (Flute + FPU + SPI at 50 MHz): 57.4K / 83.6K logic, 16 / 208 BRAM, 7 / 156
+multipliers. A game SoC doesn't need the Linux-only parts, and those return to the video
+engine. So **each game SoC gets the whole ~18K usable logic (26K free minus 10% closure
+slack), ~190 BRAM (~380 KB) and ~145 multipliers for its own engine**. It does not share that
+budget between 2D and 3D, which is the point of splitting them.
+Shared limits: SDRAM (32 MB, 16-bit, ~100 MB/s at 50 MHz, ~200-266 MB/s once G0 moves it to its
+own clock), HDMI via GPDI, a 4-bit-per-channel audio DAC on the jack, 7 buttons, US2 USB,
+ESP32 (Bluetooth pads).
+
+### `game2d`: the 2D showcase (yardstick: SNES, and past it)
+
+| | SNES (yardstick) | `game2d` target |
+|---|---|---|
+| CPU | 65816 at 3.58 MHz | Flute RV32GC at 50 MHz, roughly 10-20x the throughput, plus FP |
+| Resolution | 256x224 | 320x240 native (2x to 640x480 HDMI); 640x480 bitmap mode |
+| Colour | 15-bit, 256 on screen | 15/16-bit, multiple 256-entry palettes + direct colour |
+| Layers | up to 4 tile BGs | 4-6 tile layers, per-line scroll, line IRQ |
+| Sprites | 128, 32 per line | 256+, 64+ per line via BRAM line buffers |
+| Affine | one "mode 7" layer | 1-2 affine layers + scaled/rotated sprites (DSP multipliers) |
+| Blending | add/sub colour math | alpha + add/sub per layer/sprite |
+| VRAM | 64 KB | ~256 KB BRAM pattern/map RAM + SDRAM DMA |
+| Audio | 8-voice ADPCM, 32 kHz | 16-24 voice ADPCM/PCM, 48 kHz, HDMI audio + jack |
+| Input | pads | 7 buttons, USB HID pads, Bluetooth pads via ESP32 |
+
+Verdict: **comfortably beyond SNES class.** Logic: VDP ~8-12K, APU ~3K, input ~2K, all within budget.
+
+### `game3d`: the 3D showcase (yardsticks: PS1 reachable, N64 not)
+
+| | PS1 (yardstick) | N64 (yardstick) | `game3d` target |
+|---|---|---|---|
+| CPU | R3000A at 33.8 MHz | VR4300 at 93.75 MHz, 64-bit | Flute at 50 MHz, PS1-class integer + FP |
+| Geometry | GTE fixed-point coprocessor | RSP vector unit | GTE-style unit as custom instructions (transform, project, light, clip) on DSPs |
+| Raster | affine textured + gouraud, no Z | perspective-correct, bilinear, Z, AA | affine textured + gouraud, ordering tables; per-span perspective correction as a stretch |
+| Resolution | 320x240 (up to 640x480) | 320x240 | 320x240, back buffer in BRAM (1 px/clk), 2x scan to HDMI |
+| Texture memory | 1 MB VRAM | 4 KB TMEM + RDRAM | ~128 KB BRAM texture cache in front of SDRAM |
+| Memory BW | ~130 MB/s VRAM + main | ~500 MB/s | ~200-266 MB/s SDRAM (after G0) + BRAM |
+| Throughput | ~90K textured tris/s in practice | ~100K+ | target 20-50K textured tris/s at 30-60 fps |
+
+Verdict: **PS1 class at 320x240, a bit below its peak triangle rate.** The CPU and geometry
+unit are not the limit; SDRAM fill rate is. That's why the frame and texture working set live
+in BRAM. **N64 class is out of reach:** ~2x short on CPU, ~5x on memory bandwidth, and its
+per-pixel Z + perspective + bilinear pipeline would exceed the logic budget. A small
+Z-buffered perspective-correct mode at 160x120 is a stretch demo, not a target.
+
+### Shared work packages (each follows the IP recipe: model → BSV + unit Tb → SoC → sim → board)
+
+| # | IP | Used by | Size estimate | Proof |
+|---|---|---|---|---|
+| B0 | Peripheral bridge (1xN sub-fabric for low-speed slaves) | all | <1K LUT | gates unchanged; fabric off the critical path |
+| G0 | SDRAM on its own 100+ MHz clock + burst DMA port | all | 1-2K LUT | gates unchanged; memcpy bandwidth 2x |
+| G1 | HDMI scanout: 320x240 → 640x480, palette, framebuffer | all | 2-3K LUT, 2-4 BRAM | test pattern; Linux fbdev; TempleOS console |
+| G2 | VDP-2D: tile layers, sprite line buffers, affine, blending, line IRQ | game2d | 8-12K LUT, ~100 BRAM, 4-8 DSP | demo scene; frame-exact Verilator image compare |
+| G3 | APU: voice mixer + ADPCM + HDMI audio / sigma-delta jack | game2d, game3d | ~3K LUT, 8-16 BRAM, ~16 DSP | sample tests; captured-audio diff |
+| G4 | Input: USB HID host on US2; ESP32 Bluetooth pad bridge | game2d, game3d, templeos | 2-3K LUT | pad register + Linux evdev |
+| G5 | Geometry unit (custom insns) | game3d | 2-4K LUT, ~20 DSP | ISA-style tests vs a C reference |
+| G6 | Rasterizer: setup, edge walk, gouraud, affine texture, blending, BRAM tex cache | game3d | 8-12K LUT, ~140 BRAM, ~12 DSP | spinning textured mesh; pixel-exact vs a C rasterizer |
+| G7 | SDK: C bare-metal libs, asset tools, SD boot menu (FAT), TempleOS bindings for VDP/APU | game2d, game3d | — | an original 2D game and an original 3D demo |
+
+Order: B0 → G0 → G1 (shared by everything, and it unlocks the TempleOS/Linux framebuffer) →
+G3/G4 → `game2d` (G2) → `game3d` (G5, G6).
+
 ## Status log
 
 - 2026-11-03: `src/AXI4_SPI.bsv` (SiFive SPI register subset, 1 CS, 8-deep FIFOs, modes 0-3,
   LSB-first, TX-only, HOLD/AUTO/OFF CS, watermark interrupts) written; `test/Tb_AXI4_SPI.bsv`
   passes. Next: SoC integration as fabric slave 5 at `0xC000_4000`, IRQ 2 (PLIC source 3), pins
   `sd_clk` H2, `sd_cmd` J1 (MOSI), `sd_d[0]` J3 (MISO), `sd_d[3]` K2 (CS).
+- 2026-11-03: integrated (`-D INCLUDE_SPI0`): fabric slave 5 at `0xC000_4000`, PLIC source 3,
+  +1.8K LUT4 / +1.2K FF (lx33: 44715 LUT4, 25436 FF). `sim/common/sd_spi_model.v` (SDHC in SPI
+  mode, CRC16 data, `+sd_image=` / `+sd_none`) is wired into the strict and Linux harnesses;
+  `test/sd_test.c` (`sd_test.bin` read-only, `sd_test_w.bin` adds CMD24/CMD25) passes in the
+  strict sim (T at 63.5M, D at 64.9M cycles). Linux: `sifive,spi0` + `mmc-spi-slot` in
+  `dts-fp`, SPI/MMC options in `flute-fp.config`, `/init` reads block 0 of `/dev/mmcblk0`.
+  CI: `make sim-spi-tb` in the Bluesim gate, `sd` in the strict matrix.

@@ -54,6 +54,14 @@ interface ULX3S_Top_IFC;
    (* always_enabled *) method Action  btn1 (Bit #(1) v);
 `endif
 
+`ifdef INCLUDE_SPI0
+   // microSD slot in SPI mode: sd_clk, sd_cmd (MOSI), sd_d[3] (CS), sd_d[0] (MISO)
+   (* always_ready *)   method Bit #(1) sd_sclk;
+   (* always_ready *)   method Bit #(1) sd_mosi;
+   (* always_ready *)   method Bit #(1) sd_cs_n;
+   (* always_enabled *) method Action   sd_miso (Bit #(1) v);
+`endif
+
 `ifdef JTAG_TAP
    // The J1-header JTAG TAP is kept in the design (unconnected to the
    // debug server; the UART bridge owns server_external_control) purely
@@ -194,6 +202,15 @@ module mkULX3S_Top (ULX3S_Top_IFC);
                2'b00,
                pack (uart.rx_overflow || uart.rx_frame_err),
                pack (mem.init_done) };
+   endmethod
+`endif
+
+`ifdef INCLUDE_SPI0
+   method Bit #(1) sd_sclk = soc_top.sd_sclk;
+   method Bit #(1) sd_mosi = soc_top.sd_mosi;
+   method Bit #(1) sd_cs_n = soc_top.sd_cs_n;
+   method Action sd_miso (Bit #(1) v);
+      soc_top.sd_miso (v);
    endmethod
 `endif
 

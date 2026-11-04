@@ -5,7 +5,8 @@ sim: SDRAM preload at 0x80000000 + jump (TB_ISA mode), live UART echo, pass when
 --board: the Verilator virtual board instead -- the UART is bridged to a host pty (build/sim-tty),
 no pass string, runs until killed; IMAGE "none" preloads nothing (the boot ROM waits for
 scripts/loader.py --sim).
-usage: linux_run.py [--board] [--pass STR] [--deadline CYCLES] [--progress N] IMAGE.bin   (env: BUILD_DIR)"""
+usage: linux_run.py [--board] [--pass STR] [--deadline CYCLES] [--progress N] [--plusarg ARG]... IMAGE.bin
+(env: BUILD_DIR); --plusarg sd_trace=1 passes +sd_trace=1 to the sim."""
 import argparse, os, subprocess, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -17,6 +18,7 @@ def main():
     ap.add_argument("--deadline", type=int, default=2_000_000_000)
     ap.add_argument("--progress", type=int, default=10_000_000)
     ap.add_argument("--board", action="store_true", help="virtual board: UART on a host pty")
+    ap.add_argument("--plusarg", action="append", default=[], help="extra +ARG for the sim")
     a = ap.parse_args()
     sim = os.path.join(HERE, os.environ.get("BUILD_DIR", "obj_dir_lx"), "Vsv_tb_top")
     env = dict(os.environ, TB_HELLO_DEADLINE=str(a.deadline), TB_PROGRESS=str(a.progress))
@@ -46,6 +48,7 @@ def main():
         env["TB_ISA"] = "1"
         args += [os.path.abspath(a.image), f"+PRELOAD={hexf}", "+SB_OFF"]
         print(f"[linux_run] {a.image} ({len(img)} bytes), sim {sim}, work {work}", flush=True)
+    args += ["+" + p for p in a.plusarg]
     os.chdir(HERE)
     os.execve(sim, args, env)
 

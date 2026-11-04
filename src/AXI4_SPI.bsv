@@ -249,9 +249,12 @@ module mkAXI4_SPI (AXI4_SPI_IFC);
          case (off)
             'h00: rg_sckdiv  <= w [11:0];
             'h04: rg_sckmode <= w [1:0];
-            'h10: begin rg_csid   <= w;       rg_cs_gen <= rg_cs_gen + 1; end
-            'h14: begin rg_csdef  <= w [0];   rg_cs_gen <= rg_cs_gen + 1; end
-            'h18: begin rg_csmode <= w [1:0]; rg_cs_gen <= rg_cs_gen + 1; end
+            // HOLD ends only on a *different* csid/csmode, or a csdef write that changes the
+            // selected pin (FE310 manual); spi-sifive rewrites all three per message, and
+            // mmc_spi keeps CS asserted across messages (cs_change) between command and data.
+            'h10: begin rg_csid   <= w;       if (w != rg_csid)          rg_cs_gen <= rg_cs_gen + 1; end
+            'h14: begin rg_csdef  <= w [0];   if (w [0] != rg_csdef)     rg_cs_gen <= rg_cs_gen + 1; end
+            'h18: begin rg_csmode <= w [1:0]; if (w [1:0] != rg_csmode)  rg_cs_gen <= rg_cs_gen + 1; end
             'h28: rg_delay0  <= w;
             'h2c: rg_delay1  <= w;
             'h40: begin
