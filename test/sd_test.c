@@ -46,11 +46,23 @@ static uint16_t crc16 (uint16_t c, uint8_t b) {
    for (int k = 0; k < 8; k++) c = (c & 0x8000) ? (c << 1) ^ 0x1021 : (c << 1);
    return c;
 }
-static uint8_t cmd (int idx, uint32_t arg, uint8_t crc) {
+// CRC7 (x^7 + x^3 + 1) over the command's first 5 bytes, as (crc << 1) | end bit.  Needed once
+// CMD59 turns CRC checking on; real cards only fill in data CRC16 / CSD CRC7 with it on.
+static uint8_t crc7 (const uint8_t *p, int n) {
+   uint8_t c = 0;
+   for (int i = 0; i < n; i++)
+      for (int b = 7; b >= 0; b--) {
+         uint8_t x = ((c >> 6) ^ (p [i] >> b)) & 1;
+         c = (c << 1) & 0x7F;
+         if (x) c ^= 0x09;
+      }
+   return (c << 1) | 1;
+}
+static uint8_t cmd (int idx, uint32_t arg) {
+   uint8_t f [5] = { 0x40 | idx, arg >> 24, arg >> 16, arg >> 8, arg };
    xfer (0xFF);
-   xfer (0x40 | idx);
-   xfer (arg >> 24); xfer (arg >> 16); xfer (arg >> 8); xfer (arg);
-   xfer (crc);
+   for (int i = 0; i < 5; i++) xfer (f [i]);
+   xfer (crc7 (f, 5));
    uint8_t r = 0xFF;
    for (int i = 0; i < 10 && (r & 0x80); i++) r = xfer (0xFF);
    return r;
@@ -97,36 +109,41 @@ int main (void) {
    for (int i = 0; i < 10; i++) xfer (0xFF);
    SPI (CSMODE) = 2;
 
-   uint8_t r = cmd (0, 0, 0x95);
+   uint8_t r = cmd (0, 0);
    check (0x10, 0x01, r);
    if (r != 0x01) { puts_ ("no card\r\n"); goto done; }
-   r = cmd (8, 0x1AA, 0x87);
+   r = cmd (8, 0x1AA);
    check (0x11, 0x01, r);
    uint32_t r7 = 0;
    for (int i = 0; i < 4; i++) r7 = (r7 << 8) | xfer (0xFF);
    check (0x12, 0x1AA, r7 & 0xFFF);
    int n = 0;
-   do { cmd (55, 0, 0x65); r = cmd (41, 0x40000000, 0x77); n++; } while (r != 0 && n < 2000);
+   do { cmd (55, 0); r = cmd (41, 0x40000000); n++; } while (r != 0 && n < 2000);
    check (0x13, 0x00, r);
-   r = cmd (58, 0, 0xFD);
+   r = cmd (58, 0);
    check (0x14, 0x00, r);
    uint32_t ocr = 0;
    for (int i = 0; i < 4; i++) ocr = (ocr << 8) | xfer (0xFF);
    puts_ ("O "); puthex (ocr, 8); puts_ ("\r\n");
    check (0x15, 0x80000000u, ocr & 0x80000000u);    // powered up
+   r = cmd (59, 1);                                  // CRC on (as Linux mmc_spi does)
+   check (0x16, 0x00, r);
 
    SPI (SCKDIV) = 2;                                 // 50 MHz / 6 = 8.3 MHz
-   r = cmd (9, 0, 0xFF);
+   r = cmd (9, 0);
    check (0x20, 0x00, r);
    check (0x21, 0, read_data (blk, 16));
    puts_ ("C ");
    for (int i = 0; i < 16; i++) puthex (blk [i], 2);
    puts_ ("\r\n");
 
-   r = cmd (17, 0, 0xFF);
+   r = cmd (17, 0);
    check (0x30, 0x00, r);
    check (0x31, 0, read_data (blk, 512));
+#ifdef SD_WRITE
+   // sim only (sd_spi_model's block 0); a real card's block 0 is whatever is on it
    check (0x32, 0x55AA, (blk [510] << 8) | blk [511]);    // MBR / boot-sector signature
+#endif
    puts_ ("S "); puthex (blk [510], 2); puthex (blk [511], 2);
    puts_ (" "); for (int i = 0; i < 8; i++) puthex (blk [i], 2);
    puts_ ("\r\n");
@@ -134,25 +151,25 @@ int main (void) {
 #ifdef SD_WRITE
    // CMD24: block 100
    for (int i = 0; i < 512; i++) blk2 [i] = (uint8_t) (i * 7 + 1);
-   r = cmd (24, 100, 0xFF); check (0x40, 0, r);
+   r = cmd (24, 100); check (0x40, 0, r);
    check (0x41, 0x05, write_data (0xFE, blk2));
-   r = cmd (17, 100, 0xFF); check (0x42, 0, r);
+   r = cmd (17, 100); check (0x42, 0, r);
    check (0x43, 0, read_data (blk, 512));
    for (int i = 0; i < 512; i++) if (blk [i] != blk2 [i]) { check (0x44, blk2 [i], blk [i]); break; }
    // CMD25: blocks 101, 102; CMD18 reads 100..102
-   r = cmd (25, 101, 0xFF); check (0x50, 0, r);
+   r = cmd (25, 101); check (0x50, 0, r);
    for (int b = 0; b < 2; b++) {
       for (int i = 0; i < 512; i++) blk2 [i] = (uint8_t) (i ^ (0x5A + b));
       check (0x51 + b, 0x05, write_data (0xFC, blk2));
    }
    xfer (0xFD); xfer (0xFF); wait_ready ();
-   r = cmd (18, 100, 0xFF); check (0x60, 0, r);
+   r = cmd (18, 100); check (0x60, 0, r);
    for (int b = 0; b < 3; b++) {
       check (0x61 + b, 0, read_data (blk, 512));
       uint8_t e = (b == 0) ? 1 : (uint8_t) (0 ^ (0x5A + b - 1));
       check (0x64 + b, e, blk [0]);
    }
-   r = cmd (12, 0, 0xFF); check (0x67, 0, r);
+   r = cmd (12, 0); check (0x67, 0, r);
    wait_ready ();
    puts_ ("W ok\r\n");
 #endif

@@ -200,3 +200,18 @@ G3/G4 → `game2d` (G2) → `game3d` (G5, G6).
   strict sim (T at 63.5M, D at 64.9M cycles). Linux: `sifive,spi0` + `mmc-spi-slot` in
   `dts-fp`, SPI/MMC options in `flute-fp.config`, `/init` reads block 0 of `/dev/mmcblk0`.
   CI: `make sim-spi-tb` in the Bluesim gate, `sd` in the strict matrix.
+- 2026-11-03: Linux sim showed mmc0 error -110: HOLD ended on any CSID/CSDEF/CSMODE write, but
+  spi-sifive rewrites them per message and mmc_spi keeps CS across command/data messages. Fixed
+  to FE310 semantics (a *different* value releases HOLD). Linux sim: "mmc0: new SDHC card on
+  SPI", "sd: sig 000055aa".
+- 2026-11-03: **B0 peripheral bridge done.** The main fabric is down to 4 slaves (boot ROM,
+  SDRAM, bridge, accel0); uart0, soc_info and spi0 sit behind a 1x3 sub-fabric
+  (`mkPeriph_Fabric_AXI4`). Its write-data dispatch star had limited lx29 s3, lx32 s7 and lx33
+  s3/s5. lx35 routes at 54.48 / 55.76 / 55.25 MHz (lx33: 51.33 / 53.71 / 54.17); the remaining
+  limiters are core paths (icache S2 page-match on `rg_s2_ppn`, stage1). Each uncached access
+  through the bridge costs ~4 cycles more, so the boot ROM's 2M-poll repair window is ~68M cycles
+  (was ~60M); the sim deadlines were raised to match.
+- 2026-11-03: **board:** lx35 TempleOS suite 71/0/2 at 50 MHz. Linux reads a real 7.5 GiB SDHC
+  card (`mmcblk0: mmc0:0000 asdfg 7.50 GiB`, CRC16 on). Bare-metal `sd_test.bin` PASS on
+  hardware at 8.3 MHz SCK. That needs CMD59 (CRC on): this card leaves CSD CRC7 / data CRC16
+  empty with CRC off. The sim model always sends valid CRCs, so it can't catch that difference.

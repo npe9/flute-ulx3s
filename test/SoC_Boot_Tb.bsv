@@ -39,7 +39,8 @@ Integer clk_hz = 25_000_000;
 Integer baud   = 625_000;
 Integer cycles_per_bit = clk_hz / baud;    // 40 at 25 MHz
 
-Integer max_cycles = 70_000_000;    // > boot ROM's 60M-cycle repair window
+Integer max_cycles = 90_000_000;    // > boot ROM's repair window: 2M UART polls, ~34 cycles each
+                                    // through the peripheral bridge (~68M; ~60M before it)
 
 // Model: one 16-bit halfword per {bank, row, col}
 typedef Bit #(24) ModelAddr;    // {bank[1:0], row[12:0], col[8:0]}

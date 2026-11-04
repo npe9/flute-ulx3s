@@ -32,6 +32,8 @@ EXPECT_HZ = int(os.environ.get('EXPECT_HZ', '25000000'))
 # misa of the bitstream under test: main (ACIMU) by default, EXPECT_MISA=4014112f for the
 # linux-isa build (ACDFIMSU).
 EXPECT_MISA = os.environ.get('EXPECT_MISA', '40101105').lower()
+# SoC_Info device-table entries: 8 with spi0 (INCLUDE_SPI0), EXPECT_NDEV=7 for older bitstreams.
+EXPECT_NDEV = int(os.environ.get('EXPECT_NDEV', '8'))
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dmi import DMI  # noqa: E402
@@ -425,13 +427,13 @@ def main():
         dmi_check('SoCInfo memory 32MB',
                   lambda: dmi.mem_read32(0xC0003018),
                   lambda v: v == 0x2000000)
-        dmi_check('SoCInfo device count 7',
-                  lambda: dmi.mem_read32(0xC000301C), lambda v: v == 7)
+        dmi_check(f'SoCInfo device count {EXPECT_NDEV}',
+                  lambda: dmi.mem_read32(0xC000301C), lambda v: v == EXPECT_NDEV)
         dmi_check('SoCInfo device table 0x100',
                   lambda: dmi.mem_read32(0xC0003020), lambda v: v == 0x100)
 
         def _devrom():
-            return dmi.mem_read(0xC0003100, 7 * 8)
+            return dmi.mem_read(0xC0003100, EXPECT_NDEV * 8)
         rom = None
         try:
             rom = _devrom()
@@ -440,8 +442,8 @@ def main():
                    f'{type(e).__name__}: {e}')
         if rom:
             names = {0: 'boot_rom', 1: 'sdram', 2: 'clint', 3: 'uart0',
-                     4: 'gpio', 5: 'plic', 6: 'soc_info'}
-            recs = [rom[i * 8:(i + 1) * 8] for i in range(7)]
+                     4: 'gpio', 5: 'plic', 6: 'soc_info', 7: 'spi0'}
+            recs = [rom[i * 8:(i + 1) * 8] for i in range(EXPECT_NDEV)]
             byname = {names.get(r[0], str(r[0])): r for r in recs}
             dmi_check('devROM uart0',
                       lambda: byname['uart0'][2] == 0xC0000000
@@ -454,6 +456,11 @@ def main():
             dmi_check('devROM soc_info self',
                       lambda: byname['soc_info'][2] == 0xC0003000,
                       lambda v: v)
+            if EXPECT_NDEV >= 8:
+                dmi_check('devROM spi0 (microSD host, IRQ 2)',
+                          lambda: byname['spi0'][2] == 0xC0004000
+                          and byname['spi0'][4] == 2,
+                          lambda v: v)
 
         print('\n== E. bus error monitor ==', flush=True)
         base_cnt = dmi.mem_read32(0xC000302C)

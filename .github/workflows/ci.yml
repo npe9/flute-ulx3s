@@ -111,7 +111,7 @@ jobs:
         test: [j1, cache, amo, sd]
         include:
           # microSD host + sim/common/sd_spi_model.v: init, CSD, CMD17/18 reads, CMD24/25 writes
-          - { test: sd, bin: sd_test_w, deadline: 90000000 }
+          - { test: sd, bin: sd_test_w, deadline: 100000000 }
     container:
       image: ${{ needs.setup.outputs.image }}
       credentials: { username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}" }
@@ -134,7 +134,7 @@ jobs:
       - name: ${{ matrix.test }} test (T...D over the UART, no M)
         if: matrix.test != 'j1'
         run: |
-          TB_NOCOV=1 BUILD_DIR=obj_dir_nocov TB_TX_TRACE=1 TB_HELLO_DEADLINE=${{ matrix.deadline || 70000000 }} stdbuf -oL -eL sim/strict_bram/run.sh --strict=warn \
+          TB_NOCOV=1 BUILD_DIR=obj_dir_nocov TB_TX_TRACE=1 TB_HELLO_DEADLINE=${{ matrix.deadline || 90000000 }} stdbuf -oL -eL sim/strict_bram/run.sh --strict=warn \
             "$PWD/test/${{ matrix.bin || format('{0}_test', matrix.test) }}.bin" +verilator+seed+1 > build/${{ matrix.test }}.log 2>&1 || true
           ci/check_txtrace.py build/${{ matrix.test }}.log
       - if: always()
