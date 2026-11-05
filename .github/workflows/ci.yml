@@ -104,7 +104,8 @@ jobs:
     # One job per test (each is a long single-threaded Verilator run with coverage).
     needs: [setup, verilog]
     runs-on: ubuntu-24.04
-    timeout-minutes: 355   # J1 with coverage: 4h35m-5h40m on linux-isa (runner-dependent); cap is 360
+    timeout-minutes: 355   # J1 with coverage ran 4h35m to over 6 h while the bench idled out the ROM's
+                           # repair window; the bench now ends it (0xA5 + <dst, 0>), hello at ~0.45M cycles
     strategy:
       fail-fast: false
       matrix:

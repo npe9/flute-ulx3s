@@ -135,6 +135,23 @@ def load_blob(fd, blob, dst=0x80000000):
             raise RuntimeError('load failed at chunk %d' % ci)
 
 
+def skip_repair(fd, dst=0x80000000, timeout=30.0):
+    """After a load, wait for the ROM's head/tail readback line ('[..]')
+    and end its ~24 s repair window: 0xA5 + header <dst, 0> makes the
+    ROM jump to dst at once (boot/boot_loader.c, count == 0).  Returns
+    the bytes read; older ROMs treat it as a second empty load and
+    still jump after their window."""
+    buf = b''
+    t0 = time.time()
+    while time.time() - t0 < timeout * scale:
+        buf += read_avail(fd, 0.1)
+        i = buf.find(b'[')
+        if i >= 0 and buf.find(b']', i) >= 0:
+            os.write(fd, b'\xa5' + struct.pack('<II', dst, 0))
+            break
+    return buf
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("image", help="binary image to load")
@@ -143,6 +160,8 @@ def main():
     ap.add_argument("-a", "--addr", default="0x80000000")
     ap.add_argument("-t", "--idle-timeout", type=float, default=None,
                     help="seconds of UART silence before exiting (0 = forever; default 5; 600 with --sim, which covers the boot ROM's post-load repair window, ~60M cycles)")
+    ap.add_argument("--skip-repair", action="store_true",
+                    help="end the ROM's ~24 s post-load repair window once the readback arrives (needs a ROM from lx39 on; older ROMs then wait twice)")
     ap.add_argument("--sim", action="store_true",
                     help="virtual board (make sim-board): pty, timeouts x%d" % SIM_SCALE)
     args = ap.parse_args()
@@ -176,9 +195,12 @@ def main():
     # The ROM takes the framed-chunk path whenever dst and len are word-
     # aligned and len != 0; load_blob speaks it (ACK-paced, NAK-retry).
     # The old raw-stream path here only worked for unaligned/legacy loads.
-    load_blob(fd, payload)
+    load_blob(fd, payload, dst)
     sys.stderr.write("loader: sent in %.1fs; relaying program output\n"
                      % (time.time() - t0))
+    if args.skip_repair:
+        sys.stdout.write(skip_repair(fd, dst).decode("latin-1"))
+        sys.stdout.flush()
 
     # Relay program output until --idle-timeout seconds of silence.
     out = sys.stdout.buffer

@@ -10,7 +10,8 @@
 //     ROM ACKs (0x06) or drains ~0.5 s and NAKs (0x15) so the host
 //     resends just that chunk; other (unaligned) images stream as raw
 //     bytes with a stall watchdog
-//   - if count == 0 the loader jumps to <dst> without loading
+//   - if count == 0 the loader jumps to <dst> without loading (also as a
+//     repair-window header: 0xA5 + <dst, 0> ends the window at once)
 //   - after loading it prints a head/tail readback, waits ~24 s in a
 //     repair window (send 0xA5 + a fresh header to load another
 //     segment), then jumps to <dst>
@@ -709,8 +710,12 @@ load_protocol:
 	}
 
     load_done:
-	if (len != 0)
-	    putc ('\r'), putc ('\n');
+	// count == 0: jump to <dst> now, no readback and no repair window
+	// (a host that has checked the readback sends 0xA5 + <dst, 0> to
+	// skip the ~24 s wait).
+	if (len == 0)
+	    goto jump_to_kernel;
+	putc ('\r'), putc ('\n');
 
 	// LED5: kernel received
 	set_leds (0x33);

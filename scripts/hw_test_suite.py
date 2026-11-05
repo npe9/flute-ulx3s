@@ -175,6 +175,19 @@ def load_blob(fd, blob):
                 break
         else:
             raise RuntimeError(f'load failed at chunk {ci}')
+    # HW_SKIP_REPAIR=1: end the ROM's ~24 s repair window once the readback
+    # line is out: 0xA5 + <dst, 0> jumps at once (boot/boot_loader.c,
+    # count == 0; ROMs before lx39 would run a second window instead).
+    if not os.environ.get('HW_SKIP_REPAIR'):
+        return
+    buf = b''
+    t0 = time.time()
+    while time.time() - t0 < 30.0:
+        buf += drain(fd, 0.1)
+        i = buf.find(b'[')
+        if i >= 0 and buf.find(b']', i) >= 0:
+            os.write(fd, b'\xa5' + struct.pack('<II', 0x80000000, 0))
+            break
 
 
 def hc_dump_words(fd, addr, n_u32):

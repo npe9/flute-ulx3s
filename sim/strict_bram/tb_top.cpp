@@ -23,8 +23,9 @@
 //   2. wait for the boot ROM banner on the FPGA TX pin
 //   3. send the loader header <dst,len> then the image in 256-byte
 //      framed chunks, ACK(0x06)/NAK(0x15)-paced
-//   4. wait for the head/tail readback line, then the repair window,
-//      then the jump to SDRAM
+//   4. wait for the head/tail readback line, then end the repair
+//      window (0xA5 + <dst, 0>; TB_REPAIR_WAIT=1 idles it out), and the
+//      ROM jumps to SDRAM
 //   5. PASS when hello.bin's first banner + first "tick 00000000"
 //      line have been received, the SV scoreboard's golden checks
 //      pass, and no strict-BRAM violation fired
@@ -231,7 +232,7 @@ int main(int argc, char** argv) {
     vluint64_t banner_deadline   = 50000000;   // 2 s
     vluint64_t chunk_deadline    = 200000000;  // 8 s per ACK
     vluint64_t readback_deadline = 200000000;
-    vluint64_t hello_deadline    = 600000000;  // repair window is ~10 s+
+    vluint64_t hello_deadline    = 600000000;  // covers the ~68M-cycle repair window (TB_REPAIR_WAIT=1)
     if (const char* hd = getenv("TB_HELLO_DEADLINE")) hello_deadline = strtoull(hd, nullptr, 10);  // override for short diagnostic runs
     vluint64_t overall_deadline  = 900000000;
 
@@ -369,6 +370,16 @@ int main(int argc, char** argv) {
                 tx_log.find(']') > tx_log.find('[')) {
                 printf("[tb] load readback seen at cycle %llu\n",
                        (unsigned long long)g_cycle);
+                // End the ROM's ~24 s repair window (~68M idle cycles):
+                // 0xA5 + header <dst, 0> jumps at once.  TB_REPAIR_WAIT=1
+                // keeps the old idle-out path.
+                if (!getenv("TB_REPAIR_WAIT")) {
+                    std::vector<uint8_t> skip = {0xA5};
+                    uint32_t dst = 0x80000000u;
+                    for (int i = 0; i < 4; i++) skip.push_back((dst >> (8 * i)) & 0xFF);
+                    for (int i = 0; i < 4; i++) skip.push_back(0);
+                    send_bytes(skip);
+                }
                 new_stage(ST_HELLO);
             }
             break;
