@@ -5,7 +5,9 @@
  * sqrt/div/fma chain in double and single and checks it against its first result.
  * The parent prints "tick N  uptime U s  fp ok" (the sim harness waits for "tick 2").
  * It also reads block 0 of /dev/mmcblk0 (microSD over spi-sifive + mmc_spi) once the card has
- * been probed (retried for 30 ticks) and prints "sd: sig XXXX first ..." or "sd: none". */
+ * been probed (retried for 30 ticks) and prints "sd: sig XXXX first ..." or "sd: none".
+ * The DVI framebuffer: it sets the scan-out to 320x240 RGB565 (simplefb's format) through
+ * /dev/mem and prints "video: ..."; the banner and the tick lines also go to tty0 (fbcon). */
 #define SYS_write 64
 #define SYS_clone 220
 #define SYS_getpid 172
@@ -13,7 +15,9 @@
 #define SYS_openat 56
 #define SYS_close 57
 #define SYS_read 63
+#define SYS_mmap2 222
 #define AT_FDCWD (-100)
+#define VIDEO_PAGE 0xc0010   /* 0xc0010000 >> 12: ID at +0, MODE at +4 */
 
 typedef unsigned int u32;
 typedef unsigned long long u64;
@@ -32,8 +36,36 @@ static long sys5(long n, long a, long b, long c, long d, long e)
 	asm volatile ("ecall" : "+r"(a0) : "r"(a7), "r"(a1), "r"(a2), "r"(a3), "r"(a4) : "memory");
 	return a0;
 }
+static long sys6(long n, long a, long b, long c, long d, long e, long f)
+{
+	register long a7 asm("a7") = n, a0 asm("a0") = a, a1 asm("a1") = b, a2 asm("a2") = c,
+		a3 asm("a3") = d, a4 asm("a4") = e, a5 asm("a5") = f;
+	asm volatile ("ecall" : "+r"(a0) : "r"(a7), "r"(a1), "r"(a2), "r"(a3), "r"(a4), "r"(a5) : "memory");
+	return a0;
+}
 static int slen(const char *s) { int n = 0; while (s[n]) n++; return n; }
-static void puts1(const char *s) { sys3(SYS_write, 1, (long)s, slen(s)); }
+static long tty0 = -1;    /* fbcon, if the framebuffer is up */
+static void puts1(const char *s)
+{
+	sys3(SYS_write, 1, (long)s, slen(s));
+	if (tty0 >= 0) sys3(SYS_write, tty0, (long)s, slen(s));
+}
+
+/* Turn on the DVI scan-out in simplefb's format and open the framebuffer console. */
+static void video_on(void)
+{
+	long fd = sys5(SYS_openat, AT_FDCWD, (long)"/dev/mem", 2 /* O_RDWR */ | 0x101000 /* O_SYNC */, 0, 0);
+	if (fd < 0) { puts1("video: no /dev/mem\n"); return; }
+	long p = sys6(SYS_mmap2, 0, 4096, 3 /* PROT_READ|WRITE */, 1 /* MAP_SHARED */, fd, VIDEO_PAGE);
+	sys3(SYS_close, fd, 0, 0);
+	if ((unsigned long)p >= 0xfffff000ul) { puts1("video: mmap failed\n"); return; }
+	volatile u32 *v = (volatile u32 *)p;
+	if (v[0] != 0x56494431) { puts1("video: none\n"); return; }
+	v[1] = 2;
+	tty0 = sys5(SYS_openat, AT_FDCWD, (long)"/dev/tty0", 1 /* O_WRONLY */, 0, 0);
+	if (tty0 < 0) tty0 = -1;
+	puts1(tty0 >= 0 ? "video: 320x240 RGB565 on DVI, console on tty0\n" : "video: on, no tty0\n");
+}
 static void putu(u32 v)
 {
 	char b[12]; int i = 11; b[i] = 0;
@@ -132,6 +164,7 @@ static void run(int tag)
 
 void _start_c(void)
 {
+	video_on();
 	puts1("\nHello from Linux user space on Flute RV32IMAFDC (ULX3S): FP context test\n");
 	long pid = sys5(SYS_clone, 17 /* SIGCHLD */, 0, 0, 0, 0);
 	if (pid < 0) { puts1("clone failed\n"); run(1); }

@@ -104,5 +104,15 @@
 				disable-wp;
 			};
 		};
+		/* DVI framebuffer (src/Video_DVI.v): 320x240 RGB565, scanned out doubled to 640x480.
+		 * simplefb does not program the hardware; /init sets MODE (0xc0010004) to 2. */
+		framebuffer@c1000000 {
+			compatible = "simple-framebuffer";
+			reg = <0xc1000000 0x25800>;
+			width = <320>;
+			height = <240>;
+			stride = <640>;
+			format = "r5g6b5";
+		};
 	};
 };

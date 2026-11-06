@@ -1,6 +1,8 @@
 dir /dev 0755 0 0
 nod /dev/console 0600 0 0 c 5 1
 nod /dev/mmcblk0 0600 0 0 b 179 0
+nod /dev/mem 0600 0 0 c 1 1
+nod /dev/tty0 0600 0 0 c 4 0
 dir /proc 0755 0 0
 dir /sys 0755 0 0
 file /init /work/init-fp/init 0755 0 0
