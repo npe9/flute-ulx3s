@@ -41,6 +41,10 @@ interface AXI4_RegBus_IFC;
    (* always_ready *)   method Bit #(32) rb_wdata;
    (* always_ready *)   method Bit #(4)  rb_wstrb;
    (* always_enabled *) method Action    rb_ack (Bit #(1) ack, Bit #(32) rdata);
+`ifdef FORMAL
+   // formal/regbus: the watchdog, so the harness can tell a timeout from a dropped request
+   (* always_ready *)   method Bit #(8)  f_wdog;
+`endif
 endinterface
 
 typedef enum { RB_IDLE, RB_WR, RB_RD } RB_State deriving (Bits, Eq, FShow);
@@ -70,10 +74,13 @@ module mkAXI4_RegBus (AXI4_RegBus_IFC);
    endfunction
 
    // ================================================================
-   // Request intake (one at a time; writes win a tie)
+   // Request intake (one at a time; writes win a tie).  A request starts only when its
+   // response FIFO has room, so rl_finish can always take the device's one-cycle ack
+   // (formal/regbus: with two responses unaccepted the ack was lost and the device saw the
+   // request again).
 
    (* descending_urgency = "rl_wr_start, rl_rd_start" *)
-   rule rl_wr_start (rg_state == RB_IDLE);
+   rule rl_wr_start ((rg_state == RB_IDLE) && slave_xactor.i_wr_resp.notFull);
       let wra <- pop_o (slave_xactor.o_wr_addr);
       let wrd <- pop_o (slave_xactor.o_wr_data);
 
@@ -95,7 +102,7 @@ module mkAXI4_RegBus (AXI4_RegBus_IFC);
       end
    endrule
 
-   rule rl_rd_start (rg_state == RB_IDLE);
+   rule rl_rd_start ((rg_state == RB_IDLE) && slave_xactor.i_rd_data.notFull);
       let rda <- pop_o (slave_xactor.o_rd_addr);
       rg_addr  <= fn_word_addr (rda.araddr);
       rg_hi    <= fn_hi (rda.araddr);
@@ -109,7 +116,11 @@ module mkAXI4_RegBus (AXI4_RegBus_IFC);
    // Completion: the device's ack, or the watchdog
 
    rule rl_finish (rg_state != RB_IDLE);
+`ifdef FORMAL_SHORT_WDOG
+      Bool timeout = (rg_wdog == 7);     // formal cover build only: reach SLVERR in a few steps
+`else
       Bool timeout = (rg_wdog == '1);
+`endif
       if ((w_ack == 1) || timeout) begin
          AXI4_Resp resp = (w_ack == 1) ? axi4_resp_okay : axi4_resp_slverr;
          if (rg_state == RB_WR)
@@ -148,6 +159,9 @@ module mkAXI4_RegBus (AXI4_RegBus_IFC);
       w_ack   <= ack;
       w_rdata <= rdata;
    endmethod
+`ifdef FORMAL
+   method Bit #(8) f_wdog = rg_wdog;
+`endif
 endmodule
 
 endpackage

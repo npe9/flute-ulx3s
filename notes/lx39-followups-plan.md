@@ -16,7 +16,8 @@ in that directory); leave peer sessions' bsc/yosys/sby processes alone.
 | A, B/Zk, S-mode, CSRs, traps, F/D (313 checks) | forks `~/src/riscv-formal-{a,dev,s,fp}`; `fp-ext` contains `s-mode` | FP 60/60 and S 15/15 on 2026-10-21..23; **not run since** (uDTLB, lx50, SFENCE urgency, ...) |
 | `reg` / `pc_fwd` (deep) | `formal/run.sh deep` | pc_fwd PASS on E8d; reg stalls at step 75 (use `REG_DEPTH=74`) |
 | AXI4 protocol | vendored FVIP `formal/axi4_fvip` | Mem_Controller slave, AXI4_Deburster only |
-| Fabrics, MMIO slaves, SPI, RegBus, SoC reset | none | **no formal** |
+| Fabrics, MMIO slaves, SPI, SoC reset | none | **no formal** |
+| AXI4_RegBus bridge | `formal/regbus/` | **proved** (pdr, with and without reset); found a lost-ack bug |
 | Video_DVI (system side) | `formal/video/` | **proved** (k-induction, single clock) |
 | Equivalence | yosys `equiv` script (`build/timing-exp/equiv_modules.sh`) | EQY not installed |
 | Lockstep | TestRIG (sail-riscv-rvfi) | D1-D3 and F/D 200+200 clean in October; not routine |
@@ -53,6 +54,15 @@ reset, and the reset sequence completes whenever the slaves are fair (liveness).
 
 **A5. Peripheral IP proofs** (each a small SBY job, induction where possible):
 - `AXI4_RegBus` bridge: FVIP AXI4 slave side, reg-bus handshake asserts, one access in flight.
+  **Done 2026-11-06: `formal/regbus/`, unbounded by abc pdr** (seconds), with and without
+  the reset method toggling. Hand-written AXI master assumptions (valid held until ready,
+  single beat) rather than FVIP. Asserts: word-aligned rb_addr, no zero-strobe write,
+  rb_valid held until ack or watchdog, dropped the cycle after ack, B/R held until accepted,
+  rlast on every read, response count = request count. BMC found a real bug: intake did
+  not check the response FIFO, so a request accepted while B/R was full lost its ack
+  (`rl_wr_start`/`rl_rd_start` now require `notFull`). Covers (write, read, upper lane,
+  watchdog SLVERR) all reached; the SLVERR cover uses a `-D FORMAL_SHORT_WDOG` build (limit 7)
+  because 255 cycles is too deep for BMC. `mutate.sh`: 3 injected bugs fail.
 - `Video_DVI.v`: reset values that fb_test reads; read FSM always completes in 5 cycles; bank
   select one-hot; last bank bounds; writes dropped past the backed RAM; the two clock domains
   with `multiclock on`: MODE through the two-flop synchronizer, banks written only on sys clk.

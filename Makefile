@@ -432,3 +432,17 @@ clean:
 	rm -rf $(BUILD)
 	$(MAKE) -C sw clean 2>/dev/null || true
 	$(MAKE) -C templeos clean 2>/dev/null || true
+
+# formal-regbus-verilog: mkAXI4_RegBus alone, for formal/regbus (same flags as the SoC build;
+# REGBUS_SRC lets formal/regbus/mutate.sh build mutants).
+REGBUS_SRC ?= src/AXI4_RegBus.bsv
+.PHONY: formal-regbus-verilog
+formal-regbus-verilog:
+	mkdir -p $(BUILD)/formal-regbus/bsc $(BUILD)/formal-regbus/v
+	$(BSC) -u -verilog -g mkAXI4_RegBus $(BSC_FLAGS) $(DEFINES) -D FORMAL \
+	    -p $(BSC_PATH) -bdir $(BUILD)/formal-regbus/bsc -vdir $(BUILD)/formal-regbus/v \
+	    $(REGBUS_SRC) > $(BUILD)/formal-regbus/bsc.log 2>&1 || { tail -20 $(BUILD)/formal-regbus/bsc.log; exit 1; }
+	mkdir -p $(BUILD)/formal-regbus-short/bsc $(BUILD)/formal-regbus-short/v
+	$(BSC) -u -verilog -g mkAXI4_RegBus $(BSC_FLAGS) $(DEFINES) -D FORMAL -D FORMAL_SHORT_WDOG \
+	    -p $(BSC_PATH) -bdir $(BUILD)/formal-regbus-short/bsc -vdir $(BUILD)/formal-regbus-short/v \
+	    $(REGBUS_SRC) > $(BUILD)/formal-regbus-short/bsc.log 2>&1 || { tail -20 $(BUILD)/formal-regbus-short/bsc.log; exit 1; }
