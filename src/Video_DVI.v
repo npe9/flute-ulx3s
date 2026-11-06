@@ -24,7 +24,11 @@
 // the vertical-blank toggle comes back the same way.
 // ================================================================
 
-module video_fb (
+module video_fb #(
+    // Pixel RAM geometry; only the formal harness (formal/video) shrinks these.
+    parameter FB_WORDS  = 38400,    // 153600 bytes
+    parameter BANK_BITS = 13
+) (
     input  wire        clk,         // system clock
     input  wire        rst,         // system reset, active high
     input  wire        rb_valid,
@@ -46,8 +50,6 @@ module video_fb (
     output reg         dbg_hs,
     output reg         dbg_vs
 );
-    localparam FB_WORDS = 38400;    // 153600 bytes
-
     // ------------------------------------------------------------
     // Memories
 
@@ -56,7 +58,6 @@ module video_fb (
     // the generate block below.  One 38400-word array per lane read back through a 19:1 mux
     // spread over the whole EBR row (~19 ns, the critical path on one seed); in banks, each
     // bank's 4:1 mux has its own register and the 5:1 bank mux comes one cycle later.
-    localparam BANK_BITS  = 13;
     localparam BANK_WORDS = 1 << BANK_BITS;
     localparam NBANK      = (FB_WORDS + BANK_WORDS - 1) / BANK_WORDS;     // 5
 
