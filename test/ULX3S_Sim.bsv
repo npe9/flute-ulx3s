@@ -51,6 +51,9 @@ module mkULX3S_Sim (Empty);
    Reg #(Bit #(16)) rx_tmr  <- mkReg (0);
    Reg #(Bool)      rx_busy <- mkReg (False);
    Reg #(Bit #(1))  rg_rxd  <- mkReg (1);
+`ifdef INCLUDE_VIDEO
+   Reg #(Bool)      rg_rb_ack <- mkReg (False);   // register-bus responder (no video block here)
+`endif
 
    // DUT TX pin decoder
    Reg #(Bit #(1))  tx_prev   <- mkReg (1);
@@ -191,6 +194,11 @@ module mkULX3S_Sim (Empty);
 `endif
 `ifdef INCLUDE_SPI0
       dut.flash_miso (1'b1); // blank flash: no boot image
+`endif
+`ifdef INCLUDE_VIDEO
+      // the video block is Verilog (src/Top.v): ack every register-bus access, reads return 0
+      dut.rb_ack (pack (rg_rb_ack), 0);
+      rg_rb_ack <= (dut.rb_valid == 1) && !rg_rb_ack;
 `endif
       if (pty_on && (rg_cycle [11:0] == 0)) begin
          let b <- c_ctl_btn (zeroExtend (rg_btn1));

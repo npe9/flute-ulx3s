@@ -32,15 +32,16 @@ EXPECT_HZ = int(os.environ.get('EXPECT_HZ', '25000000'))
 # misa of the bitstream under test: main (ACIMU) by default, EXPECT_MISA=4014112f for the
 # linux-isa build (ACDFIMSU).
 EXPECT_MISA = os.environ.get('EXPECT_MISA', '40101105').lower()
-# SoC_Info device-table entries: 8 with spi0 (INCLUDE_SPI0), EXPECT_NDEV=7 for older bitstreams.
-EXPECT_NDEV = int(os.environ.get('EXPECT_NDEV', '8'))
+# SoC_Info device-table entries: 10 with spi0 and the video block's two regions
+# (INCLUDE_VIDEO); EXPECT_NDEV=8 for lx38 and older, 7 before spi0.
+EXPECT_NDEV = int(os.environ.get('EXPECT_NDEV', '10'))
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dmi import DMI  # noqa: E402
 
 PORT = '/dev/cu.usbserial-120001'
 BAUD = 625000
-BITSTREAM = 'build/ulx3s_top.bit'
+BITSTREAM = os.environ.get('HW_BITSTREAM', 'build/ulx3s_top.bit')
 BLOB = 'templeos/build/ulx3s_repl.blob.bin'
 if not os.path.exists(BLOB):              # no local TempleOS build: the committed image
     BLOB = 'templeos/prebuilt/ulx3s_repl.blob.bin'
@@ -148,6 +149,7 @@ def send_line(fd, line, timeout=45.0):
 def load_blob(fd, blob):
     drain(fd, 2.0)
     os.write(fd, struct.pack('<II', 0x80000000, len(blob)))
+    tail = b''
     for ci in range((len(blob) + CHUNK - 1) // CHUNK):
         ck = blob[ci * CHUNK:(ci + 1) * CHUNK]
         x = 0
@@ -164,6 +166,8 @@ def load_blob(fd, blob):
                     if d:
                         buf += d
                         if b'\x06' in buf:
+                            # the readback line can arrive in the same read
+                            tail = buf[buf.index(b'\x06') + 1:]
                             ok = True
                             break
                         if b'\x15' in buf:
@@ -175,12 +179,12 @@ def load_blob(fd, blob):
                 break
         else:
             raise RuntimeError(f'load failed at chunk {ci}')
-    # HW_SKIP_REPAIR=1: end the ROM's ~24 s repair window once the readback
-    # line is out: 0xA5 + <dst, 0> jumps at once (boot/boot_loader.c,
-    # count == 0; ROMs before lx39 would run a second window instead).
-    if not os.environ.get('HW_SKIP_REPAIR'):
+    # End the ROM's ~24 s repair window once the readback line is out:
+    # 0xA5 + <dst, 0> jumps at once (boot/boot_loader.c, count == 0; ROMs
+    # before lx39 run a second window instead).  HW_SKIP_REPAIR=0 waits.
+    if os.environ.get('HW_SKIP_REPAIR', '1') == '0':
         return
-    buf = b''
+    buf = tail
     t0 = time.time()
     while time.time() - t0 < 30.0:
         buf += drain(fd, 0.1)
@@ -455,7 +459,7 @@ def main():
                    f'{type(e).__name__}: {e}')
         if rom:
             names = {0: 'boot_rom', 1: 'sdram', 2: 'clint', 3: 'uart0',
-                     4: 'gpio', 5: 'plic', 6: 'soc_info', 7: 'spi0'}
+                     4: 'gpio', 5: 'plic', 6: 'soc_info', 7: 'spi0', 8: 'video'}
             recs = [rom[i * 8:(i + 1) * 8] for i in range(EXPECT_NDEV)]
             byname = {names.get(r[0], str(r[0])): r for r in recs}
             dmi_check('devROM uart0',
@@ -473,6 +477,11 @@ def main():
                 dmi_check('devROM spi0 (microSD host, IRQ 2)',
                           lambda: byname['spi0'][2] == 0xC0004000
                           and byname['spi0'][4] == 2,
+                          lambda v: v)
+            if EXPECT_NDEV >= 10:
+                dmi_check('devROM video registers + framebuffer',
+                          lambda: sorted(r[2] for r in recs if r[0] == 8)
+                          == [0xC0010000, 0xC1000000],
                           lambda v: v)
 
         print('\n== E. bus error monitor ==', flush=True)

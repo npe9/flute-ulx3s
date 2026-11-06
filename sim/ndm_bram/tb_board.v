@@ -62,6 +62,7 @@ module sim_board (
         .flash_miso  (flash_miso),
         .flash_wpn   (flash_wpn),
         .flash_holdn (flash_holdn),
+        .gpdi_dp     (),
         .sdram_clk   (sdram_clk_o),
         .sdram_cke   (sdram_cke),
         .sdram_cs_n  (sdram_cs_n),

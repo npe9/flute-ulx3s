@@ -237,6 +237,9 @@ module mkSoC_Boot_Tb (Empty);
    Reg #(Bit #(4))  rx_bit     <- mkReg (0);
    Reg #(Bit #(16)) rx_timer   <- mkReg (0);
    Reg #(Bit #(1))  rg_rxd     <- mkReg (1);
+`ifdef INCLUDE_VIDEO
+   Reg #(Bool)      rg_rb_ack <- mkReg (False);   // register-bus responder (no video block here)
+`endif
    Reg #(Bit #(64)) rg_cycle   <- mkReg (0);
    Reg #(Bit #(32)) rx_warmup  <- mkReg (200_000);
 
@@ -358,6 +361,11 @@ module mkSoC_Boot_Tb (Empty);
 `endif
 `ifdef INCLUDE_SPI0
       dut.flash_miso (1'b1); // blank flash: no boot image
+`endif
+`ifdef INCLUDE_VIDEO
+      // the video block is Verilog (src/Top.v): ack every register-bus access, reads return 0
+      dut.rb_ack (pack (rg_rb_ack), 0);
+      rg_rb_ack <= (dut.rb_valid == 1) && !rg_rb_ack;
 `endif
       rg_cycle <= rg_cycle + 1;
       if (rg_cycle > fromInteger (max_cycles)) begin

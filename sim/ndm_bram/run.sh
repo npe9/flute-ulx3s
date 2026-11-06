@@ -83,7 +83,7 @@ for f in "$BSC_LIB"/*.v; do
 done
 FILES+=("$ROOT/src/ASSIGN1.v"
         "$VERILOG_ALL"
-        "$ROOT/src/Top.v"
+        "$ROOT/src/Top.v" "$ROOT/src/Video_DVI.v"
         ./BRAM2.v
         ./ecp5_cells.v
         ./sdram_model.v

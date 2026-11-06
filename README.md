@@ -544,7 +544,11 @@ port; `Uart_Pins` derives `clk_per_bit` from the system clock, 40 at 25 MHz):
 5. If `count == 0`, the loader jumps to the destination address without loading.
 6. After loading, the ROM prints a head+tail readback of the image, waits
    ~24 s in a repair window (send `0xA5` + a fresh header to load another
-   segment), then jumps to the destination.
+   segment), then jumps to the destination. `0xA5` + `<dst, 0>` ends the
+   window at once and jumps. `loader.py` and `hw_test_suite.py` send it by default
+   (`--no-skip-repair` / `HW_SKIP_REPAIR=0` wait instead); the sim benches always send it
+   unless `TB_REPAIR_WAIT=1`.
+   ROMs before lx39 treat it as an empty segment and wait a second window.
 
 `python3 scripts/hw_repl_test.py` is the reference host implementation
 (coalesced single-write chunks, ACK-scan that skips progress dots and
@@ -580,6 +584,36 @@ Linux ~11 s). For power-on boot, also write the bitstream at offset 0
 
 This lets you iterate on RISC-V software without rebuilding the FPGA bitstream:
 a full REPL reload is ~90 s over the UART versus ~7 min for synthesis+P&R.
+
+## HDMI output
+
+The video block (`-D INCLUDE_VIDEO`, always on in the Makefile's `DEFINES`) drives a DVI picture out of the
+GPDI connector: 640x480 at 60 Hz from a second PLL (25 MHz pixel clock, 125 MHz shift clock
+into `ODDRX1F`s), with a 150 KB framebuffer in block RAM (`src/Video_DVI.v`). The CPU reaches
+it uncached through `AXI4_RegBus` (`src/AXI4_RegBus.bsv`), one AXI4 slave on the peripheral
+fabric that ends in a 32-bit valid/ack register bus in `Top.v`, so later small devices need
+no AXI port of their own (a 256-cycle watchdog answers `SLVERR` for a dead address).
+
+| Address | Register |
+|---------|----------|
+| `0xC0010000` | ID, reads `0x56494431` ("VID1") |
+| `0xC0010004` | MODE: 0 off, 1 640x480 4 bpp palette, 2 320x240 RGB565, 3 320x240 8 bpp palette, 7 test pattern |
+| `0xC0010008` | STATUS: bit 0 = in vertical blank |
+| `0xC001000C` | FRAME: counts frames |
+| `0xC0010010` | FBSIZE: 153600 |
+| `0xC0010400`..`0x7FC` | PALETTE: 256 entries of `0x00RRGGBB` (0-15 reset to the VGA colours, 16-255 to RGB332 of the index) |
+| `0xC1000000`.. | pixel RAM, 153600 bytes; byte, halfword and word access |
+
+Pixels are packed little-endian: in mode 1 the low nibble of byte 0 is pixel 0, in mode 2
+each halfword is one pixel, rows are 320 bytes (mode 1), 640 (mode 2) or 320 (mode 3). An
+uncached store costs ~42 cycles, so a full-screen redraw takes ~32 ms at 50 MHz.
+
+`test/fb_test.bin` checks the registers, every word of the RAM and the palette, then leaves an
+RGB565 picture on screen. Linux gets a `simple-framebuffer` (320x240 r5g6b5) and `/init`
+switches mode 2 on; the kernel console stays on the UART (fbcon scrolling at ~32 ms per scroll
+is too slow to be the default; add `console=tty0` to try it). In simulation,
+`sim/video_ut/run.sh` (`make sim-video-ut`) checks timing, TMDS and every mode against a model,
+and the strict and Linux benches take `+fb_ppm=<file>` to save the last full frame as a PPM.
 
 ## Milestone LEDs
 

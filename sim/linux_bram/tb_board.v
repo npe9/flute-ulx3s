@@ -44,6 +44,10 @@ module sim_board (
     spi_flash_model flash (.clk (clk), .sck (top.u_usrmclk.USRMCLKI), .mosi (flash_mosi),
                            .cs_n (flash_csn), .miso (flash_miso));
 
+    // DVI scan-out to a PPM (+fb_ppm=<file>; the pixel clock is the system clock here)
+    fb_capture fbcap (.clk (clk), .rgb (top.video.dbg_rgb), .de (top.video.dbg_de),
+                      .vs (top.video.dbg_vs));
+
     ulx3s_top top (
         .CLK      (clk),
         .BTN1     (btn1),
@@ -66,6 +70,7 @@ module sim_board (
         .flash_miso  (flash_miso),
         .flash_wpn   (flash_wpn),
         .flash_holdn (flash_holdn),
+        .gpdi_dp     (),
         .sdram_clk   (sdram_clk_o),
         .sdram_cke   (sdram_cke),
         .sdram_cs_n  (sdram_cs_n),

@@ -17,6 +17,9 @@ fi
 make sim-spi-tb > build/ci/spi-tb.log 2>&1
 grep -a "Tb_AXI4_SPI:" build/ci/spi-tb.log | tail -1
 grep -a -q "Tb_AXI4_SPI: PASS" build/ci/spi-tb.log || { tail -30 build/ci/spi-tb.log; exit 1; }
+make sim-regbus-tb > build/ci/regbus-tb.log 2>&1
+grep -a "Tb_AXI4_RegBus:" build/ci/regbus-tb.log | tail -1
+grep -a -q "Tb_AXI4_RegBus: PASS" build/ci/regbus-tb.log || { tail -30 build/ci/regbus-tb.log; exit 1; }
 # bsc -u does not see -D changes: a probe-free build needs its own bdir.
 rm -rf build/bsc-sim-boot build/sim-boot
 make sim-boot SIM_BOOT_PROBES= > build/ci/sim-boot.log 2>&1

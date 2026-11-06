@@ -154,6 +154,28 @@ module mkSoC_Info #(int clk_hz) (SoC_Info_IFC);
    RWire #(Tuple2 #(Bit #(2), Bit #(4))) rw_sel_wr  <- mkRWire;
    RWire #(Bit #(2))                     rw_cnt_clr <- mkRWire;
 
+   // The event pulses arrive from all over the die (fetch, caches, PLIC, the bus monitor); a
+   // register stage keeps the long wires out of the counters' increment enables.  Events are
+   // counted one cycle late.
+   Reg #(Bool) rg_ev_retire   <- mkReg (False);
+   Reg #(Bool) rg_ev_imiss    <- mkReg (False);
+   Reg #(Bool) rg_ev_dmiss    <- mkReg (False);
+   Reg #(Bool) rg_ev_ext_irq  <- mkReg (False);
+   Reg #(Bool) rg_ev_uart_irq <- mkReg (False);
+   Reg #(Bool) rg_ev_redirect <- mkReg (False);
+   Reg #(Bool) rg_ev_buserr   <- mkReg (False);
+
+   (* fire_when_enabled, no_implicit_conditions *)
+   rule rl_perf_events;
+      rg_ev_retire   <= pw_retire;
+      rg_ev_imiss    <= pw_imiss;
+      rg_ev_dmiss    <= pw_dmiss;
+      rg_ev_ext_irq  <= pw_ext_irq;
+      rg_ev_uart_irq <= pw_uart_irq;
+      rg_ev_redirect <= pw_redirect;
+      rg_ev_buserr   <= pw_buserr;
+   endrule
+
    rule rl_perf_count;
       Vector #(4, Bit #(4))  new_sels   = rg_perf_select;
       Vector #(4, Bit #(32)) new_counts = rg_perf_count;
@@ -165,13 +187,13 @@ module mkSoC_Info #(int clk_hz) (SoC_Info_IFC);
       for (Integer i = 0; i < 4; i = i + 1) begin
 	 let sel = rg_perf_select [i];
 	 Bool fire = (sel == 0)                                  // cycles
-		     || ((sel == 1) && pw_retire)
-		     || ((sel == 2) && pw_imiss)
-		     || ((sel == 3) && pw_dmiss)
-		     || ((sel == 4) && pw_ext_irq)
-		     || ((sel == 5) && pw_uart_irq)
-		     || ((sel == 6) && pw_redirect)
-		     || ((sel == 7) && pw_buserr);
+		     || ((sel == 1) && rg_ev_retire)
+		     || ((sel == 2) && rg_ev_imiss)
+		     || ((sel == 3) && rg_ev_dmiss)
+		     || ((sel == 4) && rg_ev_ext_irq)
+		     || ((sel == 5) && rg_ev_uart_irq)
+		     || ((sel == 6) && rg_ev_redirect)
+		     || ((sel == 7) && rg_ev_buserr);
 	 Bool clr_this = (m_clr == tagged Valid fromInteger (i));
 	 if (fire && (rg_perf_count [i] != 32'hFFFF_FFFF) && (! clr_this))
 	    new_counts [i] = rg_perf_count [i] + 1;

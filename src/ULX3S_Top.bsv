@@ -71,6 +71,17 @@ interface ULX3S_Top_IFC;
    (* always_enabled *) method Action   flash_miso (Bit #(1) v);
 `endif
 
+`ifdef INCLUDE_VIDEO
+   // Register bus to the Verilog devices in src/Top.v (src/Video_DVI.v); protocol in
+   // src/AXI4_RegBus.bsv
+   (* always_ready *)   method Bit #(1)  rb_valid;
+   (* always_ready *)   method Bit #(1)  rb_we;
+   (* always_ready *)   method Bit #(32) rb_addr;
+   (* always_ready *)   method Bit #(32) rb_wdata;
+   (* always_ready *)   method Bit #(4)  rb_wstrb;
+   (* always_enabled *) method Action    rb_ack (Bit #(1) ack, Bit #(32) rdata);
+`endif
+
 `ifdef JTAG_TAP
    // The J1-header JTAG TAP is kept in the design (unconnected to the
    // debug server; the UART bridge owns server_external_control) purely
@@ -229,6 +240,17 @@ module mkULX3S_Top (ULX3S_Top_IFC);
    method Bit #(1) flash_cs_n = soc_top.flash_cs_n;
    method Action flash_miso (Bit #(1) v);
       soc_top.flash_miso (v);
+   endmethod
+`endif
+
+`ifdef INCLUDE_VIDEO
+   method Bit #(1)  rb_valid = soc_top.rb_valid;
+   method Bit #(1)  rb_we    = soc_top.rb_we;
+   method Bit #(32) rb_addr  = soc_top.rb_addr;
+   method Bit #(32) rb_wdata = soc_top.rb_wdata;
+   method Bit #(4)  rb_wstrb = soc_top.rb_wstrb;
+   method Action rb_ack (Bit #(1) ack, Bit #(32) rdata);
+      soc_top.rb_ack (ack, rdata);
    endmethod
 `endif
 

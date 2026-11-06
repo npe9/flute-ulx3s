@@ -30,6 +30,8 @@ module ulx3s_top(
     input  wire        flash_miso,  //   D1, V2
     output wire        flash_wpn,   //   write protect (held high), Y2
     output wire        flash_holdn, //   hold (held high), W1
+    output wire [3:0]  gpdi_dp,     // DVI: blue A16, green A14, red A12, clock A17 (LVCMOS33D:
+                                    // the _dn pins are driven as the complements)
     output wire        sdram_clk,   // F19
     output wire        sdram_cke,   // F20
     output wire        sdram_cs_n,  // P20
@@ -150,6 +152,52 @@ module ulx3s_top(
     assign flash_wpn   = 1'b1;
     assign flash_holdn = 1'b1;
 
+    // ---- DVI output (src/Video_DVI.v): 640x480 at 60 Hz from a second PLL, 25 MHz pixel
+    // clock and the 125 MHz shift clock (10 bits per pixel, 2 per shift clock).  The video
+    // PLL does not gate the system reset.  Without SYS_PLL (the Verilator benches) both video
+    // clocks are the system clock and the block sits in mode 0 unless a bench drives it.
+    wire        pix_clk, shift_clk;
+`ifdef SYS_PLL
+    (* FREQUENCY_PIN_CLKI="25" *)
+    (* FREQUENCY_PIN_CLKOP="125" *)
+    (* FREQUENCY_PIN_CLKOS="25" *)
+    (* ICP_CURRENT="12" *) (* LPF_RESISTOR="8" *) (* MFG_ENABLE_FILTEROPAMP="1" *) (* MFG_GMCREF_SEL="2" *)
+    EHXPLLL #(
+        .PLLRST_ENA("DISABLED"), .INTFB_WAKE("DISABLED"), .STDBY_ENABLE("DISABLED"),
+        .DPHASE_SOURCE("DISABLED"), .OUTDIVIDER_MUXA("DIVA"), .OUTDIVIDER_MUXB("DIVB"),
+        .OUTDIVIDER_MUXC("DIVC"), .OUTDIVIDER_MUXD("DIVD"),
+        .CLKI_DIV(1), .CLKFB_DIV(5), .FEEDBK_PATH("CLKOP"),         // VCO 625 MHz
+        .CLKOP_ENABLE("ENABLED"), .CLKOP_DIV(5),  .CLKOP_CPHASE(2),  .CLKOP_FPHASE(0),
+        .CLKOS_ENABLE("ENABLED"), .CLKOS_DIV(25), .CLKOS_CPHASE(12), .CLKOS_FPHASE(0)
+    ) video_pll (
+        .RST(1'b0), .STDBY(1'b0), .CLKI(CLK),
+        .CLKOP(shift_clk), .CLKOS(pix_clk), .CLKFB(shift_clk),
+        .PHASESEL0(1'b0), .PHASESEL1(1'b0), .PHASEDIR(1'b1),
+        .PHASESTEP(1'b1), .PHASELOADREG(1'b1), .PLLWAKESYNC(1'b0),
+        .ENCLKOP(1'b0), .LOCK()
+    );
+`else
+    assign pix_clk   = sys_clk;
+    assign shift_clk = sys_clk;
+`endif
+
+    wire        rb_valid, rb_we, rb_ack;
+    wire [31:0] rb_addr, rb_wdata, rb_rdata;
+    wire [3:0]  rb_wstrb;
+    wire [9:0]  tmds_r, tmds_g, tmds_b;
+    wire        pix_tog;
+    video_fb video (
+        .clk(sys_clk), .rst(~rst_n),
+        .rb_valid(rb_valid), .rb_we(rb_we), .rb_addr(rb_addr), .rb_wdata(rb_wdata),
+        .rb_wstrb(rb_wstrb), .rb_ack(rb_ack), .rb_rdata(rb_rdata),
+        .pclk(pix_clk), .tmds_r(tmds_r), .tmds_g(tmds_g), .tmds_b(tmds_b), .ptog(pix_tog),
+        .dbg_rgb(), .dbg_de(), .dbg_hs(), .dbg_vs()
+    );
+    dvi_ser dvi (
+        .sclk(shift_clk), .ptog(pix_tog),
+        .tmds_r(tmds_r), .tmds_g(tmds_g), .tmds_b(tmds_b), .gpdi_dp(gpdi_dp)
+    );
+
     mkULX3S_Top top (
         .CLK(sys_clk),
         .RST_N(top_rst),
@@ -165,6 +213,13 @@ module ulx3s_top(
         .flash_mosi(flash_mosi),
         .flash_cs_n(flash_csn),
         .flash_miso_v(flash_miso),
+        .rb_valid(rb_valid),
+        .rb_we(rb_we),
+        .rb_addr(rb_addr),
+        .rb_wdata(rb_wdata),
+        .rb_wstrb(rb_wstrb),
+        .rb_ack_ack(rb_ack),
+        .rb_ack_rdata(rb_rdata),
 `ifdef JTAG_TAP
         .jtag_tclk(jtag_tck),
         .jtag_tms(jtag_tms),

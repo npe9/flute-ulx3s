@@ -109,8 +109,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        test: [j1, cache, amo, sd]
+        test: [j1, cache, amo, sd, fb, video]
         include:
+          # DVI framebuffer through the register-bus bridge: registers, pixel RAM fill/readback,
+          # byte/halfword stores, palette, frame counter (test/fb_test.c)
+          - { test: fb, bin: fb_test }
           # microSD host + sim/common/sd_spi_model.v: init, CSD, CMD17/18 reads, CMD24/25 writes
           - { test: sd, bin: sd_test_w, deadline: 100000000 }
     container:
@@ -132,8 +135,13 @@ jobs:
           J1_WAIVE_BTB_CENSUS=1 stdbuf -oL -eL sim/strict_bram/run.sh --strict=error +verilator+seed+1 2>&1 | tee build/j1.log
           grep -q "RESULT: PASS" build/j1.log
           grep -a "hello banner at cycle" build/j1.log
+      - name: video unit bench (src/Video_DVI.v frames, TMDS decode, pixel modes)
+        if: matrix.test == 'video'
+        run: |
+          make sim-video-ut 2>&1 | tee build/video.log
+          grep -q "\[video_ut\] PASS" build/video.log
       - name: ${{ matrix.test }} test (T...D over the UART, no M)
-        if: matrix.test != 'j1'
+        if: matrix.test != 'j1' && matrix.test != 'video'
         run: |
           TB_NOCOV=1 BUILD_DIR=obj_dir_nocov TB_TX_TRACE=1 TB_HELLO_DEADLINE=${{ matrix.deadline || 90000000 }} stdbuf -oL -eL sim/strict_bram/run.sh --strict=warn \
             "$PWD/test/${{ matrix.bin || format('{0}_test', matrix.test) }}.bin" +verilator+seed+1 > build/${{ matrix.test }}.log 2>&1 || true

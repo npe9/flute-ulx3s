@@ -110,6 +110,7 @@ def load_blob(fd, blob, dst=0x80000000):
     the xor byte is never last on the wire (DMI-bridge 0xDB magic)."""
     drain(fd, 2.0)
     os.write(fd, struct.pack('<II', dst, len(blob)))
+    tail = b''
     for ci in range((len(blob) + 255) // 256):
         ck = blob[ci * 256:(ci + 1) * 256]
         x = 0
@@ -125,6 +126,8 @@ def load_blob(fd, blob, dst=0x80000000):
                 if d:
                     buf += d
                     if b'\x06' in buf:
+                        # the readback line can arrive in the same read
+                        tail = buf[buf.index(b'\x06') + 1:]
                         ok = True
                         break
                     if b'\x15' in buf:
@@ -133,15 +136,16 @@ def load_blob(fd, blob, dst=0x80000000):
                 break
         else:
             raise RuntimeError('load failed at chunk %d' % ci)
+    return tail
 
 
-def skip_repair(fd, dst=0x80000000, timeout=30.0):
+def skip_repair(fd, dst=0x80000000, timeout=30.0, buf=b''):
     """After a load, wait for the ROM's head/tail readback line ('[..]')
     and end its ~24 s repair window: 0xA5 + header <dst, 0> makes the
     ROM jump to dst at once (boot/boot_loader.c, count == 0).  Returns
     the bytes read; older ROMs treat it as a second empty load and
-    still jump after their window."""
-    buf = b''
+    still jump after their window.  `buf`: bytes already read past the
+    last ACK (load_blob's return), which may hold the readback."""
     t0 = time.time()
     while time.time() - t0 < timeout * scale:
         buf += read_avail(fd, 0.1)
@@ -160,8 +164,16 @@ def main():
     ap.add_argument("-a", "--addr", default="0x80000000")
     ap.add_argument("-t", "--idle-timeout", type=float, default=None,
                     help="seconds of UART silence before exiting (0 = forever; default 5; 600 with --sim, which covers the boot ROM's post-load repair window, ~60M cycles)")
-    ap.add_argument("--skip-repair", action="store_true",
-                    help="end the ROM's ~24 s post-load repair window once the readback arrives (needs a ROM from lx39 on; older ROMs then wait twice)")
+    ap.add_argument("--skip-repair", action="store_true", default=True,
+                    help="end the ROM's ~24 s post-load repair window once the readback arrives (the default; ROMs before lx39 then wait twice)")
+    ap.add_argument("--no-skip-repair", dest="skip_repair", action="store_false",
+                    help="leave the repair window running (e.g. to send a repair segment by hand)")
+    ap.add_argument("--no-banner", action="store_true",
+                    help="send at once instead of waiting for the banner: for running right "
+                         "after openFPGALoader -m on a board with a flash boot directory, "
+                         "where the banner is out before the port can be opened (the JTAG "
+                         "programmer cannot claim the FTDI while the port is open) and the "
+                         "header's first byte stops the flash countdown")
     ap.add_argument("--sim", action="store_true",
                     help="virtual board (make sim-board): pty, timeouts x%d" % SIM_SCALE)
     args = ap.parse_args()
@@ -181,7 +193,7 @@ def main():
     sys.stderr.write("loader: waiting for boot banner on %s ...\n" % args.port)
     buf = b""
     deadline = time.time() + 20 * scale
-    while BANNER not in buf:
+    while BANNER not in buf and not args.no_banner:
         if time.time() > deadline:
             sys.stderr.write("loader: TIMEOUT waiting for banner\n")
             return 1
@@ -195,12 +207,13 @@ def main():
     # The ROM takes the framed-chunk path whenever dst and len are word-
     # aligned and len != 0; load_blob speaks it (ACK-paced, NAK-retry).
     # The old raw-stream path here only worked for unaligned/legacy loads.
-    load_blob(fd, payload, dst)
+    tail = load_blob(fd, payload, dst)
     sys.stderr.write("loader: sent in %.1fs; relaying program output\n"
                      % (time.time() - t0))
     if args.skip_repair:
-        sys.stdout.write(skip_repair(fd, dst).decode("latin-1"))
-        sys.stdout.flush()
+        tail = skip_repair(fd, dst, buf=tail)
+    sys.stdout.write(tail.decode("latin-1"))
+    sys.stdout.flush()
 
     # Relay program output until --idle-timeout seconds of silence.
     out = sys.stdout.buffer

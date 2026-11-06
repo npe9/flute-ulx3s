@@ -57,7 +57,7 @@ DEFINES := -D RV32 -D ISA_I -D ISA_M -D ISA_A -D ISA_C \
            -D ISA_PRIV_M -D ISA_PRIV_U -D ISA_PRIV_S -D SV32 -D SV32_ITLB \
            -D SHIFT_BARREL -D MULT_SYNTH \
            -D Near_Mem_Caches -D FABRIC64 \
-           -D INCLUDE_ACCEL0 -D INCLUDE_SPI0 \
+           -D INCLUDE_ACCEL0 -D INCLUDE_SPI0 -D INCLUDE_VIDEO \
            -D INCLUDE_GDB_CONTROL -D JTAG_TAP
 
 # FP=1: F and D extensions (stock Flute FBox).  Off by default: the stock FBox does not fit the
@@ -221,8 +221,8 @@ $(SYNTH_VERILOG): $(VERILOG) src/RO_TRNG.v
 NO_RW_CHECK_MEMS ?= *btb_bramcore2*
 YOSYS_RW_CHECK = $(if $(strip $(NO_RW_CHECK_MEMS)),synth_ecp5 -top $(TOP) -run :map_ram; $(foreach m,$(NO_RW_CHECK_MEMS),select -list t:$$mem_v2 n:$(m) %i; setattr -set no_rw_check 1 t:$$mem_v2 n:$(m) %i;) synth_ecp5 -top $(TOP) -run map_ram: -json $@,synth_ecp5 -top $(TOP) -json $@)
 
-$(JSON): $(SYNTH_VERILOG) src/Top.v src/ASSIGN1.v
-	$(YOSYS) -p 'read_verilog -DINCLUDE_GDB_CONTROL $(YOSYS_DEFS) $(BSC_VERILOG_FILES) src/ASSIGN1.v $(SYNTH_VERILOG) src/Top.v; $(YOSYS_RW_CHECK)'
+$(JSON): $(SYNTH_VERILOG) src/Top.v src/Video_DVI.v src/ASSIGN1.v
+	$(YOSYS) -p 'read_verilog -DINCLUDE_GDB_CONTROL $(YOSYS_DEFS) $(BSC_VERILOG_FILES) src/ASSIGN1.v $(SYNTH_VERILOG) src/Top.v src/Video_DVI.v; $(YOSYS_RW_CHECK)'
 
 synth: $(JSON)
 
@@ -323,6 +323,24 @@ sim-spi-tb:
 	$(BSC) -sim -e mkTb_AXI4_SPI -bdir $(BUILD)/bsc-spi-tb \
 	    -simdir $(BUILD)/bsc-spi-tb -o $(BUILD)/spi_tb
 	PATH="$(abspath $(dir $(BSC))):$$PATH" $(BUILD)/spi_tb
+
+# sim-regbus-tb: unit testbench for src/AXI4_RegBus.bsv (both fabric lanes, strobes, ack
+# latencies, protocol checks, watchdog SLVERR).  Prints "Tb_AXI4_RegBus: PASS (<n> cycles)".
+.PHONY: sim-regbus-tb
+sim-regbus-tb:
+	mkdir -p $(BUILD)/bsc-regbus-tb
+	$(BSC) -u -sim -g mkTb_AXI4_RegBus $(BSC_FLAGS) $(DEFINES) \
+	    -p $(BSC_PATH):test -bdir $(BUILD)/bsc-regbus-tb -simdir $(BUILD)/bsc-regbus-tb \
+	    test/Tb_AXI4_RegBus.bsv
+	$(BSC) -sim -e mkTb_AXI4_RegBus -bdir $(BUILD)/bsc-regbus-tb \
+	    -simdir $(BUILD)/bsc-regbus-tb -o $(BUILD)/regbus_tb
+	PATH="$(abspath $(dir $(BSC))):$$PATH" $(BUILD)/regbus_tb
+
+# sim-video-ut: Verilator unit bench for src/Video_DVI.v (frame timing, TMDS decode, the three
+# pixel modes and the test pattern against a C++ model).  Prints "[video_ut] PASS".
+.PHONY: sim-video-ut
+sim-video-ut:
+	sim/video_ut/run.sh
 
 # sim-gate: THE checked Bluesim gate.  Runs both sims and greps for
 # ASSERT FAIL (Bluesim $finish AND $fatal both exit 0 — verified on this

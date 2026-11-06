@@ -231,3 +231,18 @@ G3/G4 → `game2d` (G2) → `game3d` (G5, G6).
   (~86 cycles/byte); a burst or DMA read path would help. The lesson for the next peripherals
   stands: a full AXI4 slave per small device is too expensive; use the register-bus bridge.
 
+- 2026-11-06: **lx39 = G1 HDMI framebuffer.** `src/Video_DVI.v` (320x240 RGB565 / palette
+  modes, 150 KB pixel RAM in five 8 K-word EBR banks, registered on both ports) behind the
+  register-bus bridge `src/AXI4_RegBus.bsv` (control 0xC001_0000, pixel RAM 0xC100_0000).
+  `constraints/video_floorplan.py` (`--pre-place`) keeps the BTB in EBR row 22 next to fetch and
+  puts the framebuffer in rows 70/82. Fixes found on the way: SFENCE.VMA had no urgency against
+  debug halt / ndmreset, so bsc folded its decode into every stage1 enable; the ndmreset settle
+  (now 64 cycles) was shorter than an I$ refill, which could hang the next fetch (lx38 passed by
+  timing luck); fabric bus-error events are staged in per-master toggle registers and merged by
+  one rule. Timing is density-bound at 71-72% LUT: 50.11 / 51.34 / 52.77 MHz (s3/s5/s7); the
+  user accepted "all seeds >= 50" for this build (55 was margin, PLL stays at 50 MHz).
+  Bit: s7, md5 8ac819cb. Sims: ISA 94/94, strict cache/amo/sd/fb_test (PPM byte-identical),
+  J1, ndm x6, Linux tick 2 at 229,890,414, Bluesim gate. Board: suite 72/0/2 (bus-error
+  monitor catches the unmapped DMI read), fb_test, FP Linux 6 min clean. `hw_test_suite.py`
+  and `loader.py --skip-repair` now keep the bytes read after the last ACK: at 50 MHz the
+  readback line arrives in that read, and the skip bytes were going to the booted REPL.
