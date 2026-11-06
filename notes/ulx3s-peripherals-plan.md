@@ -108,6 +108,9 @@ generated from one table (`MEMMAP` lines in the bsc log already feed `soc-memory
 
 ## Phase 5: an SoC family; the game machines are separate SoCs
 
+The full profile list (14 SoCs, PMODs, multiboot) is now `soc-family-plan.md`; this section keeps the
+game2d/game3d detail.
+
 One Flute core and one IP library, with several SoC builds (`SOC=` profile in the Makefile), each
 optimized for its job:
 

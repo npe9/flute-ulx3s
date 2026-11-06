@@ -12,7 +12,7 @@ in that directory); leave peer sessions' bsc/yosys/sby processes alone.
 
 | Area | Tooling | Last result |
 |---|---|---|
-| RV32IMC instruction smoke (10 checks) | `formal/run.sh`, upstream riscv-formal | 10/10 on 2026-10-30; lx39 rerun in progress |
+| RV32IMC instruction smoke (10 checks) | `formal/run.sh`, upstream riscv-formal | **10/10 on lx39** (2026-11-06; 44 min at -j4, not ~4 min: the CPU has grown) |
 | A, B/Zk, S-mode, CSRs, traps, F/D (313 checks) | forks `~/src/riscv-formal-{a,dev,s,fp}`; `fp-ext` contains `s-mode` | FP 60/60 and S 15/15 on 2026-10-21..23; **not run since** (uDTLB, lx50, SFENCE urgency, ...) |
 | `reg` / `pc_fwd` (deep) | `formal/run.sh deep` | pc_fwd PASS on E8d; reg stalls at step 75 (use `REG_DEPTH=74`) |
 | AXI4 protocol | vendored FVIP `formal/axi4_fvip` | Mem_Controller slave, AXI4_Deburster only |
@@ -97,7 +97,7 @@ Two scopes:
   New `templeos/ulx3s_repl/ulx3s_video.hc`, address in `ulx3s_memmap.hc`.
 - C2 (large): the real TempleOS gr/DC layer drawing into the framebuffer (windows, sprites,
   `GrPlot`/`GrLine`), which also needs a periodic update hook.
-C1 first unless the user wants C2 directly (D4).
+**Decided 2026-11-06: C2, full graphics** (plan in `soc-family-plan.md`, `templeos` profile).
 
 ## D. Decisions for the user
 
@@ -106,7 +106,7 @@ C1 first unless the user wants C2 directly (D4).
    md5 0ae3c1d8)? Today offset 0 is untouched.
 2. **Default flash boot image and wait**: currently Linux, 3 s.
 3. **Bus-error capture semantics** (A3): best-effort, or exact with back-pressure?
-4. **TempleOS scope**: C1 text console first, or straight to C2?
+4. ~~TempleOS scope~~: decided, C2 (full graphics).
 
 ## Later (phase 2 continues)
 
