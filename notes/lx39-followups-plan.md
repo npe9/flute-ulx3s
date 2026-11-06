@@ -80,6 +80,14 @@ reset, and the reset sequence completes whenever the slaves are fair (liveness).
 **A6. Liveness and deadlock.** riscv-formal `liveness` with fairness assumptions on the AXI
 slave model (the E8a/E8b and ndm hangs were all of this class); FVIP MAXWAIT bounds composed
 through the fabric's register slices (far side bound = near side minus pipeline latency).
+  **2026-11-06 run (F/D netlist): `liveness 1 55 75` FAILS, but it is latency, not a hang.**
+  The trace: a load at step 55 takes a uDTLB miss (UDTLB_FILL/FILLP/FILL2, 3 cycles), replays,
+  misses the cache, then CACHE_SNAPSHOT (cwords_per_cline+2 = 10 cycles, by design) and an
+  8-beat CACHE_REFILL, about 26 cycles in total against the check's 20-cycle window. A PTW whose PTE
+  reads also miss is ~3x that, so no BMC window that fits in the solver budget (depth 76 took
+  2 h) can bound Flute's worst-case per-instruction latency. Keep `liveness` only as a smoke test
+  with an explicit window; real deadlock freedom has to come from the per-unit bounds above
+  (MMU_Cache FSM: every state exits within N cycles given fair AXI, composed).
 
 **A7. Property strength.** `mcy` (installed) on the A3/A5 harnesses and on a few CPU checks:
 mutants the properties do not kill show what is unchecked.
