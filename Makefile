@@ -167,12 +167,22 @@ FBDIR := $(BUILD)/formal/bsc
 FVDIR := $(BUILD)/formal/verilog
 FIDIR := $(BUILD)/formal/info
 FORMAL_VERILOG := $(BUILD)/formal/verilog_cpu.v
+FORMAL_FLAGS := $(BUILD)/formal/flags.txt
 
-.PHONY: formal-verilog
+.PHONY: formal-verilog FORCE
 formal-verilog: $(FORMAL_VERILOG)
 
-$(FORMAL_VERILOG): $(wildcard $(REPO)/src_Core/*/*.bsv)
+# The netlist depends on the defines too (FP=1, FORMAL_DEFINES, ...), not only
+# the sources: rewrite flags.txt (and drop the stale .bo files, which bsc -u
+# does not tie to defines) whenever they change.
+$(FORMAL_FLAGS): FORCE
+	@mkdir -p $(@D)
+	@echo '$(BSC_FLAGS) $(DEFINES) -D RVFI $(FORMAL_DEFINES)' | cmp -s - $@ || \
+	  { rm -rf $(FBDIR) $(FVDIR); echo '$(BSC_FLAGS) $(DEFINES) -D RVFI $(FORMAL_DEFINES)' > $@; }
+
+$(FORMAL_VERILOG): $(wildcard $(REPO)/src_Core/*/*.bsv) $(FORMAL_FLAGS)
 	mkdir -p $(FBDIR) $(FVDIR) $(FIDIR)
+	rm -f $(FVDIR)/*.v
 	$(BSC) -u -verilog -g mkCPU $(BSC_FLAGS) $(DEFINES) -D RVFI $(FORMAL_DEFINES) \
 	    -p $(BSC_PATH) -bdir $(FBDIR) -vdir $(FVDIR) -info-dir $(FIDIR) \
 	    $(REPO)/src_Core/CPU/CPU.bsv > $(BUILD)/formal/elaboration.log 2>&1
