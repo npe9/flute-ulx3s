@@ -16,7 +16,8 @@ in that directory); leave peer sessions' bsc/yosys/sby processes alone.
 | A, B/Zk, S-mode, CSRs, traps, F/D (313 checks) | forks `~/src/riscv-formal-{a,dev,s,fp}`; `fp-ext` contains `s-mode` | FP 60/60 and S 15/15 on 2026-10-21..23; **not run since** (uDTLB, lx50, SFENCE urgency, ...) |
 | `reg` / `pc_fwd` (deep) | `formal/run.sh deep` | pc_fwd PASS on E8d; reg stalls at step 75 (use `REG_DEPTH=74`) |
 | AXI4 protocol | vendored FVIP `formal/axi4_fvip` | Mem_Controller slave, AXI4_Deburster only |
-| Fabrics, MMIO slaves, SPI, RegBus, Video_DVI, SoC reset | none | **no formal** |
+| Fabrics, MMIO slaves, SPI, RegBus, SoC reset | none | **no formal** |
+| Video_DVI (system side) | `formal/video/` | **proved** (k-induction, single clock) |
 | Equivalence | yosys `equiv` script (`build/timing-exp/equiv_modules.sh`) | EQY not installed |
 | Lockstep | TestRIG (sail-riscv-rvfi) | D1-D3 and F/D 200+200 clean in October; not routine |
 | Compliance | `~/src/riscv-arch-test`, `~/src/riscof-venv` present | not run |
@@ -55,6 +56,11 @@ reset, and the reset sequence completes whenever the slaves are fair (liveness).
 - `Video_DVI.v`: reset values that fb_test reads; read FSM always completes in 5 cycles; bank
   select one-hot; last bank bounds; writes dropped past the backed RAM; the two clock domains
   with `multiclock on`: MODE through the two-flop synchronizer, banks written only on sys clk.
+  **Done 2026-11-06 (single clock): `formal/video/`, unbounded by k-induction** (depth 10,
+  seconds): reg-bus device contract (write ack 1 cycle, read 5, one-cycle pulse), a symbolic
+  pixel word / palette entry / MODE read back what was written, unbacked reads 0, control
+  registers. 36-word geometry (same banks and muxes); `mutate.sh` checks 3 injected bugs fail.
+  Open: multiclock, and the scan-out side.
 - `AXI4_SPI`: FIFO bounds, CS HOLD semantics (FE310: a *different* value releases HOLD),
   mode 0/3 clock phase, no lost TX byte.
 - `Sdram_Controller` raw port (memlat plan 4(d)): credit <= 8, chunks in order, refresh

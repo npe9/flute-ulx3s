@@ -31,7 +31,11 @@ module video_fb_fv (
                   .rb_wdata (rb_wdata), .rb_wstrb (rb_wstrb),
                   .rb_ack (rb_ack), .rb_rdata (rb_rdata),
                   .pclk (clk), .tmds_r (tr), .tmds_g (tg), .tmds_b (tb), .ptog (ptog),
-                  .dbg_rgb (dbg_rgb), .dbg_de (dbg_de), .dbg_hs (dbg_hs), .dbg_vs (dbg_vs));
+                  .dbg_rgb (dbg_rgb), .dbg_de (dbg_de), .dbg_hs (dbg_hs), .dbg_vs (dbg_vs),
+                  .f_sw (sw), .f_sp (sp), .f_word (f_word), .f_pal (f_pal), .f_mode (f_mode));
+    wire [31:0] f_word;
+    wire [23:0] f_pal;
+    wire [2:0]  f_mode;
 
     // ---------------- bridge contract (assumptions) ----------------
     reg past_valid_q = 1'b0;
@@ -134,6 +138,18 @@ module video_fb_fv (
     // reads of the rest of the window (0x800-0xFFF) return 0
     always @(*) if (!init && rb_ack && !rb_we && !is_fb && rb_addr[11])
         assert (rb_rdata == 32'b0);
+
+    // ---------------- invariants (what makes the prove task inductive) ----------------
+    // Pixel RAM writes land the cycle after the ack, with the shadow.  Palette and MODE
+    // writes land at the take, one cycle before the shadow: skip that ack cycle.
+    wire ack_pal  = rb_ack && rb_we && hit_sp;
+    wire ack_mode = rb_ack && rb_we && is_ctl && rb_addr[9:2] == 8'h01 && rb_wstrb[0];
+    always @(*) if (!init) begin
+        for (b = 0; b < 4; b = b + 1)
+            if (known[b]) assert (f_word[8*b +: 8] == shadow[8*b +: 8]);
+        if (!ack_pal)  assert (f_pal  == pshadow);
+        if (!ack_mode) assert (f_mode == mshadow);
+    end
 
     // ---------------- reachability ----------------
     always @(*) if (!init) begin

@@ -49,6 +49,16 @@ module video_fb #(
     output reg         dbg_de,
     output reg         dbg_hs,
     output reg         dbg_vs
+`ifdef FORMAL
+    ,
+    // formal/video: the harness's symbolic pixel word and palette index, and the state it
+    // keeps invariants on (an unbounded proof needs the RAM contents, not only read-backs)
+    input  wire [15:0] f_sw,
+    input  wire [7:0]  f_sp,
+    output wire [31:0] f_word,
+    output wire [23:0] f_pal,
+    output wire [2:0]  f_mode
+`endif
 );
     // ------------------------------------------------------------
     // Memories
@@ -121,6 +131,11 @@ module video_fb #(
     wire [32*NBANK-1:0] fbb;       // system side, per bank, one cycle after the RAM read
     wire [32*NBANK-1:0] pqb;       // pixel side, per bank, the RAM read
     genvar gb, gl;
+`ifdef FORMAL
+    wire [32*NBANK-1:0] fw;
+    assign f_word = fw[32*f_sw[15:BANK_BITS] +: 32];
+    assign f_pal  = pal[f_sp];
+`endif
     generate
         for (gb = 0; gb < NBANK; gb = gb + 1) begin : fbg
             localparam WORDS = (gb == NBANK - 1) ? FB_WORDS - gb * BANK_WORDS : BANK_WORDS;
@@ -136,6 +151,9 @@ module video_fb #(
                 always @(posedge pclk) pq <= mem[pa[BANK_BITS-1:0]];
                 assign fbb[32*gb + 8*gl +: 8] = qq;
                 assign pqb[32*gb + 8*gl +: 8] = pq;
+`ifdef FORMAL
+                assign fw[32*gb + 8*gl +: 8] = mem[f_sw[BANK_BITS-1:0]];
+`endif
             end
         end
     endgenerate
@@ -149,6 +167,9 @@ module video_fb #(
     end
 
     reg  [2:0]  mode;
+`ifdef FORMAL
+    assign f_mode = mode;
+`endif
     reg  [31:0] frame;
     reg         in_vblank;
     reg  [2:0]  vtog_s;
