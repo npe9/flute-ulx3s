@@ -1,0 +1,28 @@
+[tasks]
+bmc
+prove
+cover
+
+[options]
+bmc: mode bmc
+bmc: depth 40
+prove: mode prove
+cover: mode cover
+cover: depth 60
+
+[engines]
+bmc: smtbmc boolector
+prove: abc pdr
+cover: smtbmc boolector
+
+[script]
+read_verilog -D BSV_NO_INITIAL_BLOCKS FIFO2.v FIFO1.v
+read_verilog -D BSV_NO_INITIAL_BLOCKS mkAXI4_SPI.v
+read_verilog -formal -sv spi_fv.sv
+prep -top spi_fv
+
+[files]
+/Users/npe/src/bsc/inst/lib/Verilog/FIFO2.v
+/Users/npe/src/bsc/inst/lib/Verilog/FIFO1.v
+../../build/formal-spi/v/mkAXI4_SPI.v
+spi_fv.sv

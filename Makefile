@@ -436,6 +436,15 @@ clean:
 # formal-regbus-verilog: mkAXI4_RegBus alone, for formal/regbus (same flags as the SoC build;
 # REGBUS_SRC lets formal/regbus/mutate.sh build mutants).
 REGBUS_SRC ?= src/AXI4_RegBus.bsv
+# formal-spi-verilog: mkAXI4_SPI alone, for formal/spi (SPI_SRC lets formal/spi/mutate.sh build mutants).
+SPI_SRC ?= src/AXI4_SPI.bsv
+.PHONY: formal-spi-verilog
+formal-spi-verilog:
+	mkdir -p $(BUILD)/formal-spi/bsc $(BUILD)/formal-spi/v
+	$(BSC) -u -verilog -g mkAXI4_SPI $(BSC_FLAGS) $(DEFINES) -D FORMAL \
+	    -p $(BSC_PATH) -bdir $(BUILD)/formal-spi/bsc -vdir $(BUILD)/formal-spi/v \
+	    $(SPI_SRC) > $(BUILD)/formal-spi/bsc.log 2>&1 || { tail -20 $(BUILD)/formal-spi/bsc.log; exit 1; }
+
 .PHONY: formal-regbus-verilog
 formal-regbus-verilog:
 	mkdir -p $(BUILD)/formal-regbus/bsc $(BUILD)/formal-regbus/v

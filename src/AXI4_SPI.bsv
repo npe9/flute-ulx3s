@@ -54,6 +54,23 @@ interface AXI4_SPI_IFC;
    (* always_ready *)   method Bit #(2) cs_n;
    (* always_enabled *) method Action   miso0 (Bit #(1) v);
    (* always_enabled *) method Action   miso1 (Bit #(1) v);
+`ifdef FORMAL
+   // formal/spi: state the harness aligns frames with (the checked ends are the pins and the bus)
+   (* always_ready *) method Bit #(4)  f_tx_level;
+   (* always_ready *) method Bit #(4)  f_rx_level;
+   (* always_ready *) method Bool      f_busy;
+   (* always_ready *) method Bit #(32) f_csid;
+   (* always_ready *) method Bit #(2)  f_csmode;
+   (* always_ready *) method Bit #(2)  f_csdef;
+   (* always_ready *) method Bit #(2)  f_sckmode;
+   (* always_ready *) method Bit #(1)  f_endian;
+   (* always_ready *) method Bit #(1)  f_dir;
+   (* always_ready *) method Bit #(12) f_sckdiv;
+   (* always_ready *) method Maybe #(Bit #(8)) f_tx_enq;     // TXDATA byte entering the FIFO
+   (* always_ready *) method Bool      f_frame_end;
+   (* always_ready *) method Maybe #(Bit #(8)) f_rx_push;    // received byte entering the RX FIFO
+   (* always_ready *) method Maybe #(Bit #(8)) f_rx_pop;     // RXDATA read returning a byte
+`endif
 endinterface
 
 // ================================================================
@@ -123,6 +140,13 @@ module mkAXI4_SPI (AXI4_SPI_IFC);
    Bool cs_sel1 = (rg_csid == 1);
    Bit #(1) miso_q = cs_sel1 ? rg_miso1_q : rg_miso0_q;
 
+`ifdef FORMAL
+   RWire #(Bit #(8)) rw_tx_enq    <- mkRWire;
+   PulseWire         pw_frame_end <- mkPulseWire;
+   RWire #(Bit #(8)) rw_rx_push   <- mkRWire;
+   RWire #(Bit #(8)) rw_rx_pop    <- mkRWire;
+`endif
+
    // ================================================================
    // Engine: one rule, fires every cycle
 
@@ -188,9 +212,15 @@ module mkAXI4_SPI (AXI4_SPI_IFC);
          else begin
             // tail: frame done
             busy = False;
+`ifdef FORMAL
+            pw_frame_end.send;
+`endif
             if ((rg_f_dir == 0) && (rx_level != 8)) begin
                v_rx [rx_wp [2:0]] <= ((rg_f_endian == 1) ? fv_rev8 (sh_rx) : sh_rx);
                rx_wp = rx_wp + 1;
+`ifdef FORMAL
+               rw_rx_push.wset ((rg_f_endian == 1) ? fv_rev8 (sh_rx) : sh_rx);
+`endif
             end
          end
       end
@@ -276,6 +306,9 @@ module mkAXI4_SPI (AXI4_SPI_IFC);
             'h48: if (tx_level != 8) begin
                      v_tx [rg_tx_wp [2:0]] <= w [7:0];
                      rg_tx_wp <= rg_tx_wp + 1;
+`ifdef FORMAL
+                     rw_tx_enq.wset (w [7:0]);
+`endif
                   end
             'h50: rg_txmark  <= w [2:0];
             'h54: rg_rxmark  <= w [2:0];
@@ -309,6 +342,9 @@ module mkAXI4_SPI (AXI4_SPI_IFC);
          else begin
             v = zeroExtend (v_rx [rg_rx_rp [2:0]]);
             rg_rx_rp <= rg_rx_rp + 1;
+`ifdef FORMAL
+            rw_rx_pop.wset (v_rx [rg_rx_rp [2:0]]);
+`endif
          end
       end
       else
@@ -347,6 +383,22 @@ module mkAXI4_SPI (AXI4_SPI_IFC);
    method Action miso1 (Bit #(1) v);
       rg_miso1_q <= v;
    endmethod
+`ifdef FORMAL
+   method Bit #(4)  f_tx_level  = tx_level;
+   method Bit #(4)  f_rx_level  = rx_level;
+   method Bool      f_busy      = rg_busy;
+   method Bit #(32) f_csid      = rg_csid;
+   method Bit #(2)  f_csmode    = rg_csmode;
+   method Bit #(2)  f_csdef     = rg_csdef;
+   method Bit #(2)  f_sckmode   = rg_sckmode;
+   method Bit #(1)  f_endian    = rg_fmt_endian;
+   method Bit #(1)  f_dir       = rg_fmt_dir;
+   method Bit #(12) f_sckdiv    = rg_sckdiv;
+   method Maybe #(Bit #(8)) f_tx_enq  = rw_tx_enq.wget;
+   method Bool      f_frame_end = pw_frame_end;
+   method Maybe #(Bit #(8)) f_rx_push = rw_rx_push.wget;
+   method Maybe #(Bit #(8)) f_rx_pop  = rw_rx_pop.wget;
+`endif
 endmodule
 
 endpackage
