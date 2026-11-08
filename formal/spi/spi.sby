@@ -1,24 +1,30 @@
 [tasks]
-bmc
-prove
-cover
+bmc full
+prove_k
+prove_ctl
+cover full
 
 [options]
 bmc: mode bmc
 bmc: depth 40
-prove: mode prove
+prove_ctl: mode prove
+prove_k: mode prove
+prove_k: depth 6
 cover: mode cover
 cover: depth 60
 
 [engines]
 bmc: smtbmc boolector
-prove: abc pdr
+prove_ctl: abc pdr
+prove_k: smtbmc boolector
 cover: smtbmc boolector
 
 [script]
 read_verilog -D BSV_NO_INITIAL_BLOCKS FIFO2.v FIFO1.v
 read_verilog -D BSV_NO_INITIAL_BLOCKS mkAXI4_SPI.v
-read_verilog -formal -sv spi_fv.sv
+full: read_verilog -formal -sv spi_fv.sv
+prove_ctl: read_verilog -formal -sv -D NO_DATA spi_fv.sv
+prove_k: read_verilog -formal -sv -D DATA_ONLY spi_fv.sv
 prep -top spi_fv
 
 [files]

@@ -70,6 +70,20 @@ interface AXI4_SPI_IFC;
    (* always_ready *) method Bool      f_frame_end;
    (* always_ready *) method Maybe #(Bit #(8)) f_rx_push;    // received byte entering the RX FIFO
    (* always_ready *) method Maybe #(Bit #(8)) f_rx_pop;     // RXDATA read returning a byte
+   // for the data invariants (k-induction)
+   (* always_ready *) method Bit #(4)  f_tx_rp;
+   (* always_ready *) method Bit #(4)  f_rx_rp;
+   (* always_ready *) method Bit #(64) f_v_tx;
+   (* always_ready *) method Bit #(64) f_v_rx;
+   (* always_ready *) method Bit #(5)  f_edge;
+   (* always_ready *) method Bit #(12) f_cnt;
+   (* always_ready *) method Bit #(12) f_f_div;
+   (* always_ready *) method Bit #(8)  f_sh_tx;
+   (* always_ready *) method Bit #(8)  f_sh_rx;
+   (* always_ready *) method Bit #(1)  f_f_pha;
+   (* always_ready *) method Bit #(1)  f_f_endian;
+   (* always_ready *) method Bit #(1)  f_f_dir;
+   (* always_ready *) method Bit #(1)  f_miso_q;
 `endif
 endinterface
 
@@ -398,6 +412,19 @@ module mkAXI4_SPI (AXI4_SPI_IFC);
    method Bool      f_frame_end = pw_frame_end;
    method Maybe #(Bit #(8)) f_rx_push = rw_rx_push.wget;
    method Maybe #(Bit #(8)) f_rx_pop  = rw_rx_pop.wget;
+   method Bit #(4)  f_tx_rp     = rg_tx_rp;
+   method Bit #(4)  f_rx_rp     = rg_rx_rp;
+   method Bit #(64) f_v_tx      = pack (readVReg (v_tx));
+   method Bit #(64) f_v_rx      = pack (readVReg (v_rx));
+   method Bit #(5)  f_edge      = rg_edge;
+   method Bit #(12) f_cnt       = rg_cnt;
+   method Bit #(12) f_f_div     = rg_f_div;
+   method Bit #(8)  f_sh_tx     = rg_sh_tx;
+   method Bit #(8)  f_sh_rx     = rg_sh_rx;
+   method Bit #(1)  f_f_pha     = rg_f_pha;
+   method Bit #(1)  f_f_endian  = rg_f_endian;
+   method Bit #(1)  f_f_dir     = rg_f_dir;
+   method Bit #(1)  f_miso_q    = miso_q;
 `endif
 endmodule
 

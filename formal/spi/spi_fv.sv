@@ -12,6 +12,10 @@
 //   AXI4:    B/R held until accepted, one response per request, rlast.
 // Environment simplifications: SCKDIV <= 1 while a frame is queued or running (frame length),
 // SCKMODE / FMT change only while idle (the driver's behaviour; the frame latches them).
+// Proofs (spi.sby): prove_ctl (abc pdr, -D NO_DATA) FIFOs, CS, HOLD, AXI; prove_k (k-induction,
+// k=6, -D DATA_ONLY) the data path with the invariants below, assuming the FIFO bounds prove_ctl
+// proved (prove_ctl assumes nothing from it, so this is not circular).  The RX end is checked at
+// the RXDATA pop (f_rx_pop), not on the R channel; the lane mapping is covered by Tb_AXI4_SPI.
 module spi_fv (
     input wire        clk,
     input wire        awvalid, input wire [3:0] awid, input wire [63:0] awaddr,
@@ -36,6 +40,8 @@ module spi_fv (
     wire [3:0] tx_level, rx_level; wire busy, endian, dir, frame_end;
     wire [31:0] csid; wire [1:0] csmode, csdef, sckmode; wire [11:0] sckdiv;
     wire [8:0] tx_enq, rx_push, rx_pop;
+    wire [3:0] tx_rp, rx_rp; wire [63:0] v_tx, v_rx; wire [4:0] edge_n;
+    wire [11:0] cnt, f_div; wire [7:0] sh_tx, sh_rx; wire r_pha, r_end, r_dir, miso_q;
 
     mkAXI4_SPI dut (
         .CLK (clk), .RST_N (rst_n),
@@ -60,7 +66,10 @@ module spi_fv (
         .f_tx_level (tx_level), .f_rx_level (rx_level), .f_busy (busy), .f_csid (csid),
         .f_csmode (csmode), .f_csdef (csdef), .f_sckmode (sckmode), .f_endian (endian),
         .f_dir (dir), .f_sckdiv (sckdiv), .f_tx_enq (tx_enq), .f_frame_end (frame_end),
-        .f_rx_push (rx_push), .f_rx_pop (rx_pop));
+        .f_rx_push (rx_push), .f_rx_pop (rx_pop),
+        .f_tx_rp (tx_rp), .f_rx_rp (rx_rp), .f_v_tx (v_tx), .f_v_rx (v_rx), .f_edge (edge_n),
+        .f_cnt (cnt), .f_f_div (f_div), .f_sh_tx (sh_tx), .f_sh_rx (sh_rx),
+        .f_f_pha (r_pha), .f_f_endian (r_end), .f_f_dir (r_dir), .f_miso_q (miso_q));
 
     wire idle = !busy && tx_level == 0;
     wire start = !busy && tx_level != 0;          // the engine starts a frame this cycle
@@ -78,11 +87,17 @@ module spi_fv (
     end
 
     // ---------------- FIFOs ----------------
+`ifdef DATA_ONLY
+    // proved by prove_ctl, which assumes nothing from the data proof
+    always @(*) begin assume (tx_level <= 4'd8); assume (rx_level <= 4'd8); end
+`else
     always @(*) if (pv) begin
         assert (tx_level <= 4'd8);
         assert (rx_level <= 4'd8);
     end
+`endif
 
+`ifndef DATA_ONLY
     // ---------------- chip selects ----------------
     // cs_n is registered from the previous cycle's state
     always @(posedge clk) if (pv2) begin
@@ -103,6 +118,7 @@ module spi_fv (
             assert (cs_n[0] == !$past(csdef[0]));
     end
 
+`endif
     // ---------------- data: one tracked byte, TX pin and RX FIFO ----------------
     localparam ST_IDLE = 0, ST_QUEUED = 1, ST_FRAME = 2, ST_RXQ = 3, ST_DONE = 4;
     reg [2:0] st = ST_IDLE;
@@ -150,6 +166,7 @@ module spi_fv (
         default: ;
         endcase
     end
+`ifndef NO_DATA
     always @(*) if (pv) begin
         if (st == ST_QUEUED) assert (ahead < tx_level);
         if (st == ST_FRAME && frame_end) begin
@@ -161,7 +178,54 @@ module spi_fv (
         if (st == ST_RXQ && rx_pop[8] && ahead == 0) assert (rx_pop[7:0] == tb);
         if (st == ST_RXQ) assert (ahead < rx_level);
     end
+`endif
 
+`ifndef NO_DATA
+    // ---------------- data invariants: make the data asserts inductive at low depth ----------------
+    wire [7:0] wire_b  = f_end ? {tb[0],tb[1],tb[2],tb[3],tb[4],tb[5],tb[6],tb[7]} : tb;
+    wire [3:0] e_half  = edge_n[4:1];                         // complete SCK periods
+    wire [3:0] n_smp   = f_pha ? e_half : (edge_n[4:1] + {3'b0, edge_n[0]});   // sampling edges so far
+    wire [2:0] tx_slot = tx_rp[2:0] + ahead[2:0];
+    wire [2:0] rx_slot = rx_rp[2:0] + ahead[2:0];
+    wire [3:0] e_m1    = e_half - 4'd1;
+    wire [3:0] n_cap   = f_pha ? ((edge_n == 0) ? 4'd0 : (edge_n[0] ? e_half : e_m1)) : e_half;
+    always @(*) if (pv) begin
+        assert (rcnt >= 2'd2);
+        // every frame, tracked or not: SCK follows the edge count and idles at CPOL
+        if (busy) begin
+            assert (edge_n <= 5'd16);
+            assert (sclk == (sckmode[1] ^ edge_n[0]));
+        end
+        if (start) assert (sclk == sckmode[1]);
+        if (st == ST_QUEUED) assert (v_tx[8*tx_slot +: 8] == tb);
+        if (st == ST_RXQ)    assert (v_rx[8*rx_slot +: 8] == tb);
+        if (st == ST_FRAME) begin
+            assert (busy);
+            assert (edge_n <= 5'd16);
+            assert (r_pha == f_pha && r_end == f_end && r_dir == f_dir);
+            assert (sckmode[1] == f_pol && sckmode[0] == f_pha);
+            assert (endian == f_end && dir == f_dir);
+            assert (sclk == (f_pol ^ edge_n[0]));
+            assert (f_div <= 12'd1 && cnt <= f_div);
+            assert (ndec_n == n_smp);
+            assert ((dec_n & ((16'd1 << ndec_n) - 16'd1)) == (wire_b >> (4'd8 - ndec_n)));
+            // the TX shifter: bits still to go
+            if (!f_pha) assert (sh_tx == (wire_b << e_half));
+            else        assert (sh_tx == (wire_b << (e_half + {3'b0, edge_n[0]})));
+            // MOSI: the bit on the wire for this half period
+            if (!f_pha && edge_n < 5'd16) assert (mosi == wire_b[3'd7 - e_half[2:0]]);
+            if (f_pha && edge_n[0])       assert (mosi == wire_b[3'd7 - e_half[2:0]]);
+            if (f_pha && !edge_n[0] && edge_n != 0) begin
+                assert (mosi   == wire_b[3'd7 - e_m1[2:0]]);
+                assert (miso_q == wire_b[3'd7 - e_m1[2:0]]);    // the capture about to happen
+            end
+            if (!f_pha && edge_n[0]) assert (miso_q == wire_b[3'd7 - e_half[2:0]]);
+            // the RX shifter: bits captured so far (loopback)
+            assert ((sh_rx & ((16'd1 << n_cap) - 16'd1)) == (wire_b >> (4'd8 - n_cap)));
+        end
+    end
+`endif
+`ifndef DATA_ONLY
     // ---------------- AXI4 ----------------
     always @(posedge clk) if (pv) begin
         if ($past(bvalid && !bready)) assert (bvalid && bid == $past(bid) && bresp == $past(bresp));
@@ -182,6 +246,7 @@ module spi_fv (
         if (bvalid) assert (n_b != n_aw);
         if (rvalid) assert (n_r != n_ar);
     end
+`endif
 
     // ---------------- reachability ----------------
     always @(*) if (pv) begin

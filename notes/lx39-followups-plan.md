@@ -17,7 +17,7 @@ in that directory); leave peer sessions' bsc/yosys/sby processes alone.
 | `reg` / `pc_fwd` (deep) | `formal/run.sh deep` | pc_fwd PASS on E8d; reg stalls at step 75 (use `REG_DEPTH=74`) |
 | AXI4 protocol | vendored FVIP `formal/axi4_fvip` | Mem_Controller slave, AXI4_Deburster only |
 | Fabrics, MMIO slaves, SoC reset | none | **no formal** |
-| AXI4_SPI | `formal/spi/` | BMC depth 40 + covers + mutants; pdr pending |
+| AXI4_SPI | `formal/spi/` | **proved** (pdr + k-induction, SCKDIV <= 1) |
 | AXI4_RegBus bridge | `formal/regbus/` | **proved** (pdr, with and without reset); found a lost-ack bug |
 | Video_DVI (system side) | `formal/video/` | **proved** (k-induction, single clock) |
 | Equivalence | yosys `equiv` script (`build/timing-exp/equiv_modules.sh`) | EQY not installed |
@@ -74,14 +74,18 @@ reset, and the reset sequence completes whenever the slaves are fair (liveness).
   Open: multiclock, and the scan-out side.
 - `AXI4_SPI`: FIFO bounds, CS HOLD semantics (FE310: a *different* value releases HOLD),
   mode 0/3 clock phase, no lost TX byte.
-  **BMC 2026-11-06: `formal/spi/`** (depth 40, seconds; covers reach the RXDATA read-back at
-  step 28). Checked: TX/RX levels <= 8; a CS asserts only when selected and CSMODE != OFF (the
-  flash only for CSID 1); every SCK edge of a frame has the selected CS asserted; HOLD survives
-  same-value CSID/CSMODE/CSDEF rewrites; a tracked TXDATA byte goes out on MOSI (decoded
-  at the pins in the frame's CPOL/CPHA/bit order) and comes back from RXDATA through the MISO
-  loopback in FIFO order; AXI B/R stability and response counts. The environment keeps SCKDIV
-  <= 1 while frames are queued and changes SCKMODE/FMT only when idle. `mutate.sh`: 4
-  injected bugs fail. No bugs found. Unbounded (pdr): pending.
+  **Done 2026-11-08: `formal/spi/`, unbounded.** `prove_ctl` (abc pdr, seconds): TX/RX levels
+  <= 8; a CS asserts only when selected and CSMODE != OFF (the flash only for CSID 1); every SCK
+  edge of a frame has the selected CS asserted; HOLD survives same-value CSID/CSMODE/CSDEF
+  rewrites; AXI B/R stability and response counts. `prove_k` (k-induction, k=6, about a second, with
+  invariants on FIFO slots, shifters and edge count): a tracked TXDATA byte goes out on MOSI, decoded
+  at the pins in the frame's CPOL/CPHA/bit order, and comes back through the MISO loopback in
+  FIFO order. It assumes the FIFO bounds from prove_ctl, which assumes nothing from it. Limits: the
+  environment keeps SCKDIV <= 1 while frames are queued and changes SCKMODE/FMT only when idle;
+  FMT.len and proto are stored but not modelled; the RX end is the RXDATA pop, not the R channel
+  (lanes: Tb_AXI4_SPI). `mutate.sh`: 7 injected bugs each give a BMC counterexample and stop the proof
+  passing; 4 covers reached. Plain pdr on the data path did not converge (frame 110, 30 min). No
+  bugs found.
 - `Sdram_Controller` raw port (memlat plan 4(d)): credit <= 8, chunks in order, refresh
   interval bound (the three refresh/init bugs were found only by the sim checker).
 - MMIO slaves: UART, CLINT, PLIC, SoC_Info, GPIO with FVIP (AXI4LITE mode where they are Lite).
