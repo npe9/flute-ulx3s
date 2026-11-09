@@ -445,6 +445,16 @@ formal-spi-verilog:
 	    -p $(BSC_PATH) -bdir $(BUILD)/formal-spi/bsc -vdir $(BUILD)/formal-spi/v \
 	    $(SPI_SRC) > $(BUILD)/formal-spi/bsc.log 2>&1 || { tail -20 $(BUILD)/formal-spi/bsc.log; exit 1; }
 
+# formal-sdram-verilog: mkSdram_Controller at 50 MHz behind a synthesized wrapper, short power-up pause.
+SDRAM_SRC ?= src/Sdram_Controller.bsv
+.PHONY: formal-sdram-verilog
+formal-sdram-verilog:
+	mkdir -p $(BUILD)/formal-sdram/bsc $(BUILD)/formal-sdram/v $(BUILD)/formal-sdram/src
+	cp $(SDRAM_SRC) $(BUILD)/formal-sdram/src/Sdram_Controller.bsv
+	$(BSC) -u -verilog -g mkSdramFormal $(BSC_FLAGS) $(DEFINES) -D FORMAL -D FORMAL_SHORT_PWR \
+	    -p $(abspath $(BUILD))/formal-sdram/src:$(CURDIR)/formal/sdram:$(BSC_PATH) -bdir $(BUILD)/formal-sdram/bsc -vdir $(BUILD)/formal-sdram/v \
+	    formal/sdram/SdramFormal.bsv > $(BUILD)/formal-sdram/bsc.log 2>&1 || { tail -20 $(BUILD)/formal-sdram/bsc.log; exit 1; }
+
 .PHONY: formal-regbus-verilog
 formal-regbus-verilog:
 	mkdir -p $(BUILD)/formal-regbus/bsc $(BUILD)/formal-regbus/v

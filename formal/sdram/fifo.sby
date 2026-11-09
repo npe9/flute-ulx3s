@@ -1,0 +1,26 @@
+[tasks]
+prove_fifo
+prove_fifo_tooweak
+cover
+
+[options]
+prove_fifo: mode prove
+prove_fifo_tooweak: mode prove
+cover: mode cover
+cover: depth 30
+
+[engines]
+prove_fifo: abc pdr
+prove_fifo_tooweak: abc pdr
+cover: smtbmc boolector
+
+[script]
+read_verilog -D BSV_NO_INITIAL_BLOCKS SizedFIFO.v
+prove_fifo: read_verilog -formal -sv fifo_fv.sv
+cover: read_verilog -formal -sv fifo_fv.sv
+prove_fifo_tooweak: read_verilog -formal -sv -D CAP=9 fifo_fv.sv
+prep -top fifo_fv
+
+[files]
+/Users/npe/src/bsc/inst/lib/Verilog/SizedFIFO.v
+fifo_fv.sv

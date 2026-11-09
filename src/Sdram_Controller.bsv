@@ -81,6 +81,22 @@ interface Sdram_Controller_IFC;
    (* always_ready *) method Bit #(16) sdram_dq_out;
    (* always_ready *) method Bit #(1)  sdram_dq_oe;
    (* always_enabled *) method Action sdram_dq_in (Bit #(16) v);
+`ifdef FORMAL
+   // formal/sdram: the latched request and the credit state (the checked ends are the pins)
+   (* always_ready *) method Raw_Mem_Req f_req;
+   (* always_ready *) method Bit #(4)    f_chunks_in_flight;
+   (* always_ready *) method Bool        f_rsps_notFull;
+   (* always_ready *) method Maybe #(Bit #(64)) f_rsp_enq;
+   (* always_ready *) method Bool        f_cap_chunk;     // this cycle's capture completes a chunk
+   (* always_ready *) method Bit #(5)    f_state;
+   (* always_ready *) method Bit #(16)   f_ref_cnt;
+   (* always_ready *) method Bit #(3)    f_beat;
+   (* always_ready *) method Bit #(2)    f_burst;
+   (* always_ready *) method Bit #(16)   f_wait;
+   (* always_ready *) method Bit #(2)    f_burst_last;
+   (* always_ready *) method Bit #(4)    f_bmask;
+   (* always_ready *) method Bit #(48)   f_hw;
+`endif
 endinterface
 
 // ================================================================
@@ -122,7 +138,11 @@ endfunction
 
 module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
 
+`ifdef FORMAL_SHORT_PWR
+   Integer t_powerup = 8;                // formal build: the pause is a plain countdown
+`else
    Integer t_powerup = clk_hz / 5000;    // 200 us
+`endif
    // tRFC >= 66 ns (and the init gaps tRP/tRFC/tMRD, which it covers), in
    // clocks, at least 2: 2 at 25 MHz (80 ns), 3 at the 32.14 MHz PLL clock
    // (2 would be 62 ns).  Refresh interval refresh_div (98 clocks) stays
@@ -161,6 +181,9 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
    Reg #(Bool) rg_inited     <- mkReg (False);
    Reg #(Bool) rg_cmd_valid  <- mkReg (False);
    PulseWire   pw_cmd        <- mkPulseWire;     // a command is issued this cycle
+`ifdef FORMAL
+   RWire #(Bit #(64)) rw_rsp_enq <- mkRWire;
+`endif
 
    FIFOF #(Raw_Mem_Req)  f_reqs <- mkSizedFIFOF (4);
    // Read chunks.  Credits: rg_chunks_issued - rg_chunks_taken chunks are
@@ -384,6 +407,9 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
          if (rg_beat [1:0] == 3) begin
             Bit #(64) chunk = { rg_dq_in, rg_hw [2], rg_hw [1], rg_hw [0] };
             f_rsps.enq (chunk);
+`ifdef FORMAL
+            rw_rsp_enq.wset (chunk);
+`endif
 `ifdef SDCAP_PROBES
             if (rg_req.line == 0)
                $display ("%0d SDCAP burst=%0d beat=%0d chunk=%0h", 0, rg_burst, rg_beat, chunk);
@@ -492,6 +518,21 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
    method Action sdram_dq_in (Bit #(16) v);
       rg_dq_in <= v;
    endmethod
+`ifdef FORMAL
+   method Raw_Mem_Req f_req              = rg_req;
+   method Bit #(4)    f_chunks_in_flight = chunks_in_flight;
+   method Bool        f_rsps_notFull     = f_rsps.notFull;
+   method Maybe #(Bit #(64)) f_rsp_enq   = rw_rsp_enq.wget;
+   method Bool        f_cap_chunk        = (rg_state == ST_RD_CAP) && (rg_wait == 0) && (rg_beat [1:0] == 3);
+   method Bit #(5)    f_state            = zeroExtend (pack (rg_state));
+   method Bit #(16)   f_ref_cnt          = rg_ref_cnt;
+   method Bit #(3)    f_beat             = rg_beat;
+   method Bit #(2)    f_burst            = rg_burst;
+   method Bit #(16)   f_wait             = rg_wait;
+   method Bit #(2)    f_burst_last       = rg_burst_last;
+   method Bit #(4)    f_bmask            = rg_bmask;
+   method Bit #(48)   f_hw               = { rg_hw [2], rg_hw [1], rg_hw [0] };
+`endif
 endmodule
 
 endpackage

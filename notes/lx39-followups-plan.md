@@ -72,6 +72,27 @@ reset, and the reset sequence completes whenever the slaves are fair (liveness).
   pixel word / palette entry / MODE read back what was written, unbacked reads 0, control
   registers. 36-word geometry (same banks and muxes); `mutate.sh` checks 3 injected bugs fail.
   Open: multiclock, and the scan-out side.
+- `Sdram_Controller`: **Done 2026-11-08: `formal/sdram/`, unbounded except as noted** (`run.sh`
+  runs all of it, seconds to a minute a group; pdr gave up after an hour on refresh and decode,
+  and k-induction with a ranking function and FSM-to-pin invariants does them in seconds).
+  Init order, one MRS, state at the MRS (pdr). JEDEC timings in 50 MHz clocks: tRP/tRAS/tRC/tRRD/tDAL (tRCD is
+  one clock by construction, no assert), no command truncating a burst, REF only with all banks idle (pdr). Read credit: `chunks in flight <= 8`,
+  capture never stalled, every chunk at READ+6 then every 4 clocks (k-induction). Refresh gap
+  <= 150 cycles at every point after the MRS, whatever the requests do (k-induction). Commands
+  match the request: row, bank, column, burst order, gapless, auto-precharge on the last (k-induction).
+  Read and write data, byte masks (k-induction, k=12). Assume-guarantee chain, no cycles, listed
+  in `run.sh`; the FIFO contract is `fifo.sby` on bsc's SizedFIFO at width 1 (control does not
+  read the data). `mutate.sh`: 14 injected bugs, each stops its proof, and it requires the same
+  task to pass unmutated first.
+  Bounded, or assumed and not proved: the refresh gap at the MRS is a BMC on the
+  `FORMAL_SHORT_PWR` build, exhaustive because init takes no inputs, with the real 200 us pause
+  covered by argument only (ref_cnt reaches 1, the gap is the few cycles since the last init REF).
+  Request shapes are assumed of Mem_Controller (not proved of it). Refresh is stated for the
+  50 MHz divider; SDRAM electrical timing and CAS capture delay are not modelled (the capture
+  offset comes from `t_cas_first`, sim-validated). The joint check with no hand-offs is only a
+  bound: `bmc` (boolector, with data) reached step 85 in about a minute and got no further in a
+  30-minute limit; `bmc_deep` (abc bmc3, no data) reached step 138 on an earlier harness and has
+  not been rerun on this one. `cover` reaches all its statements, including the MRS and a full-line read.
 - `AXI4_SPI`: FIFO bounds, CS HOLD semantics (FE310: a *different* value releases HOLD),
   mode 0/3 clock phase, no lost TX byte.
   **Done 2026-11-08: `formal/spi/`, unbounded.** `prove_ctl` (abc pdr, seconds): TX/RX levels
