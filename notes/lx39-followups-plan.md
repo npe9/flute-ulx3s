@@ -91,8 +91,8 @@ reset, and the reset sequence completes whenever the slaves are fair (liveness).
   50 MHz divider; SDRAM electrical timing and CAS capture delay are not modelled (the capture
   offset comes from `t_cas_first`, sim-validated). The joint check with no hand-offs is only a
   bound: `bmc` (boolector, with data) reached step 85 in about a minute and got no further in a
-  30-minute limit; `bmc_deep` (abc bmc3, no data) reached step 138 on an earlier harness and has
-  not been rerun on this one. `cover` reaches all its statements, including the MRS and a full-line read.
+  30-minute limit; `bmc_deep` (abc bmc3, no data) found nothing through frame 132 in a 1-hour limit
+  on this harness. `cover` reaches all its statements, including the MRS and a full-line read.
 - `AXI4_SPI`: FIFO bounds, CS HOLD semantics (FE310: a *different* value releases HOLD),
   mode 0/3 clock phase, no lost TX byte.
   **Done 2026-11-08: `formal/spi/`, unbounded.** `prove_ctl` (abc pdr, seconds): TX/RX levels
