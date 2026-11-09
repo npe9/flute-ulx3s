@@ -40,6 +40,13 @@ module sim_board (
     wire flash_csn, flash_mosi, flash_wpn, flash_holdn;
     wire flash_miso = 1'b1;    // erased flash: no boot image
 
+    // the I2C bus: pull-ups, and the board's RTC + EDID
+    wire gpdi_sda, gpdi_scl, i2c_slave_low;
+    pullup (gpdi_sda);
+    pullup (gpdi_scl);
+    assign gpdi_sda = i2c_slave_low ? 1'b0 : 1'bz;
+    i2c_slave_model i2c_slaves (.clk (clk), .scl (gpdi_scl), .sda (gpdi_sda), .sda_low (i2c_slave_low));
+
     ulx3s_top top (
         .CLK      (clk),
         .BTN1     (btn1),
@@ -62,6 +69,13 @@ module sim_board (
         .flash_miso  (flash_miso),
         .flash_wpn   (flash_wpn),
         .flash_holdn (flash_holdn),
+        .btn_pwr_n   (1'b1),
+        .btn_rest    (5'b0),
+        .sw          (4'b0101),
+        .gpdi_sda    (gpdi_sda),
+        .gpdi_scl    (gpdi_scl),
+        .audio_l     (),
+        .audio_r     (),
         .gpdi_dp     (),
         .sdram_clk   (sdram_clk_o),
         .sdram_cke   (sdram_cke),

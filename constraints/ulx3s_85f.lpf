@@ -137,3 +137,48 @@ IOBUF PORT "sdram_ba[*]" IO_TYPE=LVCMOS33 SLEWRATE=FAST ;
 IOBUF PORT "sdram_a[*]" IO_TYPE=LVCMOS33 SLEWRATE=FAST ;
 IOBUF PORT "sdram_dq[*]" IO_TYPE=LVCMOS33 SLEWRATE=FAST ;
 IOBUF PORT "sdram_dqm[*]" IO_TYPE=LVCMOS33 SLEWRATE=FAST ;
+
+# Board_IO: buttons, DIP switches, the I2C bus shared by the RTC and HDMI DDC.  Sites and pulls
+# from the board's official constraints (emard/ulx3s doc/constraints/ulx3s_v20.lpf).
+LOCATE COMP "btn_pwr_n"    SITE "D6" ;
+LOCATE COMP "btn_rest[0]"  SITE "T1" ;
+LOCATE COMP "btn_rest[1]"  SITE "R18" ;
+LOCATE COMP "btn_rest[2]"  SITE "V1" ;
+LOCATE COMP "btn_rest[3]"  SITE "U1" ;
+LOCATE COMP "btn_rest[4]"  SITE "H16" ;
+LOCATE COMP "sw[0]"        SITE "E8" ;
+LOCATE COMP "sw[1]"        SITE "D8" ;
+LOCATE COMP "sw[2]"        SITE "D7" ;
+LOCATE COMP "sw[3]"        SITE "E7" ;
+LOCATE COMP "gpdi_sda"     SITE "B19" ;
+LOCATE COMP "gpdi_scl"     SITE "E12" ;
+IOBUF  PORT "btn_pwr_n"    PULLMODE=UP   IO_TYPE=LVCMOS33 ;
+IOBUF  PORT "btn_rest[0]"  PULLMODE=DOWN IO_TYPE=LVCMOS33 ;
+IOBUF  PORT "btn_rest[1]"  PULLMODE=DOWN IO_TYPE=LVCMOS33 ;
+IOBUF  PORT "btn_rest[2]"  PULLMODE=DOWN IO_TYPE=LVCMOS33 ;
+IOBUF  PORT "btn_rest[3]"  PULLMODE=DOWN IO_TYPE=LVCMOS33 ;
+IOBUF  PORT "btn_rest[4]"  PULLMODE=DOWN IO_TYPE=LVCMOS33 ;
+IOBUF  PORT "sw[0]"        PULLMODE=DOWN IO_TYPE=LVCMOS33 ;
+IOBUF  PORT "sw[1]"        PULLMODE=DOWN IO_TYPE=LVCMOS33 ;
+IOBUF  PORT "sw[2]"        PULLMODE=DOWN IO_TYPE=LVCMOS33 ;
+IOBUF  PORT "sw[3]"        PULLMODE=DOWN IO_TYPE=LVCMOS33 ;
+IOBUF  PORT "gpdi_sda"     PULLMODE=UP IO_TYPE=LVCMOS33 DRIVE=4 ;
+IOBUF  PORT "gpdi_scl"     PULLMODE=UP IO_TYPE=LVCMOS33 DRIVE=4 ;
+
+# Audio jack DACs (src/Audio.v): official ulx3s_v20.lpf
+LOCATE COMP "audio_l[0]"   SITE "E4" ;
+IOBUF  PORT "audio_l[0]"   PULLMODE=NONE IO_TYPE=LVCMOS33 DRIVE=16 ;
+LOCATE COMP "audio_l[1]"   SITE "D3" ;
+IOBUF  PORT "audio_l[1]"   PULLMODE=NONE IO_TYPE=LVCMOS33 DRIVE=16 ;
+LOCATE COMP "audio_l[2]"   SITE "C3" ;
+IOBUF  PORT "audio_l[2]"   PULLMODE=NONE IO_TYPE=LVCMOS33 DRIVE=16 ;
+LOCATE COMP "audio_l[3]"   SITE "B3" ;
+IOBUF  PORT "audio_l[3]"   PULLMODE=NONE IO_TYPE=LVCMOS33 DRIVE=16 ;
+LOCATE COMP "audio_r[0]"   SITE "A3" ;
+IOBUF  PORT "audio_r[0]"   PULLMODE=NONE IO_TYPE=LVCMOS33 DRIVE=16 ;
+LOCATE COMP "audio_r[1]"   SITE "B5" ;
+IOBUF  PORT "audio_r[1]"   PULLMODE=NONE IO_TYPE=LVCMOS33 DRIVE=16 ;
+LOCATE COMP "audio_r[2]"   SITE "D5" ;
+IOBUF  PORT "audio_r[2]"   PULLMODE=NONE IO_TYPE=LVCMOS33 DRIVE=16 ;
+LOCATE COMP "audio_r[3]"   SITE "C5" ;
+IOBUF  PORT "audio_r[3]"   PULLMODE=NONE IO_TYPE=LVCMOS33 DRIVE=16 ;

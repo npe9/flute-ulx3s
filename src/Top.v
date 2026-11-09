@@ -30,6 +30,13 @@ module ulx3s_top(
     input  wire        flash_miso,  //   D1, V2
     output wire        flash_wpn,   //   write protect (held high), Y2
     output wire        flash_holdn, //   hold (held high), W1
+    input  wire        btn_pwr_n,   // BTN0, power button, active low, D6 (src/Board_IO.v)
+    input  wire [4:0]  btn_rest,    // FIRE2 T1, UP R18, DOWN V1, LEFT U1, RIGHT H16, active high
+    input  wire [3:0]  sw,          // DIP switches E8 D8 D7 E7
+    inout  wire        gpdi_sda,    // I2C shared by the RTC and HDMI DDC, open drain, B19
+    inout  wire        gpdi_scl,    //   E12
+    output wire [3:0]  audio_l,     // jack DACs (src/Audio.v), mute until software sets VOLUME
+    output wire [3:0]  audio_r,
     output wire [3:0]  gpdi_dp,     // DVI: blue A16, green A14, red A12, clock A17 (LVCMOS33D:
                                     // the _dn pins are driven as the complements)
     output wire        sdram_clk,   // F19
@@ -184,12 +191,39 @@ module ulx3s_top(
     wire        rb_valid, rb_we, rb_ack;
     wire [31:0] rb_addr, rb_wdata, rb_rdata;
     wire [3:0]  rb_wstrb;
+    // The bridge's devices.  Only mapped windows get here, so bits 24 (0xC1xx_xxxx) and 16
+    // (0xC001_xxxx) tell the video windows from the 0xC000_6000+ small devices.
+    wire        rb_sel_video = rb_addr[24] || rb_addr[16];
+    wire        rb_sel_audio = !rb_sel_video && (rb_addr[15:12] == 4'h9);
+    wire        video_ack, io_ack, audio_ack;
+    wire [31:0] video_rdata, io_rdata, audio_rdata;
+    assign rb_ack   = video_ack || io_ack || audio_ack;
+    assign rb_rdata = io_ack ? io_rdata : audio_ack ? audio_rdata : video_rdata;
+
+    audio audio_0 (
+        .clk(sys_clk), .rst(~rst_n),
+        .rb_valid(rb_valid && rb_sel_audio), .rb_we(rb_we), .rb_addr(rb_addr[11:0]),
+        .rb_wdata(rb_wdata), .rb_wstrb(rb_wstrb), .rb_ack(audio_ack), .rb_rdata(audio_rdata),
+        .audio_l(audio_l), .audio_r(audio_r)
+    );
+
+    wire i2c_scl_low, i2c_sda_low;
+    assign gpdi_scl = i2c_scl_low ? 1'b0 : 1'bz;
+    assign gpdi_sda = i2c_sda_low ? 1'b0 : 1'bz;
+    board_io board_io_0 (
+        .clk(sys_clk), .rst(~rst_n),
+        .rb_valid(rb_valid && !rb_sel_video && !rb_sel_audio), .rb_we(rb_we), .rb_addr(rb_addr[15:0]),
+        .rb_wdata(rb_wdata), .rb_wstrb(rb_wstrb), .rb_ack(io_ack), .rb_rdata(io_rdata),
+        .btn_i({btn_rest, BTN1, btn_pwr_n}), .sw_i(sw),
+        .scl_i(gpdi_scl), .sda_i(gpdi_sda), .scl_low(i2c_scl_low), .sda_low(i2c_sda_low)
+    );
+
     wire [9:0]  tmds_r, tmds_g, tmds_b;
     wire        pix_tog;
     video_fb video (
         .clk(sys_clk), .rst(~rst_n),
-        .rb_valid(rb_valid), .rb_we(rb_we), .rb_addr(rb_addr), .rb_wdata(rb_wdata),
-        .rb_wstrb(rb_wstrb), .rb_ack(rb_ack), .rb_rdata(rb_rdata),
+        .rb_valid(rb_valid && rb_sel_video), .rb_we(rb_we), .rb_addr(rb_addr), .rb_wdata(rb_wdata),
+        .rb_wstrb(rb_wstrb), .rb_ack(video_ack), .rb_rdata(video_rdata),
         .pclk(pix_clk), .tmds_r(tmds_r), .tmds_g(tmds_g), .tmds_b(tmds_b), .ptog(pix_tog),
         .dbg_rgb(), .dbg_de(), .dbg_hs(), .dbg_vs()
     );

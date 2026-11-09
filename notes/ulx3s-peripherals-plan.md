@@ -22,7 +22,7 @@ be confirmed against the schematic of the board revision in hand.
 | Real-time clock (MCP7940N, check) + battery | I2C on `gpdi_sda/scl` | phase 3: I2C host |
 | Audio jack: 4-bit resistor DACs L/R + ring2 | `audio_l/r/v[0..3]` | phase 3: tone generator, then PCM via sigma-delta |
 | Composite video / S/PDIF on ring2 | `audio_v` | phase 4 |
-| SPI ADC, 8 channels (MAX11125, check) | `adc_*` | phase 3: second SPI instance |
+| SPI ADC, 8 channels (MAX11125 here, MAX11123 in the LPF: check the board) | `adc_*` | phase 3: second SPI instance |
 | OLED/LCD header (7-pin SPI) | `oled_*` | phase 3: SPI instance (or the framebuffer mirrored to an ST7789-class LCD) |
 | GPIO headers: 28 differential pairs | `gp/gn[0..27]` | phase 3: PMOD GPIO; phase 4: Ethernet PMOD (RMII), LVDS |
 | HDMI Ethernet pair, CEC | `gpdi_ethp/ethn`, `gpdi_cec` | phase 4 (experimental) |
@@ -249,3 +249,46 @@ G3/G4 → `game2d` (G2) → `game3d` (G5, G6).
   monitor catches the unmapped DMI read), fb_test, FP Linux 6 min clean. `hw_test_suite.py`
   and `loader.py --skip-repair` now keep the bytes read after the last ACK: at 50 MHz the
   readback line arrives in that read, and the skip bytes were going to the booted REPL.
+
+## Board audit, 2026-11-09
+
+Pins checked against the official `emard/ulx3s` `doc/constraints/ulx3s_v20.lpf`.
+
+| Part | State | Next |
+|---|---|---|
+| Buttons, switches, RTC, HDMI DDC | `src/Board_IO.v`: IP proved, 8/8 mutants; strict sim passes; lx41 gates running; **not yet run on the board** | board test of `io_test`; Linux `i2c-ocores` and RTC device tree |
+| Audio jack L/R | `src/Audio.v`: IP proved, 7/7 mutants; **not on the SoC yet** | integrate after lx41 at `0xC000_9000`; needs someone listening; volume resets to mute |
+| 8-channel ADC | none | second SPI instance at `0xC000_A000`, see below |
+| USB host (US2) | none | largest remaining item: low-speed HID host |
+| ESP32 UART | none | `uart1`; shares SD pins, so needs care with `wifi_en` |
+| OLED header | none | SPI instance at `0xC000_B000` |
+| 28 header pairs, 433 MHz, CEC | none | later |
+| Power-off, multiboot | none | with the SoC profiles |
+
+Verified pins not yet in `constraints/ulx3s_85f.lpf`:
+
+- `audio_l[3:0]` B3 C3 D3 E4, `audio_r[3:0]` C5 D5 B5 A3, `audio_v[3:0]` E5 F5 F2 H5, each listed
+  [3] to [0]; `PULLMODE=NONE DRIVE=16`
+- `adc_csn` R17 (`PULLMODE=UP`), `adc_mosi` R16, `adc_miso` U16, `adc_sclk` P17
+- `oled_clk` P4, `oled_mosi` P3, `oled_dc` P1, `oled_resn` P2, `oled_csn` N2
+- `wifi_rxd` K3, `wifi_txd` K4, `wifi_gpio0` L2, `wifi_gpio5` N4, `wifi_gpio16` L1, `wifi_gpio17` N3
+- `ant_433mhz` G1, `gpdi_cec` A18, `user_programn` M4
+- `usb_fpga_dp` E16, `usb_fpga_dn` F16, `usb_fpga_bd_dp` D15, `usb_fpga_bd_dn` E15,
+  `usb_fpga_pu_dp` B12, `usb_fpga_pu_dn` C12
+- `shutdown` G16 (`PULLMODE=DOWN`): do not drive it high by accident
+
+### ADC: what is and is not known
+
+- **Datasheet not read.** Analog Devices' PDF timed out from here, and the mirrors gave only page 1.
+  Page 1 of Rev 1, 4/12 gives the family as 12/10/8-bit, 4/8/16-channel, 1 Msps, 16 MHz 3-wire SPI;
+  it does not map part numbers to those figures.
+- **The part number is unconfirmed.** The LPF says MAX11123; this plan said MAX11125. Read the chip
+  on the board or the schematic.
+- The analog inputs share `gp/gn[14..17]` (AIN0 = gn14, AIN1 = gp14, ... AIN7 = gp17), so those
+  header pairs must stay high-impedance in a build that uses the ADC. Input range and any series
+  resistors are not confirmed.
+- Register words in `emard/ulx3s-misc` `examples/adc/max1112x/hdl/max1112x_init_pack.vhd` (labelled
+  work in progress) are a lead for software, not a specification.
+- **Design consequence:** use the proved `AXI4_SPI` as a generic host and keep the chip's protocol in
+  software. Only the SPI mode and SCLK limit then come from the chip, and SCKMODE and SCKDIV are
+  software-settable. Do not write a hardware scanner against unread register definitions.
