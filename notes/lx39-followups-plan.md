@@ -1,6 +1,7 @@
 # After lx39: plan for the open issues (2026-11-06)
 
-lx39 (G1 HDMI framebuffer) is promoted. This plan orders what is left. The user asked for **as
+lx39 (G1 HDMI framebuffer) is promoted, and lx40 after it (2026-11-09: the TVM and RegBus lost-ack
+fixes the formal work found; build/ulx3s_top.bit md5 6c7b9293, 56.38 MHz s5). This plan orders what is left. The user asked for **as
 much formal verification as possible**, so formal is a workstream of its own (section A) and runs
 alongside the feature work (B, C). Section D lists the decisions only the user can make.
 
