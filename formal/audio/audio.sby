@@ -1,0 +1,24 @@
+[tasks]
+bmc
+prove
+cover
+
+[options]
+bmc: mode bmc
+bmc: depth 24
+prove: mode prove
+prove: depth 8
+cover: mode cover
+cover: depth 40
+
+[engines]
+smtbmc boolector
+
+[script]
+read_verilog -formal -D FORMAL Audio.v
+read_verilog -formal -sv audio_fv.sv
+prep -top audio_fv
+
+[files]
+../../src/Audio.v
+audio_fv.sv
