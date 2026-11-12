@@ -13,7 +13,10 @@
  * one line per button press or release ("key CODE down|up").
  * Console commands (one line each, read once a tick): "poweroff" arms the RTC alarm 20 s ahead
  * through /sys/class/rtc/rtc0/wakealarm and powers off (syscon-poweroff, the shutdown pin; MFP
- * powers the board back on); "reboot" reloads the FPGA from flash (syscon-reboot, PROGRAMN). */
+ * powers the board back on); "reboot" reloads the FPGA from flash (syscon-reboot, PROGRAMN);
+ * "beep" sends SND_TONE 440 to the flute-audio beep input device and reads the tone registers back
+ * through /dev/mem (the ALSA volume stays as it is: muted after boot, so this is silent);
+ * "adc" prints the eight MAX11125 channels from /sys/bus/iio/devices/iio:device0 (max1112x). */
 #define SYS_write 64
 #define SYS_clone 220
 #define SYS_getpid 172
@@ -127,6 +130,63 @@ static void write_file(const char *path, const char *v)
 	puts1(path); puts1(r < 0 ? ": write failed " : ": ok\n");
 	if (r < 0) { putu((u32)-r); puts1("\n"); }
 }
+/* the input device named "ULX3S Flute beep", or -1 */
+static long beep_open(void)
+{
+	static char path[] = "/dev/input/event0";
+	char name[32];
+	for (int i = 0; i < 8; i++) {
+		path[16] = '0' + i;
+		long fd = sys5(SYS_openat, AT_FDCWD, (long)path, 1 /* O_WRONLY */, 0, 0);
+		if (fd < 0) continue;
+		for (int k = 0; k < 32; k++) name[k] = 0;
+		sys3(SYS_ioctl, fd, 0x80000000 | (31 << 16) | ('E' << 8) | 0x06 /* EVIOCGNAME(31) */, (long)name);
+		if (streq(name, "ULX3S Flute beep")) return fd;
+		sys3(SYS_close, fd, 0, 0);
+	}
+	return -1;
+}
+static void beep_send(long fd, int hz)
+{
+	struct { u32 sec, usec; unsigned short type, code; int value; } ev = { 0, 0, 0x12 /* EV_SND */, 2 /* SND_TONE */, hz };
+	sys3(SYS_write, fd, (long)&ev, sizeof ev);
+}
+static void beep_test(void)
+{
+	long fd = beep_open();
+	if (fd < 0) { puts1("beep: no beep input device\n"); return; }
+	long m = sys5(SYS_openat, AT_FDCWD, (long)"/dev/mem", 2 | 0x101000, 0, 0);
+	long p = m < 0 ? -1 : sys6(SYS_mmap2, 0, 4096, 3, 1, m, 0xc0009 /* audio */);
+	if (m >= 0) sys3(SYS_close, m, 0, 0);
+	if ((unsigned long)p >= 0xfffff000ul) { puts1("beep: no /dev/mem\n"); sys3(SYS_close, fd, 0, 0); return; }
+	volatile u32 *a = (volatile u32 *)p;
+	beep_send(fd, 440);
+	u32 tone = a[4], ctrl = a[1], vol = a[2];
+	beep_send(fd, 0);
+	u32 ctrl0 = a[1];
+	sys3(SYS_close, fd, 0, 0);
+	puts1("beep: 440 Hz TONE "); putu(tone); puts1(" CTRL "); putu(ctrl); puts1(" VOLUME "); putu(vol);
+	puts1(", off CTRL "); putu(ctrl0);
+	puts1((tone == 56817 && (ctrl & 2) && !(ctrl0 & 2)) ? "  beep ok\n" : "  beep BAD\n");
+}
+static void adc_show(void)
+{
+	static char path[] = "/sys/bus/iio/devices/iio:device0/in_voltage0_raw";
+	char buf[16];
+	sys5(SYS_mount, (long)"sysfs", (long)"/sys", (long)"sysfs", 0, 0);
+	puts1("adc:");
+	for (int ch = 0; ch < 8; ch++) {
+		path[sizeof path - 6] = '0' + ch;   /* the digit before "_raw" */
+		long fd = sys5(SYS_openat, AT_FDCWD, (long)path, 0, 0, 0);
+		long n = fd < 0 ? -1 : sys3(SYS_read, fd, (long)buf, sizeof buf - 1);
+		if (fd >= 0) sys3(SYS_close, fd, 0, 0);
+		if (n <= 0) { puts1(" -"); continue; }
+		while (n > 0 && (buf[n - 1] == '\n')) n--;
+		buf[n] = 0;
+		puts1(" "); puts1(buf);
+	}
+	puts1("\n");
+}
 static void console_poll(void)
 {
 	static char line[64];
@@ -148,7 +208,11 @@ static void console_poll(void)
 		sys3(SYS_sync, 0, 0, 0);
 		sys5(SYS_reboot, 0xfee1dead, 672274793, 0x01234567 /* RESTART */, 0, 0);
 		puts1("reboot: still running\n");
-	} else if (n) { puts1("commands: poweroff, reboot\n"); }
+	} else if (streq(line, "beep")) {
+		beep_test();
+	} else if (streq(line, "adc")) {
+		adc_show();
+	} else if (n) { puts1("commands: poweroff, reboot, beep, adc\n"); }
 }
 /* button events since the last call: struct input_event on rv32 (time64) is 16 bytes */
 static void keys_poll(void)

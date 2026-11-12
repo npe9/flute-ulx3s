@@ -1,5 +1,5 @@
 // ulx3s_drv.hc -- ULX3S board drivers for the HolyC REPL: the MCP7940N RTC (I2C), the buttons and
-// DIP switches, the audio jack's tone generator, power-off and reconfigure.
+// DIP switches, the audio jack's tone generator, the MAX11125 ADC, power-off and reconfigure.
 // Included from jit.hc (after print/str/mem), registered in JitInit.
 //
 // The same blob boots on SoCs without these devices (the 25 MHz main build, Bluesim), so nothing
@@ -16,6 +16,7 @@
 #define BRD_DEV_I2C0    9
 #define BRD_DEV_GPIO1   10
 #define BRD_DEV_AUDIO   11
+#define BRD_DEV_SPI2    12
 
 U32 BrdRd(U32 a)
 {
@@ -477,6 +478,89 @@ U0 Reconf()
   UartStr("still here: no RECONF register in this bitstream (before lx44)\n");
 }
 
+// ---------------- ADC (MAX11125 on spi2, src/AXI4_SPI.bsv: SiFive SPI registers) ----------------
+// MAX11120-MAX11128 datasheet: 16-bit words, DIN sampled on the rising SCLK edge and DOUT moving on
+// the falling edge (SPI mode 3).  Manual mode (SCAN 0001, CHAN_ID): the frame naming a channel
+// converts it, the next frame carries [15:12] channel, [11:0] data.  The host moves 8-bit frames,
+// so a word is two under CSMODE HOLD.  Checked on the board with test/adc_test.c -DSEQ3.
+U32 g_adc;
+
+// One 16-bit word under one chip select; the reply, or -1 when the host does not answer.
+I64 AdcWord(I64 w)
+{
+  U32 t0, lim, v, hi, i;
+  lim = BrdTimerHz() / 100;
+  BrdWr(g_adc + 0x18, 2);                   // CSMODE HOLD
+  BrdWr(g_adc + 0x48, (w >> 8) & 0xFF);
+  BrdWr(g_adc + 0x48, w & 0xFF);
+  hi = 0;
+  for (i = 0; i < 2; i++) {
+    t0 = BrdTimeLo();
+    while ((v = BrdRd(g_adc + 0x4C)) & 0x80000000) {
+      if (BrdTimeLo() - t0 > lim) {
+        BrdWr(g_adc + 0x18, 0);
+        UartStr("adc: spi2 does not answer\n");
+        return -1;
+      }
+    }
+    hi = (hi << 8) | (v & 0xFF);
+  }
+  BrdWr(g_adc + 0x18, 0);                   // CSMODE AUTO: chip select up
+  return hi;
+}
+
+I64 AdcInit()
+{
+  g_adc = BrdNeed(BRD_DEV_SPI2, "spi2");
+  if (!g_adc)
+    return 0;
+  BrdWr(g_adc + 0x00, 1);                   // SCKDIV 1: clk / 4 (12.5 MHz at 50 MHz)
+  BrdWr(g_adc + 0x04, 3);                   // SCKMODE 3: CPOL 1, CPHA 1
+  BrdWr(g_adc + 0x10, 0);                   // CSID 0
+  while (!(BrdRd(g_adc + 0x4C) & 0x80000000))
+    ;                                       // drain RX
+  if (AdcWord(0x0040) < 0)                  // reset all registers
+    return 0;
+  AdcWord(0x8000);                          // configuration: external single-ended reference
+  AdcWord(0x8800);                          // unipolar: all single-ended
+  AdcWord(0x9000);                          // bipolar: none
+  return 1;
+}
+
+// Channel `ch` (0-7): 12-bit result, -1 on failure.
+I64 AdcRd(I64 ch)
+{
+  I64 r;
+  ch &= 0xFF;
+  if (ch > 7) {
+    UartStr("adc: channels 0-7\n");
+    return -1;
+  }
+  if (!AdcInit())
+    return -1;
+  AdcWord(0x0804 | (ch << 7));              // Manual, CHSEL ch, CHAN_ID
+  r = AdcWord(0);                           // SCAN 0000: no change; clocks the result out
+  if (r < 0)
+    return -1;
+  if ((r >> 12) != ch) {
+    Print("adc: reply 0x%04X is for channel %d\n", r, r >> 12);
+    return -1;
+  }
+  return r & 0xFFF;
+}
+
+// All eight channels, raw and in millivolts (3.3 V reference, 4096 steps).
+U0 AdcShow()
+{
+  I64 ch, v;
+  for (ch = 0; ch < 8; ch++) {
+    v = AdcRd(ch);
+    if (v < 0)
+      return;
+    Print("ain%d %4d  %4d mV\n", ch, v, v * 3300 / 4096);
+  }
+}
+
 U0 BoardHelp()
 {
   UartStr(
@@ -487,6 +571,7 @@ U0 BoardHelp()
     "Btns() Sws()              buttons [6:0], DIP switches [3:0]\n"
     "BtnWait(ms)               wait for a button (0 = forever); bit number or -1\n"
     "Snd(ona) SndHz(hz) SndVol(0-8) Beep()   tone on the audio jack (Snd(0) = off)\n"
+    "AdcRd(ch) AdcShow()       MAX11125 ADC: channel 0-7 (12 bits), all eight in mV\n"
     "Sleep(ms) BrdRd(addr) BrdWr(addr,v)   32-bit register access\n"
     "PowerOff() PowerOffFor(s) Reconf()\n");
 }

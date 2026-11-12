@@ -516,11 +516,25 @@ python3 scripts/dmi.py -p /dev/cu.usbserial-120001 resume
 Only one process may hold the serial port, so close any picocom/screen
 session first. `pc` resolves symbols against `templeos/build/ulx3s_repl.map`.
 
-Note: the FT231X handshake (modem) pins are hardwired to the ECP5
-**configuration** JTAG (T5/U5/R5/V4), so they cannot carry the RISC-V
-debug TAP — the old `openocd/ulx3s_ft231x.ocd` FT232R-bitbang config only
-ever talks to the FPGA config TAP. The J1-header soft TAP was removed in
-favor of this bridge (J1 pins A10/A11/B11/C11 are free GPIO again).
+JTAG (lx45d and later; lx45-lx45c shift dmi writes one bit off): the FT231X handshake (modem) pins are hardwired to the ECP5
+**configuration** JTAG, and the RISC-V DTM now sits behind that TAP's user instructions
+through the `JTAGG` primitive (`src/JtaggDtm.bsv`: ER1 IR 0x32 = dmi, ER2 IR 0x38 = dtmcs),
+sharing the debug module with the UART bridge. OpenOCD 0.12's `ft232r` driver reads all ones
+on this chip, so `scripts/ft231x_jtag.py` drives the cable through libftdi (as openFPGALoader
+does) and serves OpenOCD's `remote_bitbang`:
+
+```bash
+python3 scripts/ft231x_jtag.py --server 4567 &      # the FT231X stops being a UART meanwhile
+openocd -f openocd/ulx3s_jtagg.ocd                  # then gdb: target extended-remote :3333
+openocd -f openocd/ulx3s_jtagg.ocd -c 'halt; echo "[reg pc]"; echo "[mdw 0x80000000 4]"; resume; shutdown'
+```
+
+Board (lx45d): OpenOCD examines the hart (misa 0x4014112f, datacount 4, no program buffer),
+halts it, reads and writes registers and memory, and resumes. On the LFE5U-85F, JTAGG's JTDI is
+TDI registered on TCK's rising edge, so the DTM takes it one system clock after the edge.
+
+The J1-header soft TAP is gone (it was never connected to the debug module), so J1's
+A10/A11/B11/C11 are free GPIO.
 
 ## Boot loader protocol
 

@@ -53,19 +53,24 @@ static int u1_get (uint32_t t) {
 #ifndef BOARD
 int main (void) {
    putc_ ('T');
-   check (0x01, 0, ESP32_EN);
+   check (0x01, 0, ESP32_EN & 1);
    check (0x02, THRE, U1 (LSR) & (THRE | DR));
    u1_put ('A');                                   // held: the stand-in does not answer
    check (0x03, (uint32_t) -1, (uint32_t) u1_get (20000));
    ESP32_EN = 1;
-   check (0x04, 1, ESP32_EN);
+   check (0x04, 1, ESP32_EN & 1);
+   check (0x06, 2, ESP32_EN & 2);                  // the stand-in drives TX high (idle)
    static const uint8_t bytes [] = { 0x55, 0xC0, 0x12, 0x00, 0xFF };
    for (unsigned i = 0; i < sizeof bytes; i++) {
       u1_put (bytes [i]);
       check (0x10 + i, bytes [i], (uint32_t) u1_get (20000));
    }
    ESP32_EN = 0;
-   check (0x05, 0, ESP32_EN);
+   check (0x05, 0, ESP32_EN & 1);
+   ESP32_EN = 4;                                   // STRAP alone: reads back, EN stays held
+   check (0x07, 4, ESP32_EN & 5);
+   ESP32_EN = 0;
+   check (0x08, 0, ESP32_EN & 5);
    puts_ (errs ? "esp32_test: FAIL\r\n" : "esp32_test: ok\r\n");
    putc_ ('D');
    return errs;
@@ -91,9 +96,25 @@ int main (void) {
    putc_ ('T');
    ESP32_EN = 0;
    collect (50);                                   // held in reset; drain
+#ifdef MOSI_HIGH
+   // GPIO15 = sd_cmd (spi0 MOSI) holds the last bit sent (the boot ROM's flash probe leaves it low,
+   // which silences the ESP32 ROM's boot log): clock one 0xFF with chip selects off
+   REG (0xC0004018) = 3;                           // CSMODE OFF
+   REG (0xC0004040) = 0x80008;                     // FMT: 8 bits, MSB first, RX discarded
+   REG (0xC0004048) = 0xFF;
+   collect (5);
+   REG (0xC0004040) = 0x80000;
+   REG (0xC0004018) = 0;
+   puts_ ("esp32_probe: MOSI (GPIO15) left high\r\n");
+#endif
    puts_ ("esp32_probe: released into the ROM bootloader (GPIO0 low)\r\n");
-   ESP32_EN = 1;
+   ESP32_EN = 4;                                   // GPIO2 low (STRAP), EN still low
+   collect (5);
+   ESP32_EN = 5;                                   // EN rises: GPIO0 low + GPIO2 low = download
+   collect (20);
+   ESP32_EN = 1;                                   // release GPIO2 (the SD card's DO again)
    unsigned n = collect (400);
+   puts_ ("ESP32 TX line: "); puts_ ((ESP32_EN & 2) ? "high (driven)\r\n" : "low (nothing drives it: no module, or not running)\r\n");
    puts_ ("rom says ("); puthex (n, 3); puts_ (" bytes):\r\n");
    dump (n);
    // esptool SYNC: C0 | dir 00, cmd 08, len 0x0024, checksum 0 | 07 07 12 20, 32 x 55 | C0

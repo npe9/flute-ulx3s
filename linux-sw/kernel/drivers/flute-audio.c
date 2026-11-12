@@ -6,7 +6,12 @@
  *   0x10 TONE  0x14 FIFO [15:0] left [31:16] right, signed  0x18 STATUS [8:0] level [16] drop [17] underrun
  * The device has no interrupt, so an hrtimer keeps the FIFO topped up from the ALSA buffer.
  * Playback only: S16_LE, 2 channels, 8-48 kHz.  "Master Playback Volume" 0-8, muted at probe.
+ * The tone generator is also an input device with EV_SND SND_TONE / SND_BELL (like pcspkr), so the
+ * console bell, KDMKTONE and a write of an EV_SND event to its /dev/input node sound it; it plays at
+ * the ALSA volume (muted until that is raised).  TONE is 16 bits of half periods, so tones below
+ * clk / 2^17 (381 Hz at 50 MHz) play an octave up, as often as needed.
  */
+#include <linux/input.h>
 #include <linux/hrtimer.h>
 #include <linux/io.h>
 #include <linux/module.h>
@@ -22,6 +27,7 @@
 #define FA_CTRL    0x04
 #define FA_VOLUME  0x08
 #define FA_RATE    0x0C
+#define FA_TONE    0x10
 #define FA_FIFO    0x14
 #define FA_STATUS  0x18
 #define FA_ID_VAL  0x41554431
@@ -39,7 +45,15 @@ struct flute_audio {
 	snd_pcm_uframes_t pos;                /* frames handed to the FIFO, in the buffer */
 	snd_pcm_uframes_t in_period;
 	u32 volume;
+	u32 ctrl;                             /* CTRL shadow: PCM and tone share it */
+	struct input_dev *beep;
 };
+
+static void fa_ctrl(struct flute_audio *fa, u32 mask, u32 val)
+{
+	fa->ctrl = (fa->ctrl & ~mask) | (val & mask);
+	writel(fa->ctrl, fa->base + FA_CTRL);
+}
 
 static void fa_fill(struct flute_audio *fa, bool *elapsed)
 {
@@ -111,7 +125,9 @@ static int fa_prepare(struct snd_pcm_substream *ss)
 {
 	struct flute_audio *fa = snd_pcm_substream_chip(ss);
 
-	writel(0, fa->base + FA_CTRL);
+	spin_lock_irq(&fa->lock);
+	fa_ctrl(fa, 1, 0);
+	spin_unlock_irq(&fa->lock);
 	writel(DIV_ROUND_CLOSEST(fa->clk_hz, ss->runtime->rate) - 1, fa->base + FA_RATE);
 	writel(0, fa->base + FA_STATUS);
 	fa->pos = 0;
@@ -130,7 +146,7 @@ static int fa_trigger(struct snd_pcm_substream *ss, int cmd)
 		spin_lock(&fa->lock);
 		fa->substream = ss;
 		fa_fill(fa, &elapsed);        /* prime the FIFO before playing */
-		writel(1, fa->base + FA_CTRL);
+		fa_ctrl(fa, 1, 1);
 		spin_unlock(&fa->lock);
 		hrtimer_start(&fa->timer, ns_to_ktime(FA_PERIOD_NS), HRTIMER_MODE_REL);
 		return 0;
@@ -138,7 +154,7 @@ static int fa_trigger(struct snd_pcm_substream *ss, int cmd)
 	case SNDRV_PCM_TRIGGER_SUSPEND:
 		spin_lock(&fa->lock);
 		fa->substream = NULL;          /* the timer stops itself */
-		writel(0, fa->base + FA_CTRL);
+		fa_ctrl(fa, 1, 0);
 		spin_unlock(&fa->lock);
 		return 0;
 	}
@@ -199,6 +215,33 @@ static const struct snd_kcontrol_new fa_vol = {
 	.put = fa_vol_put,
 };
 
+/* EV_SND: value = Hz for SND_TONE (0 = off), nonzero = on (1 kHz) for SND_BELL */
+static int fa_beep_event(struct input_dev *dev, unsigned int type, unsigned int code, int value)
+{
+	struct flute_audio *fa = input_get_drvdata(dev);
+	unsigned long flags;
+	u32 half = 0;
+
+	if (type != EV_SND || (code != SND_TONE && code != SND_BELL))
+		return -EINVAL;
+	if (code == SND_BELL && value)
+		value = 1000;
+	if (value > 0 && value <= 20000) {
+		half = fa->clk_hz / 2 / value;
+		while (half > 65536)
+			half /= 2;
+	}
+	spin_lock_irqsave(&fa->lock, flags);
+	if (half) {
+		writel(half - 1, fa->base + FA_TONE);
+		fa_ctrl(fa, 2, 2);
+	} else {
+		fa_ctrl(fa, 2, 0);
+	}
+	spin_unlock_irqrestore(&fa->lock, flags);
+	return 0;
+}
+
 static int fa_probe(struct platform_device *pdev)
 {
 	struct flute_audio *fa;
@@ -221,7 +264,7 @@ static int fa_probe(struct platform_device *pdev)
 				     readl(fa->base + FA_ID));
 	if (of_property_read_u32(pdev->dev.of_node, "clock-frequency", &fa->clk_hz))
 		fa->clk_hz = 50000000;
-	writel(0, fa->base + FA_CTRL);
+	fa_ctrl(fa, 3, 0);
 	writel(0, fa->base + FA_VOLUME);    /* muted: it drives real headphones */
 	fa->volume = 0;
 	hrtimer_init(&fa->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
@@ -245,6 +288,19 @@ static int fa_probe(struct platform_device *pdev)
 	if (err < 0)
 		return err;
 	platform_set_drvdata(pdev, fa);
+
+	fa->beep = devm_input_allocate_device(&pdev->dev);
+	if (fa->beep) {
+		fa->beep->name = "ULX3S Flute beep";
+		fa->beep->phys = "flute-audio/input0";
+		fa->beep->id.bustype = BUS_HOST;
+		fa->beep->evbit[0] = BIT_MASK(EV_SND);
+		fa->beep->sndbit[0] = BIT_MASK(SND_TONE) | BIT_MASK(SND_BELL);
+		fa->beep->event = fa_beep_event;
+		input_set_drvdata(fa->beep, fa);
+		if (input_register_device(fa->beep))
+			dev_warn(&pdev->dev, "no beep input device\n");
+	}
 	return 0;
 }
 
@@ -253,7 +309,7 @@ static void fa_remove(struct platform_device *pdev)
 	struct flute_audio *fa = platform_get_drvdata(pdev);
 
 	hrtimer_cancel(&fa->timer);
-	writel(0, fa->base + FA_CTRL);
+	fa_ctrl(fa, 3, 0);
 }
 
 static const struct of_device_id fa_of[] = {

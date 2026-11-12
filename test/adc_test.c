@@ -8,6 +8,10 @@
 // emard/ulx3s-misc examples/adc (max1112x_init_pack.vhd, not checked against the datasheet) and
 // prints every 16-bit reply raw, for working out the protocol on the real chip.
 //
+// -DSEQ3 builds adc_probe3 from the MAX11120-MAX11128 datasheet: SPI mode 3 (mode 0 reads every
+// word one bit late, which is what -DBOARD and -DSEQ2 saw), Standard_Ext over channels 0-7 then
+// Manual 7..0.  Board (lx45b): channels step 0..7 in Standard_Ext and Manual answers each one.
+//
 // UART: 'T' on entry, "M <id> <exp> <got>" on a mismatch, 'D' when done.
 // Build: riscv64-unknown-elf-gcc -march=rv32imac_zicsr -mabi=ilp32 -Os -ffreestanding
 //   -nostdlib -nostartfiles -T sd_test.ld; objcopy -O binary; pad to 4 bytes.
@@ -67,12 +71,49 @@ int main (void) {
    SPI (SCKDIV) = 1;                           // 12.5 MHz at 50 MHz
    SPI (CSID) = 0;
    while (! (SPI (RXDATA) & 0x80000000u)) ;    // drain
-#ifndef BOARD
+#if !defined (BOARD) && !defined (SEQ2) && !defined (SEQ3)
    check (0x10, 0xA5C3, xfer16 (0x1234));
    check (0x11, 0x1234, xfer16 (0xBEEF));
    check (0x12, 0xBEEF, xfer16 (0x0F0F));
    check (0x13, 0x0F0F, xfer16 (0x8001));
    puts_ (errs ? "adc_test: FAIL\r\n" : "adc_test: ok\r\n");
+#elif defined (SEQ3)
+   // From the MAX11120-MAX11128 datasheet: DIN is sampled on the rising SCLK edge and DOUT changes
+   // on the falling edge, so SPI mode 3 (SCLK idles high; the first falling edge presents the MSB).
+   // A mode-control word restarts the scan; 0x0000 (SCAN 0000) continues it.  Results come one
+   // frame after the conversion; with CHAN_ID, [15:12] is the channel and [11:0] the data.
+   SPI (SCKMODE) = 3;
+   static const uint16_t words [] = {
+      0x0040,                  // mode control, SCAN 0000, RESET 10: all registers to defaults
+      0x8000,                  // ADC configuration: external single-ended reference, no echo
+      0x8800,                  // Unipolar: all single-ended
+      0x9000,                  // Bipolar: none
+      0x2384,                  // Standard_Ext (SCAN 0100), N = 7 (CHSEL 0111), CHAN_ID
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0x0B84, 0x0B04, 0x0A84, 0x0A04, 0x0984, 0x0904, 0x0884, 0x0804, 0,   // Manual, CHSEL 7..0
+   };
+   puts_ ("adc_probe3 (SPI mode 3): word -> reply\r\n");
+   for (unsigned i = 0; i < sizeof words / sizeof words [0]; i++) {
+      uint32_t r = xfer16 (words [i]);
+      for (volatile int k = 0; k < 200; k++) ;
+      puthex (words [i], 4); puts_ (" -> "); puthex (r, 4); puts_ ("\r\n");
+   }
+   puts_ ("adc_probe3: done\r\n");
+#elif defined (SEQ2)
+   // emard's exact sequence, then two other modes; each group starts with RESET
+   static const uint16_t words [] = {
+      0x0040, 0x0040, 0x8404, 0x8800, 0x97F8, 0x9F80, 0xA000, 0xAAA8, 0x4006, 0, 0, 0,
+      0x4006, 0, 0, 0, 0x4006, 0, 0, 0,
+      0x0040, 0x0040, 0x8404, 0x8800, 0x9000, 0x2386, 0, 0, 0, 0, 0, 0, 0, 0x2386, 0, 0, 0, 0, 0, 0, 0,
+      0x0040, 0x0040, 0x8404, 0x8800, 0x9000, 0x1B82, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+   };
+   puts_ ("adc_probe2: word -> reply\r\n");
+   for (unsigned i = 0; i < sizeof words / sizeof words [0]; i++) {
+      uint32_t r = xfer16 (words [i]);
+      for (volatile int k = 0; k < 200; k++) ;   // CS high a while: conversion time
+      puthex (words [i], 4); puts_ (" -> "); puthex (r, 4); puts_ ("\r\n");
+   }
+   puts_ ("adc_probe2: done\r\n");
 #else
    static const uint16_t words [] = {
       0x0040, 0x0040,          // RESET (emard: "reset all registers to defaults")

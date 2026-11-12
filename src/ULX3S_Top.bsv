@@ -37,9 +37,10 @@ import Uart_DMI_Bridge     :: *;
 `endif
 
 `ifdef JTAG_TAP
-import Jtag_IFC            :: *;
-import JtagTap             :: *;
-import Jtag_Control_Adapter :: *;
+import JtaggDtm            :: *;
+import ClientServer        :: *;
+import GetPut              :: *;
+import External_Control    :: *;
 `endif
 
 // ================================================================
@@ -95,12 +96,11 @@ interface ULX3S_Top_IFC;
 `endif
 
 `ifdef JTAG_TAP
-   // The J1-header JTAG TAP is kept in the design (unconnected to the
-   // debug server; the UART bridge owns server_external_control) purely
-   // to preserve the clock tree and placement landscape of the
-   // known-good 2026-10-04 build -- removing it changed sys_clk
-   // insertion delay enough to break SDRAM read sampling.
-   interface JTAG_IFC jtag;
+   // lx45: the RISC-V DTM on the FPGA's own JTAG port (ECP5 JTAGG ER1/ER2, src/JtaggDtm.bsv),
+   // which the FT231X on US1 reaches.  It shares the debug module with the UART bridge.
+   // (The J1-header soft TAP it replaces was unconnected, kept only for placement parity.)
+   (* always_ready, always_enabled *) method Action jtagg (Bit #(7) v);  // {JCE2..JTCK}
+   (* always_ready *)                 method Bit #(1) jtagg_tdo;
 `endif
 
    (* always_ready *) method Bool     sdram_init_done;
@@ -177,15 +177,34 @@ module mkULX3S_Top (ULX3S_Top_IFC);
    endrule
    mkConnection (toGet (f_tx), uart.put);
 
-   mkConnection (dbg.client, soc_top.server_external_control);
-
 `ifdef JTAG_TAP
-   // JTAG TAP kept for placement-parity with the known-good build;
-   // its DMI output is intentionally left dangling (bridge owns the
-   // debug server).
-   JtagTap_IFC              jtag_tap <- mkJtagTap;
-   Jtag_Control_Adapter_IFC jtag_adp <- mkJtag_Control_Adapter;
-   mkConnection (jtag_tap.dmi, jtag_adp.dmi);
+   // Two debug clients, one debug server: requests merge in order, a tag FIFO routes each
+   // response back (the server answers every request once, in order).
+   JtaggDtm_IFC        jtagg_dtm <- mkJtaggDtm;
+   FIFOF #(Bit #(1))   f_dbg_tag <- mkSizedFIFOF (4);
+   (* descending_urgency = "rl_dbg_req_uart, rl_dbg_req_jtag" *)
+   rule rl_dbg_req_uart;
+      let r <- dbg.client.request.get;
+      soc_top.server_external_control.request.put (r);
+      f_dbg_tag.enq (0);
+   endrule
+   rule rl_dbg_req_jtag;
+      let r <- jtagg_dtm.client.request.get;
+      soc_top.server_external_control.request.put (r);
+      f_dbg_tag.enq (1);
+   endrule
+   rule rl_dbg_rsp_uart (f_dbg_tag.first == 0);
+      let r <- soc_top.server_external_control.response.get;
+      f_dbg_tag.deq;
+      dbg.client.response.put (r);
+   endrule
+   rule rl_dbg_rsp_jtag (f_dbg_tag.first == 1);
+      let r <- soc_top.server_external_control.response.get;
+      f_dbg_tag.deq;
+      jtagg_dtm.client.response.put (r);
+   endrule
+`else
+   mkConnection (dbg.client, soc_top.server_external_control);
 `endif
 `else
    mkConnection (soc_top.get_to_console, uart.put);
@@ -287,7 +306,10 @@ module mkULX3S_Top (ULX3S_Top_IFC);
 `endif
 
 `ifdef JTAG_TAP
-   interface JTAG_IFC jtag = jtag_tap.jtag;
+   method Action jtagg (Bit #(7) v);
+      jtagg_dtm.pins (v);
+   endmethod
+   method Bit #(1) jtagg_tdo = jtagg_dtm.tdo;
 `endif
 
    method Bool     sdram_init_done = mem.init_done;

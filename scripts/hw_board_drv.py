@@ -3,7 +3,8 @@
 
 Programs the bitstream, loads the REPL blob, then checks: BoardHelp, the RTC (it answers and its
 seconds advance), buttons and DIP switches (read, nothing pressed), BtnWait timeout, Sleep timing,
-and the tone generator by register readback at volume 0 (silent).  Never calls PowerOff, PowerOffFor
+the tone generator by register readback at volume 0 (silent), and the ADC (channels 0 and 7
+answer with their own channel id).  Never calls PowerOff, PowerOffFor
 or Reconf.  --set-rtc sets the RTC to the host's UTC time first.
 
   HW_BITSTREAM=build/lx43/ulx3s_top.bit python3 scripts/hw_board_drv.py --blob templeos/build-drv/repl.blob.bin
@@ -93,6 +94,10 @@ def main():
     hw.record(R, 'Snd(60) = 440 Hz at volume 0, Snd(0) off', 'PASS' if ok else 'FAIL',
               f'TONE {tone} (exp {exp}) CTRL {ctrl} VOL {vol} after-off CTRL {ctrl0}')
     hw.check_repl(R, 'I2cRd no device (0x20)', fd, 'I2cRd(0x20, 0);', expect=('ans=0xffffffff',))
+    for ch in (0, 7):
+        out = hw.check_repl(R, f'AdcRd({ch}) answers', fd, f'AdcRd({ch});', expect=('ans=',), forbid=('adc:',))
+        if out is not None and not 0 <= ans(out) <= 4095:
+            hw.record(R, f'AdcRd({ch}) in 0-4095', 'FAIL', hex(ans(out)))
     n_fail = sum(1 for r in hw.results if r[2] == 'FAIL')
     print(f'== summary: {sum(1 for r in hw.results if r[2] == "PASS")} PASS, {n_fail} FAIL ==')
     return 1 if n_fail else 0

@@ -357,3 +357,58 @@ SYNC reply. Likely cause, not confirmed: the strap pins share the SD lines. GPIO
 mode; GPIO15 = `sd_cmd` (MOSI) idling low silences the ROM's boot log. Fix to try in lx45: drive
 `sd_d0` low (and `sd_cmd` high) while EN is held and for a few ms after release, only while the SD
 CS is high (the card's DO is then high-impedance). GPIO12 = `sd_d2` must stay low (flash voltage).
+
+### lx45 (in progress, 2026-11-12)
+
+- **JTAG over US1 (JTAGG).** `src/JtaggDtm.bsv`: the debug-spec 0.13 DTM behind the configuration
+  TAP's ER1 (IR 0x32, dmi, abits 7) and ER2 (IR 0x38, dtmcs), sampled with sys_clk (no TCK clock
+  domain); ULX3S_Top merges it with the UART bridge in front of the debug module (tag FIFO). The J1
+  soft TAP is gone (it never reached the debug module, and yosys never even got the JTAG_TAP define,
+  so Top.v's TAP block had not been synthesized for a long time: the "placement parity" was moot).
+  In Verilator, Top.v keeps the jtag_* ports and drives `src/ecp5_jtag_model.v` instead of JTAGG.
+  Unit bench `sim/jtagg/run.sh`: IDCODE, dtmcs, dmi write/read, busy sticky + dmireset, PASS.
+  Host side: OpenOCD 0.12's ft232r driver reads all ones on the FT231X (every pin permutation tried;
+  openFPGALoader's map TCK=DSR TMS=DCD TDI=RI TDO=CTS is right), so `scripts/ft231x_jtag.py` drives
+  it through libftdi (sync bitbang) and serves `remote_bitbang`; `openocd/ulx3s_jtagg.ocd`. Checked
+  on lx44: OpenOCD reads IDCODE 0x41113043 through it.
+  Board (lx45, lx45b, lx45c): dtmcs reads 0x1071 and dmi reads come back right, but every 41-bit
+  dmi write landed one bit up (0x10 -> 0x20; reads turned into writes or no-ops). Two wrong
+  guesses first: lx45 shifted on JCE, lx45b on JSHIFT, lx45c added a "last edge hidden" repair
+  (count shifts, take the missing bit afterwards); none helped. What fits every session
+  (`build/jtagmodel/model.py` replays them against each candidate): **JTDI is TDI registered on
+  TCK's rising edge**, so the sample just before an edge holds the previous bit. Evidence: 42-bit
+  scans with the value in the low 41 bits work; reads and dtmcs are right (the controls are on
+  time); moving TDI before TCK's falling edge (`ft231x_jtag.py --tdi-early`) changes nothing.
+  With 42-bit scans on lx45c the whole debug path works: haltreq -> allhalted (dmstatus 0x382),
+  abstract reads of ra/sp/misa (0x4014112f)/mstatus/dpc, an a0 write and readback, resumereq ->
+  allresumeack (`build/lx45c/dbg42.ocd`). lx45d takes JTDI one system clock after JTCK is first
+  seen high (controls still from the sample before). The sim model's JTDI is registered by
+  default (`ECP5_JTAG_TDI_COMB` for the plain wire); the lx45c DTM fails it with the board's
+  signature, the lx45d DTM passes both. **lx45d board: stock OpenOCD works** (examine: misa
+  0x4014112f, datacount 4, progbufsize 0; halt at pc 0x1238 in the boot loader, reg sp/ra/mstatus,
+  mdw 0x80000000, mww/mdw 0x80fff000 = 0xcafef00d, resume).
+- **ESP32.** The user confirms the module is fitted. With GPIO15 (sd_cmd) left high first, the ROM
+  still printed nothing, so the strap theory is out (the ROM prints its rst/boot line in every
+  mode). lx45: `wifi_txd` pulled down, gpio1 0x0C bit 1 = its level (1 = driven, as a running ESP32
+  does), uart1 RX held idle while EN is low. Board_IO formal: prove PASS, 14/14 mutants (new: etxsync).
+  lx45c: STRAP (gpio1 0x0C bit 2) drives GPIO2 (sd_d0) low while the SD card is deselected, so EN
+  rising with GPIO0 low selects the ROM's download mode. Board: the ROM answers esptool's SYNC
+  (`c0 01 08 04 00 07 12 55 55 00 00 00 00 c0`, five replies) and prints nothing first (GPIO15 low
+  silences it). Board_IO formal: prove PASS, 16/16 mutants (new: strapreset, strapbit).
+- **Linux beep.** flute-audio registers an EV_SND input device ("ULX3S Flute beep", SND_TONE /
+  SND_BELL); CTRL is a shadowed read-modify-write so PCM and tone no longer clear each other. init's
+  `beep` command: board (lx44) TONE 56817, CTRL 2 at 440 Hz, off CTRL 0, volume 0 (silent): "beep ok".
+- **RECONF on the board (user OK'd):** TempleOS `Reconf()` reloaded flash offset 0, which is the
+  ULX3S factory self-test (115200 baud: RTC, EDID, ADC, DAC loopback, buttons, flash, OLED, SD).
+- **ADC, working (datasheet from the user, max11120-max11128.pdf).** DIN is sampled on the rising
+  SCLK edge and DOUT changes on the falling edge: SPI mode 3. In mode 0 the host sampled before the
+  first falling edge, so every word read one bit late (0x07ff = the self-test's 0x0fff >> 1), and
+  the earlier probes also resent the mode word every frame, which restarts the scan (0x0000
+  continues it). Mode control: [15] 0, SCAN [14:11] (0001 Manual, 0100 Standard_Ext, 1000
+  Custom_Ext), CHSEL [10:7], RESET [6:5], PM [4:3], CHAN_ID [2], SWCNV [1]; config registers are
+  [15:11] = 10000 config, 10001 unipolar, 10010 bipolar, 10011 range, 10100/10101 custom scan.
+  Board (lx45b, test/adc_test.c -DSEQ3): Standard_Ext steps channels 0..7; Manual answers the named
+  channel in the next frame; the header inputs read near 0.
+  Linux: `kernel/drivers/max1112x.c` (IIO, manual mode, SPI mode 3, vref-mv 3300), DTS adc@0 on
+  spi2; init `adc` printed `adc: 3 1 0 0 2 3 3 5` on the board. TempleOS: `AdcRd(ch)`, `AdcShow()`
+  (ulx3s_drv.hc); board AdcShow lists ain0-7, AdcRd(9) is refused. hw_board_drv checks AdcRd(0/7).

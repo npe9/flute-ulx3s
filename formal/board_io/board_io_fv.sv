@@ -14,7 +14,8 @@
 //            which is not modelled; software never sets RD and WR together.
 //   open:    arbitration lost is reached only through that unmodelled master's write path here.
 module board_io_fv (input clk, input [15:0] rb_addr, input rb_valid_i, input rb_we, input [31:0] rb_wdata,
-                    input [3:0] rb_wstrb, input [6:0] btn_i, input [3:0] sw_i, input slave_sda_low, input slave_scl_low);
+                    input [3:0] rb_wstrb, input [6:0] btn_i, input [3:0] sw_i, input slave_sda_low, input slave_scl_low,
+                    input etx_i);
     reg [1:0] rc = 0; wire rst = rc != 2'd3;
     always @(posedge clk) if (rst) rc <= rc + 1;
     reg pv = 0; always @(posedge clk) pv <= 1;
@@ -32,9 +33,10 @@ module board_io_fv (input clk, input [15:0] rb_addr, input rb_valid_i, input rb_
     end
     // a slave only pulls the wires low; the harness models the wires
     wire scl = !(scl_low || slave_scl_low), sda = !(sda_low || slave_sda_low);
+    wire esp32_strap;
     board_io dut (.clk(clk), .rst(rst), .rb_valid(rb_valid), .rb_we(rb_we), .rb_addr(rb_addr), .rb_wdata(rb_wdata),
-                  .rb_wstrb(rb_wstrb), .rb_ack(rb_ack), .rb_rdata(rb_rdata), .btn_i(btn_i), .sw_i(sw_i),
-                  .scl_i(scl), .sda_i(sda), .scl_low(scl_low), .sda_low(sda_low), .esp32_en(esp32_en), .shutdown(shutdown), .reconf(reconf),
+                  .rb_wstrb(rb_wstrb), .rb_ack(rb_ack), .rb_rdata(rb_rdata), .btn_i(btn_i), .sw_i(sw_i), .esp32_tx_i(etx_i),
+                  .scl_i(scl), .sda_i(sda), .scl_low(scl_low), .sda_low(sda_low), .esp32_en(esp32_en), .esp32_strap(esp32_strap), .shutdown(shutdown), .reconf(reconf),
                   .f_state(st), .f_ph(ph), .f_bits(bits), .f_en(en), .f_wr(c_wr), .f_rd(c_rd), .f_sto(c_sto),
                   .f_shift(sh), .f_is_tick(is_tick), .f_tip(tip), .f_scl_s(scl_s), .f_sda_s(sda_s), .f_rxr(rxr), .f_txr(txr));
 
@@ -45,15 +47,18 @@ module board_io_fv (input clk, input [15:0] rb_addr, input rb_valid_i, input rb_
         if (rb_ack && !we_q && addr_q[15:12] == 4'h8 && addr_q[4:2] == 3'd0) assert (rb_rdata == 32'h47504931);
         if (rb_ack && !we_q && addr_q[15:12] == 4'h6 && addr_q[4:2] == 3'd7) assert (rb_rdata == 32'h49324331);
     end
+    // the ESP32 TX level reaches gpio1 0x0C bit 1 through exactly two flops
+    reg e1, e2;
+    always @(posedge clk) begin e1 <= etx_i; e2 <= e1; end
     // ESP32 EN: held (0) through reset; changes only on a write to gpio1 0x0C, and reads back
     always @(posedge clk) if (pv) begin
-        if ($past(rst)) assert (!esp32_en);
+        if ($past(rst)) assert (!esp32_en && !esp32_strap);
         if (!rst && !$past(rst)) begin
             if ($past(rb_valid && !rb_ack && rb_we && rb_addr[15:12] == 4'h8 && rb_addr[4:2] == 3'd3 && rb_wstrb[0]))
-                assert (esp32_en == $past(rb_wdata[0]));
+                assert (esp32_en == $past(rb_wdata[0]) && esp32_strap == $past(rb_wdata[2]));
             else
-                assert (esp32_en == $past(esp32_en));
-            if (rb_ack && !we_q && addr_q[15:12] == 4'h8 && addr_q[4:2] == 3'd3) assert (rb_rdata == {31'b0, $past(esp32_en)});
+                assert (esp32_en == $past(esp32_en) && esp32_strap == $past(esp32_strap));
+            if (rb_ack && !we_q && addr_q[15:12] == 4'h8 && addr_q[4:2] == 3'd3) assert (rb_rdata[31:0] == {29'b0, $past(esp32_strap), $past(e2), $past(esp32_en)});
         end
     end
     // POWER / RECONF: clear through reset; set only by the full-word magic write to their own register;
@@ -70,7 +75,7 @@ module board_io_fv (input clk, input [15:0] rb_addr, input rb_valid_i, input rb_
         end
     end
     // the pins reach the registers through exactly two flops, PWR inverted
-    reg [6:0] b1, b2; reg [3:0] s1, s2;
+    reg [6:0] b1, b2; reg [3:0] s1, s2;;
     always @(posedge clk) begin b1 <= btn_i; b2 <= b1; s1 <= sw_i; s2 <= s1; end
     always @(posedge clk) if (pv && !rst && $past(pv) && $past(!rst)) begin
         if (rb_ack && !we_q && addr_q[15:12] == 4'h8 && addr_q[4:2] == 3'd1) assert (rb_rdata == {25'b0, $past(b2[6:1]), ~$past(b2[0])});

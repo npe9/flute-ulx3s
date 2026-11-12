@@ -17,17 +17,8 @@ IOBUF  PORT "ftdi_txd"   PULLMODE=UP IO_TYPE=LVCMOS33 ;
 # via the Uart_DMI_Bridge (magic "\xDBSDM\x01\x02\x03\x04", then
 # fixed-frame DMI; see src/Uart_DMI_Bridge.bsv and scripts/dmi.py).
 
-# Soft RISC-V JTAG TAP on GPIO header J1 (kept for placement parity
-# with the known-good 2026-10-04 build; the UART DMI bridge is the
-# actual debug transport -- see src/Uart_DMI_Bridge.bsv).
-LOCATE COMP "jtag_tck"   SITE "A11" ;  # J1_7-  (gn[1])
-IOBUF  PORT "jtag_tck"   PULLMODE=UP IO_TYPE=LVCMOS33 ;
-LOCATE COMP "jtag_tms"   SITE "B11" ;  # J1_5+  (gp[0])
-IOBUF  PORT "jtag_tms"   PULLMODE=UP IO_TYPE=LVCMOS33 ;
-LOCATE COMP "jtag_tdi"   SITE "C11" ;  # J1_5-  (gn[0])
-IOBUF  PORT "jtag_tdi"   PULLMODE=UP IO_TYPE=LVCMOS33 ;
-LOCATE COMP "jtag_tdo"   SITE "A10" ;  # J1_7+  (gp[1])
-IOBUF  PORT "jtag_tdo"   PULLMODE=UP IO_TYPE=LVCMOS33 DRIVE=4 ;
+# RISC-V debug: lx45 moved the DTM onto the FPGA's configuration JTAG port (JTAGG in src/Top.v,
+# the FT231X on US1), so header J1's A10/A11/B11/C11 are free.
 
 # Buttons
 
@@ -58,7 +49,7 @@ LOCATE COMP "sd_d0"      SITE "J3" ;
 LOCATE COMP "sd_d3"      SITE "K2" ;
 IOBUF  PORT "sd_clk"     PULLMODE=UP IO_TYPE=LVCMOS33 DRIVE=4 ;
 IOBUF  PORT "sd_cmd"     PULLMODE=UP IO_TYPE=LVCMOS33 DRIVE=4 ;
-IOBUF  PORT "sd_d0"      PULLMODE=UP IO_TYPE=LVCMOS33 ;
+IOBUF  PORT "sd_d0"      PULLMODE=UP IO_TYPE=LVCMOS33 DRIVE=4 ;  # also drives the ESP32 GPIO2 strap
 IOBUF  PORT "sd_d3"      PULLMODE=UP IO_TYPE=LVCMOS33 DRIVE=4 ;
 
 # Configuration flash after configuration (MASTER_SPI_PORT=DISABLE above frees these pins; the
@@ -198,7 +189,9 @@ IOBUF  PORT "adc_sclk"     IO_TYPE=LVCMOS33 DRIVE=4 ;
 LOCATE COMP "wifi_rxd"     SITE "K3" ;
 IOBUF  PORT "wifi_rxd"     PULLMODE=UP IO_TYPE=LVCMOS33 DRIVE=4 ;
 LOCATE COMP "wifi_txd"     SITE "K4" ;
-IOBUF  PORT "wifi_txd"     PULLMODE=UP IO_TYPE=LVCMOS33 DRIVE=4 ;
+# pulled down (lx45): an ESP32 that runs drives its TX high when idle, so gpio1 0x0C bit 1 reading 0
+# with the ESP32 released means nothing is driving the line (no module, or it is not running)
+IOBUF  PORT "wifi_txd"     PULLMODE=DOWN IO_TYPE=LVCMOS33 DRIVE=4 ;
 LOCATE COMP "wifi_gpio0"     SITE "L2" ;
 IOBUF  PORT "wifi_gpio0"     PULLMODE=UP IO_TYPE=LVCMOS33 DRIVE=4 ;
 

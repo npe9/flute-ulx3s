@@ -1,0 +1,19 @@
+# RISC-V debug over the ULX3S's US1 cable (lx45d and later: lx45-lx45c lose a TDI bit on dmi
+# writes): the DTM sits behind the ECP5 configuration TAP's user instructions (src/JtaggDtm.bsv: ER1 0x32 = dmi, ER2 0x38 = dtmcs).
+# OpenOCD 0.12's ft232r driver reads all ones on the FT231X, so the cable is driven by
+# scripts/ft231x_jtag.py (libftdi, the way openFPGALoader does it) as a remote_bitbang server:
+#   python3 scripts/ft231x_jtag.py --server 4567 &
+#   openocd -f openocd/ulx3s_jtagg.ocd
+# While it runs the FT231X is not a UART (no console); the server puts it back when it exits.
+adapter driver remote_bitbang
+remote_bitbang host 127.0.0.1
+remote_bitbang port 4567
+adapter speed 1000
+transport select jtag
+jtag newtap ecp5 tap -irlen 8 -expected-id 0x41113043
+target create ecp5.cpu riscv -chain-position ecp5.tap
+riscv set_ir idcode 0xe0
+riscv set_ir dtmcs 0x38
+riscv set_ir dmi 0x32
+riscv set_command_timeout_sec 5
+init

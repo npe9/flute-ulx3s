@@ -12,7 +12,7 @@ module tb;
     wire sda = !(sda_low || m_sda_low);
     board_io dut (.clk(clk), .rst(rst), .rb_valid(rb_valid), .rb_we(rb_we), .rb_addr(rb_addr),
                   .rb_wdata(rb_wdata), .rb_wstrb(rb_wstrb), .rb_ack(rb_ack), .rb_rdata(rb_rdata),
-                  .btn_i(btn), .sw_i(sw), .scl_i(scl), .sda_i(sda), .scl_low(scl_low), .sda_low(sda_low));
+                  .btn_i(btn), .sw_i(sw), .esp32_tx_i(1'b0), .esp32_strap(), .scl_i(scl), .sda_i(sda), .scl_low(scl_low), .sda_low(sda_low));
     i2c_slave_model #(.TICK(1000000000)) m (.clk(clk), .scl(scl), .sda(sda), .sda_low(m_sda_low));
     integer errs = 0, i, sum;
     reg [31:0] q;

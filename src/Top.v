@@ -12,13 +12,15 @@ module ulx3s_top(
     input  wire        ftdi_txd,    // from FTDI, M1
     output wire        ftdi_rxd,    // to FTDI, L4
 `ifdef JTAG_TAP
-    // Soft RISC-V JTAG TAP on GPIO header J1.  Kept in the design for
-    // placement parity with the known-good 2026-10-04 build; the UART
-    // DMI bridge is the actual debug transport.
-    input  wire        jtag_tck,    // J1_7-  (gn[1], A11)
-    input  wire        jtag_tms,    // J1_5+  (gp[0], B11)
-    input  wire        jtag_tdi,    // J1_5-  (gn[0], C11)
-    output wire        jtag_tdo,    // J1_7+  (gp[1], A10)
+`ifdef VERILATOR
+    // The RISC-V DTM is on the FPGA's configuration JTAG port (JTAGG, below), which has no user
+    // pins.  In simulation these four ports stand for that port (the FT231X's TCK/TMS/TDI/TDO)
+    // and drive src/ecp5_jtag_model.v, a model of the configuration TAP, in place of JTAGG.
+    input  wire        jtag_tck,
+    input  wire        jtag_tms,
+    input  wire        jtag_tdi,
+    output wire        jtag_tdo,
+`endif
 `endif
     output wire        wifi_en,     // ESP32 EN, F1: 0 holds it in reset (gpio1 0x0C, src/Board_IO.v)
     output wire        wifi_gpio0,  // ESP32 GPIO0, L2: held low, so it can only start its ROM bootloader
@@ -28,7 +30,11 @@ module ulx3s_top(
     input  wire        wifi_txd,    // ESP32 UART0 TX, K4: the FPGA receives
     output wire        sd_clk,      // microSD SPI mode: SCLK, H2
     output wire        sd_cmd,      //   MOSI, J1
-    input  wire        sd_d0,       //   MISO, J3
+`ifdef VERILATOR
+    input  wire        sd_d0,       //   MISO, J3 (the benches have no ESP32 strap model)
+`else
+    inout  wire        sd_d0,       //   MISO, J3; also the ESP32's GPIO2 strap (gpio1 0x0C [2])
+`endif
     output wire        sd_d3,       //   CS (active low), K2
     output wire        flash_csn,   // configuration flash: CS, R2
     output wire        flash_mosi,  //   D0, W2
@@ -219,13 +225,19 @@ module ulx3s_top(
     wire i2c_scl_low, i2c_sda_low;
     assign gpdi_scl = i2c_scl_low ? 1'b0 : 1'bz;
     assign gpdi_sda = i2c_sda_low ? 1'b0 : 1'bz;
+    wire esp32_en, esp32_strap, board_reconf;
+`ifndef VERILATOR
+    // ESP32 boot strap: GPIO2 low while EN rises (download mode), only while the card is deselected
+    // (its DO is then high-impedance)
+    assign sd_d0 = (esp32_strap && sd_d3) ? 1'b0 : 1'bz;
+`endif
     board_io board_io_0 (
         .clk(sys_clk), .rst(~rst_n),
         .rb_valid(rb_valid && !rb_sel_video && !rb_sel_audio), .rb_we(rb_we), .rb_addr(rb_addr[15:0]),
         .rb_wdata(rb_wdata), .rb_wstrb(rb_wstrb), .rb_ack(io_ack), .rb_rdata(io_rdata),
-        .btn_i({btn_rest, BTN1, btn_pwr_n}), .sw_i(sw),
+        .btn_i({btn_rest, BTN1, btn_pwr_n}), .sw_i(sw), .esp32_tx_i(wifi_txd),
         .scl_i(gpdi_scl), .sda_i(gpdi_sda), .scl_low(i2c_scl_low), .sda_low(i2c_sda_low),
-        .esp32_en(esp32_en), .shutdown(shutdown), .reconf(board_reconf)
+        .esp32_en(esp32_en), .esp32_strap(esp32_strap), .shutdown(shutdown), .reconf(board_reconf)
     );
 
     wire [9:0]  tmds_r, tmds_g, tmds_b;
@@ -242,13 +254,33 @@ module ulx3s_top(
         .tmds_r(tmds_r), .tmds_g(tmds_g), .tmds_b(tmds_b), .gpdi_dp(gpdi_dp)
     );
 
+`ifdef JTAG_TAP
+    // RISC-V debug over the FPGA's own JTAG port: the configuration TAP's ER1 (IR 0x32) and
+    // ER2 (IR 0x38) select src/JtaggDtm.bsv's dmi and dtmcs registers; it samples these
+    // strobes with sys_clk (no TCK clock domain).
+    wire [6:0] jtagg_pins;
+    wire       jtagg_tdo;
+    wire jg_tck, jg_tdi, jg_shift, jg_update, jg_rstn, jg_ce1, jg_ce2;
+    assign jtagg_pins = {jg_ce2, jg_ce1, jg_rstn, jg_update, jg_shift, jg_tdi, jg_tck};
+`ifdef VERILATOR
+    ecp5_jtag_model jtagg_i (
+        .TCK(jtag_tck), .TMS(jtag_tms), .TDI(jtag_tdi), .TDO(jtag_tdo),
+`else
+    JTAGG jtagg_i (
+`endif
+        .JTCK(jg_tck), .JTDI(jg_tdi), .JSHIFT(jg_shift), .JUPDATE(jg_update), .JRSTN(jg_rstn),
+        .JCE1(jg_ce1), .JCE2(jg_ce2), .JRTI1(), .JRTI2(),
+        .JTDO1(jtagg_tdo), .JTDO2(jtagg_tdo)
+    );
+`endif
+
     mkULX3S_Top top (
         .CLK(sys_clk),
         .RST_N(top_rst),
         .serial_txd(ftdi_rxd),
         .serial_rxd_v(ftdi_txd),
         .esp32_txd(wifi_rxd),
-        .esp32_rxd_v(wifi_txd),
+        .esp32_rxd_v(esp32_en ? wifi_txd : 1'b1),   // idle while held (the pin is pulled down)
         .leds(led),
         .btn1_v(BTN1),
         .sd_sclk(sd_clk),
@@ -271,12 +303,8 @@ module ulx3s_top(
         .rb_ack_ack(rb_ack),
         .rb_ack_rdata(rb_rdata),
 `ifdef JTAG_TAP
-        .jtag_tclk(jtag_tck),
-        .jtag_tms(jtag_tms),
-        .jtag_tdi(jtag_tdi),
-        .jtag_tdo(jtag_tdo),
-        .CLK_jtag_tclk_out(),
-        .CLK_GATE_jtag_tclk_out(),
+        .jtagg_v(jtagg_pins),
+        .jtagg_tdo(jtagg_tdo),
 `endif
         .sdram_cke(sdram_cke),
         .sdram_cs_n(sdram_cs_n),
@@ -293,8 +321,13 @@ module ulx3s_top(
 
     // The ESP32: released only by software (Board_IO, reset 0), and then only into its ROM
     // bootloader: GPIO0 low at EN's rising edge selects download mode, never the flashed firmware.
-    wire esp32_en, board_reconf;
     assign user_programn = board_reconf ? 1'b0 : 1'bz;
     assign wifi_en    = esp32_en;
     assign wifi_gpio0 = 1'b0;
 endmodule
+
+`ifdef JTAG_TAP
+`ifdef VERILATOR
+`include "ecp5_jtag_model.v"
+`endif
+`endif

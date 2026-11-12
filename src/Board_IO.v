@@ -21,7 +21,13 @@
 //       0x04 BTN     RO  [6:0] buttons, 1 = pressed: 0 PWR, 1 FIRE1 (also the SoC reset),
 //                        2 FIRE2, 3 UP, 4 DOWN, 5 LEFT, 6 RIGHT.  Not debounced.
 //       0x08 SW      RO  [3:0] DIP switches, 1 = on
-//       0x0C ESP32   RW  [0] EN: 1 releases the ESP32 from reset (reset value 0: held).  src/Top.v
+//       0x0C ESP32   RW  [0] EN: 1 releases the ESP32 from reset (reset value 0: held).  [1] RO: the
+//                        level on the ESP32's TX line (pulled down at the pin: 1 = something drives
+//                        it high, as a running ESP32 does when idle).  [2] STRAP (reset 0): drive the
+//                        ESP32's GPIO2 (sd_d0, the microSD DO) low while the SD chip select is high,
+//                        so that EN rising with GPIO0 low selects the ROM's download mode (GPIO2 is
+//                        pulled up at the pin; GPIO0 low with GPIO2 high is "HSPI flash boot").  Set
+//                        it, release EN, wait a few ms, clear it.  src/Top.v
 //                        holds its GPIO0 low, so released it can only run its ROM bootloader.
 //       0x10 POWER   RW  write 0x504F4646 ("POFF", all four byte lanes): raise SHUTDOWN, which turns the
 //                        board off (wake: BTN0, the RTC alarm, re-plugging US1; while US1 powers it, the
@@ -43,12 +49,14 @@ module board_io (
 
     input  wire [6:0]  btn_i,       // at the pin: btn_i[0] is active low, the others active high
     input  wire [3:0]  sw_i,
+    input  wire        esp32_tx_i,  // the ESP32's TX pin (pulled down)
 
     input  wire        scl_i,
     input  wire        sda_i,
     output reg         scl_low,     // 1 = drive the line low, 0 = release it
     output reg         sda_low,
     output reg         esp32_en,    // the ESP32's EN pin: 0 = held in reset
+    output reg         esp32_strap, // 1 = hold GPIO2 (sd_d0) low while the SD card is deselected
     output reg         shutdown,    // 1 = turn the board off
     output reg         reconf       // 1 = pull PROGRAMN low (reconfigure from flash)
 `ifdef FORMAL
@@ -75,6 +83,7 @@ module board_io (
     reg [1:0] scl_m, sda_m;
     reg [6:0] btn_m, btn_s;
     reg [3:0] sw_m, sw_s;
+    reg [1:0] etx_m;
     wire scl_s = scl_m[1];
     wire sda_s = sda_m[1];
     always @(posedge clk) begin
@@ -82,6 +91,7 @@ module board_io (
         sda_m <= {sda_m[0], sda_i};
         btn_m <= btn_i;  btn_s <= {btn_m[6:1], ~btn_m[0]};
         sw_m  <= sw_i;   sw_s  <= sw_m;
+        etx_m <= {etx_m[0], esp32_tx_i};
     end
 
     // ---------------- registers ----------------
@@ -135,7 +145,7 @@ module board_io (
                         2'd0: rb_rdata <= 32'h47504931;
                         2'd1: rb_rdata <= {25'b0, btn_s};
                         2'd2: rb_rdata <= {28'b0, sw_s};
-                        2'd3: rb_rdata <= {31'b0, esp32_en};
+                        2'd3: rb_rdata <= {29'b0, esp32_strap, etx_m[1], esp32_en};
                     endcase
                 else if (sel_i2c)
                     case (reg_a)
@@ -155,7 +165,7 @@ module board_io (
         if (take && rb_we && sel_gpio && rb_addr[4:2] == 3'd5 && rb_wstrb == 4'hF && rb_wdata == 32'h52454346)
             reconf <= 1'b1;
         if (take && rb_we && sel_gpio && rb_addr[4:2] == 3'd3 && rb_wstrb[0])
-            esp32_en <= rb_wdata[0];
+            begin esp32_en <= rb_wdata[0]; esp32_strap <= rb_wdata[2]; end
 
         if (wr_i2c)
             case (reg_a)
@@ -262,6 +272,7 @@ module board_io (
         end
         if (rst) begin
             esp32_en <= 1'b0;
+            esp32_strap <= 1'b0;
             shutdown <= 1'b0;
             reconf   <= 1'b0;
             rb_ack   <= 1'b0;

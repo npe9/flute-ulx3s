@@ -156,6 +156,8 @@ U0 JitInit()
   JitAdd("SndHz", &SndHz, 1, 1);
   JitAdd("SndVol", &SndVol, 1, 0);
   JitAdd("Beep", &Beep, 0, 1);
+  JitAdd("AdcRd", &AdcRd, 1, 0);
+  JitAdd("AdcShow", &AdcShow, 0, 1);
   JitAdd("PowerOffFor", &PowerOffFor, 1, 1);
   JitAdd("Reconf", &Reconf, 0, 1);
   JitAdd("BoardHelp", &BoardHelp, 0, 1);

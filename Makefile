@@ -96,6 +96,11 @@ endif
 # onto a global net (~3.8K LSR sinks off general routing).  Synthesis only;
 # sim/strict_bram/run.sh matches it by default (BSV_POSITIVE_RESET=1).
 YOSYS_DEFS  += -DBSV_POSITIVE_RESET
+# The DTM on the configuration JTAG port (JTAGG, src/Top.v) when the BSV has it (lx45; before that
+# Top.v's JTAG_TAP block was never synthesized: yosys did not get the define).
+ifneq ($(filter JTAG_TAP,$(DEFINES)),)
+YOSYS_DEFS  += -DJTAG_TAP
+endif
 
 # Sim builds omit the JTAG TAP (the Bluesim top is the BSV module
 # itself); the UART DMI bridge provides debug access in simulation too.
