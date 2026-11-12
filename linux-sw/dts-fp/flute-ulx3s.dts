@@ -156,6 +156,17 @@
 			gpio-controller;
 			#gpio-cells = <2>;
 		};
+		/* gpio1 ESP32 (0x0C): line 0 EN (0 = held in reset), 1 its TX level (read only), 2 STRAP
+		 * (GPIO2 low while the SD card is deselected; with EN rising = ROM download mode) */
+		esp32_gpio: gpio@c000800c {
+			compatible = "wd,mbl-gpio";
+			reg = <0xc000800c 0x4>;
+			reg-names = "dat";
+			gpio-controller;
+			#gpio-cells = <2>;
+			ngpios = <3>;
+			gpio-line-names = "ESP32_EN", "ESP32_TXD", "ESP32_GPIO2_LOW";
+		};
 		/* gpio1 POWER (0x10) and RECONF (0x14): each acts only on its full-word magic value */
 		board_ctl: syscon@c0008010 {
 			compatible = "syscon";

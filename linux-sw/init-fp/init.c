@@ -16,7 +16,9 @@
  * powers the board back on); "reboot" reloads the FPGA from flash (syscon-reboot, PROGRAMN);
  * "beep" sends SND_TONE 440 to the flute-audio beep input device and reads the tone registers back
  * through /dev/mem (the ALSA volume stays as it is: muted after boot, so this is silent);
- * "adc" prints the eight MAX11125 channels from /sys/bus/iio/devices/iio:device0 (max1112x). */
+ * "adc" prints the eight MAX11125 channels from /sys/bus/iio/devices/iio:device0 (max1112x);
+ * "esp32" resets the ESP32 into its ROM's download mode (gpio1 0x0C through /dev/mem: EN, STRAP)
+ * and sends esptool's SYNC on /dev/ttyS1 (raw), printing whether the ROM answered. */
 #define SYS_write 64
 #define SYS_clone 220
 #define SYS_getpid 172
@@ -29,6 +31,9 @@
 #define SYS_mount 40
 #define SYS_reboot 142
 #define SYS_sync 81
+#define SYS_clock_nanosleep_time64 407
+#define TCGETS 0x5401
+#define TCSETS 0x5402
 #define O_NONBLOCK 0x800
 #define RTC_RD_TIME 0x80247009   /* _IOR('p', 0x09, struct rtc_time) */
 #define AT_FDCWD (-100)
@@ -187,6 +192,52 @@ static void adc_show(void)
 	}
 	puts1("\n");
 }
+static void msleep(long ms)
+{
+	struct ts64 ts = { ms / 1000, (ms % 1000) * 1000000 };
+	sys5(SYS_clock_nanosleep_time64, 1 /* CLOCK_MONOTONIC */, 0, (long)&ts, 0, 0);
+}
+/* the kernel's struct termios on riscv (asm-generic): four flags, c_line, c_cc[19] */
+struct ktermios_ { u32 iflag, oflag, cflag, lflag; unsigned char line, cc[19]; };
+static void esp32_test(void)
+{
+	static const unsigned char sync[] = { 0xC0, 0x00, 0x08, 0x24, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x07, 0x07, 0x12, 0x20 };
+	unsigned char pkt[46], buf[256];
+	long m = sys5(SYS_openat, AT_FDCWD, (long)"/dev/mem", 2 | 0x101000, 0, 0);
+	long p = m < 0 ? -1 : sys6(SYS_mmap2, 0, 4096, 3, 1, m, 0xc0008 /* gpio1 */);
+	if (m >= 0) sys3(SYS_close, m, 0, 0);
+	if ((unsigned long)p >= 0xfffff000ul) { puts1("esp32: no /dev/mem\n"); return; }
+	volatile u32 *g = (volatile u32 *)p;
+	long fd = sys5(SYS_openat, AT_FDCWD, (long)"/dev/ttyS1", 2 | O_NONBLOCK | 0x100 /* O_NOCTTY */, 0, 0);
+	if (fd < 0) { puts1("esp32: no /dev/ttyS1\n"); return; }
+	struct ktermios_ t;
+	if (sys3(SYS_ioctl, fd, TCGETS, (long)&t) == 0) {
+		t.iflag = 0; t.oflag = 0; t.lflag = 0;
+		t.cflag |= 0x80 /* CREAD */ | 0x800 /* CLOCAL */;
+		sys3(SYS_ioctl, fd, TCSETS, (long)&t);
+	}
+	g[3] = 0; msleep(50);
+	g[3] = 4; msleep(5);                 /* GPIO2 low, EN low */
+	g[3] = 5; msleep(50);                /* EN rises: download mode */
+	g[3] = 1; msleep(100);               /* GPIO2 released */
+	puts1((g[3] & 2) ? "esp32: TX driven, " : "esp32: TX not driven, ");
+	while (sys3(SYS_read, fd, (long)buf, sizeof buf) > 0) ;   /* what the ROM printed */
+	for (int i = 0; i < 13; i++) pkt[i] = sync[i];
+	for (int i = 13; i < 45; i++) pkt[i] = 0x55;
+	pkt[45] = 0xC0;
+	int ok = 0;
+	for (int k = 0; k < 5 && !ok; k++) {
+		sys3(SYS_write, fd, (long)pkt, sizeof pkt);
+		msleep(100);
+		long n = sys3(SYS_read, fd, (long)buf, sizeof buf);
+		for (long i = 0; i + 2 < n; i++)
+			if (buf[i] == 0xC0 && buf[i + 1] == 0x01 && buf[i + 2] == 0x08) ok = 1;
+	}
+	sys3(SYS_close, fd, 0, 0);
+	g[3] = 0;                            /* hold it in reset again */
+	puts1(ok ? "the ROM answered SYNC  esp32 ok\n" : "no SYNC reply  esp32 BAD\n");
+}
 static void console_poll(void)
 {
 	static char line[64];
@@ -212,7 +263,9 @@ static void console_poll(void)
 		beep_test();
 	} else if (streq(line, "adc")) {
 		adc_show();
-	} else if (n) { puts1("commands: poweroff, reboot, beep, adc\n"); }
+	} else if (streq(line, "esp32")) {
+		esp32_test();
+	} else if (n) { puts1("commands: poweroff, reboot, beep, adc, esp32\n"); }
 }
 /* button events since the last call: struct input_event on rv32 (time64) is 16 bytes */
 static void keys_poll(void)

@@ -1,5 +1,6 @@
 // ulx3s_drv.hc -- ULX3S board drivers for the HolyC REPL: the MCP7940N RTC (I2C), the buttons and
-// DIP switches, the audio jack's tone generator, the MAX11125 ADC, power-off and reconfigure.
+// DIP switches, the audio jack's tone generator, the MAX11125 ADC, the ESP32 (reset, download
+// mode, SYNC over uart1), power-off and reconfigure.
 // Included from jit.hc (after print/str/mem), registered in JitInit.
 //
 // The same blob boots on SoCs without these devices (the 25 MHz main build, Bluesim), so nothing
@@ -17,6 +18,7 @@
 #define BRD_DEV_GPIO1   10
 #define BRD_DEV_AUDIO   11
 #define BRD_DEV_SPI2    12
+#define BRD_DEV_UART1   13
 
 U32 BrdRd(U32 a)
 {
@@ -561,6 +563,84 @@ U0 AdcShow()
   }
 }
 
+// ---------------- ESP32 (EN/TX/STRAP at gpio1 0x0C, its UART0 on uart1 at 115200) ----------------
+// src/Top.v holds the ESP32's GPIO0 low, so a released ESP32 can only run its ROM bootloader.
+// gpio1 0x0C: [0] EN (0 = held in reset), [1] its TX level, [2] STRAP: GPIO2 (sd_d0) low while
+// the SD card is deselected.  GPIO0 low with GPIO2 low = download mode (esptool's protocol);
+// with GPIO2 high (its pull-up) the ROM tries the SPI flash with HSPI pins and stops.
+// From the host, scripts/esp32_bridge.py bridges esptool to it through the board.
+
+U0 Esp32Off()
+{
+  U32 g = BrdNeed(BRD_DEV_GPIO1, "gpio1");
+  if (g)
+    BrdWr(g + 0x0C, 0);
+}
+
+// Reset into the ROM's download mode; 1 when its TX line is then driven (it is running).
+I64 Esp32Download()
+{
+  U32 g = BrdNeed(BRD_DEV_GPIO1, "gpio1");
+  if (!g)
+    return 0;
+  BrdWr(g + 0x0C, 0);
+  Sleep(50);
+  BrdWr(g + 0x0C, 4);                       // GPIO2 low, EN still low
+  Sleep(5);
+  BrdWr(g + 0x0C, 5);                       // EN rises: download mode
+  Sleep(50);
+  BrdWr(g + 0x0C, 1);                       // let GPIO2 go
+  Sleep(50);
+  return (BrdRd(g + 0x0C) >> 1) & 1;
+}
+
+// esptool's SYNC (SLIP framed) to the ROM; 1 when it answers.  Call Esp32Download() first.
+I64 Esp32Sync()
+{
+  U32 u, t0, lim, i, k, n, st;
+  U8 hdr[13];
+  u = BrdNeed(BRD_DEV_UART1, "uart1");
+  if (!u)
+    return 0;
+  hdr[0] = 0xC0; hdr[1] = 0x00; hdr[2] = 0x08; hdr[3] = 0x24; hdr[4] = 0x00;
+  hdr[5] = 0; hdr[6] = 0; hdr[7] = 0; hdr[8] = 0;
+  hdr[9] = 0x07; hdr[10] = 0x07; hdr[11] = 0x12; hdr[12] = 0x20;
+  lim = BrdTimerHz() / 10;
+  while (BrdRd(u + 0x14) & 1)
+    BrdRd(u);                               // drop what the ROM printed
+  for (k = 0; k < 5; k++) {
+    for (i = 0; i < 45; i++) {
+      while (!(BrdRd(u + 0x14) & 0x20))
+        ;
+      if (i < 13)
+        BrdWr(u, hdr[i]);
+      else if (i < 45)
+        BrdWr(u, 0x55);
+    }
+    while (!(BrdRd(u + 0x14) & 0x20))
+      ;
+    BrdWr(u, 0xC0);
+    // the reply starts C0 01 08
+    st = 0;
+    n = 0;
+    t0 = BrdTimeLo();
+    while (BrdTimeLo() - t0 < lim) {
+      if (BrdRd(u + 0x14) & 1) {
+        i = BrdRd(u) & 0xFF;
+        n++;
+        if (st == 0 && i == 0xC0) st = 1;
+        else if (st == 1 && i == 0x01) st = 2;
+        else if (st == 2 && i == 0x08) {
+          Print("esp32: SYNC answered (try %d)\n", k + 1);
+          return 1;
+        } else st = (i == 0xC0);
+      }
+    }
+  }
+  UartStr("esp32: no SYNC reply\n");
+  return 0;
+}
+
 U0 BoardHelp()
 {
   UartStr(
@@ -572,6 +652,7 @@ U0 BoardHelp()
     "BtnWait(ms)               wait for a button (0 = forever); bit number or -1\n"
     "Snd(ona) SndHz(hz) SndVol(0-8) Beep()   tone on the audio jack (Snd(0) = off)\n"
     "AdcRd(ch) AdcShow()       MAX11125 ADC: channel 0-7 (12 bits), all eight in mV\n"
+    "Esp32Download() Esp32Sync() Esp32Off()   ESP32 ROM download mode, esptool SYNC\n"
     "Sleep(ms) BrdRd(addr) BrdWr(addr,v)   32-bit register access\n"
     "PowerOff() PowerOffFor(s) Reconf()\n");
 }

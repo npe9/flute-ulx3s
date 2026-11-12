@@ -395,6 +395,24 @@ CS is high (the card's DO is then high-impedance). GPIO12 = `sd_d2` must stay lo
   rising with GPIO0 low selects the ROM's download mode. Board: the ROM answers esptool's SYNC
   (`c0 01 08 04 00 07 12 55 55 00 00 00 00 c0`, five replies) and prints nothing first (GPIO15 low
   silences it). Board_IO formal: prove PASS, 16/16 mutants (new: strapreset, strapbit).
+  esptool through the board (`test/esp32_bridge.c` + `scripts/esp32_bridge.py`, lx45c and later):
+  chip_id ESP32-D0WDQ6 rev 1.0, 40 MHz crystal, MAC a4:cf:12:17:1b:60; flash_id 0x20/0x4016, 4 MB,
+  3.3 V. Long reads failed their MD5; traced (SoC-side capture vs host log: the SoC got 00, the
+  host 80) to the console link, not the ESP32 link: **on macOS the FT231X runs at 600015 baud when
+  asked for 625000** (measured: host sends 0x55s, the board times 256-byte windows), so it samples
+  the FPGA's 625000 bits late and reads a 0 last data bit as 1, about 6% of back-to-back 0x00
+  bytes, 0% of 0x00 between 0xFF. Same on the promoted lx44 (old, not an lx45 regression). Host ->
+  board is clean (the FPGA receiver tolerates 4%). Pin DRIVE 16 and SLEWRATE FAST (config edits)
+  change nothing. Workaround: `esp32_bridge.py --read-flash` (digest-checked reads from 16 KB,
+  halved on each failure down to 512 B, then the stub's whole-range MD5). Full 4 MB backup
+  2026-11-12 on lx45d: 528 s, 332 retries, md5 fd656393ff7018eeceb71143a761922b matches the
+  ESP32's (build/esp32-flash-backup-20261112.bin, not in git); fixed 16 KB reads gave up at 0x8000. Real fix (user's call; touches the loader, dmi.py, sims, CI): a
+  console rate every FT231X driver makes exactly, 600000 (3 MHz / 5; 50 MHz / 83.3) or 1000000
+  (3 MHz / 3; 50 MHz / 50 exactly).
+  The ESP32 ROM's own replies come at ~111 kbaud (auto-baud), the stub's at 115208.
+  Drivers (board, lx45d): TempleOS `Esp32Download();` 1 (TX driven), `Esp32Sync();` 1 (answered
+  on try 2), `Esp32Off();` (hw_board_drv.py 14/14); Linux DT node `esp32_gpio` (wd,mbl-gpio:
+  ESP32_EN / ESP32_TXD / ESP32_GPIO2_LOW) and init's `esp32` command over /dev/ttyS1: "esp32 ok".
 - **Linux beep.** flute-audio registers an EV_SND input device ("ULX3S Flute beep", SND_TONE /
   SND_BELL); CTRL is a shadowed read-modify-write so PCM and tone no longer clear each other. init's
   `beep` command: board (lx44) TONE 56817, CTRL 2 at 440 Hz, off CTRL 0, volume 0 (silent): "beep ok".
