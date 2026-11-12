@@ -6,6 +6,8 @@
 #define JIT_BASE  0x81A00000
 #define JIT_END   0x81E00000
 #define JIT_GLOBB 0x81900000
+// ULX3S board drivers (RTC, buttons, sound, power): registered at the end of JitInit.
+#include "/bootstrap/hc_repl/ulx3s_drv.hc"
 // Boot registers ~230 AOT symbols via JitAdd; the rest is session headroom for
 // Run/redefine. Overrun used to be silent (JitAdd → -1, symptom deferred to a
 // later "unknown fun"), so JitAdd now names the function that did not fit.
@@ -139,6 +141,27 @@ U0 JitInit()
   JitAdd("MemCpy", &MemCpy, 3, 0);
   JitAdd("Atoi", &Atoi, 1, 0);
   JitAdd("Str2I64", &Str2I64, 3, 0);
+  // ulx3s_drv.hc
+  JitAdd("Sleep", &Sleep, 1, 1);
+  JitAdd("I2cRd", &I2cRd, 2, 0);
+  JitAdd("I2cWr", &I2cWr, 3, 0);
+  JitAdd("RtcShow", &RtcShow, 0, 0);
+  JitAdd("RtcSet", &RtcSet, 6, 0);
+  JitAdd("RtcAlarmIn", &RtcAlarmIn, 1, 0);
+  JitAdd("RtcAlarmOff", &RtcAlarmOff, 0, 1);
+  JitAdd("Btns", &Btns, 0, 0);
+  JitAdd("Sws", &Sws, 0, 0);
+  JitAdd("BtnWait", &BtnWait, 1, 0);
+  JitAdd("Snd", &Snd, 1, 1);
+  JitAdd("SndHz", &SndHz, 1, 1);
+  JitAdd("SndVol", &SndVol, 1, 0);
+  JitAdd("Beep", &Beep, 0, 1);
+  JitAdd("PowerOffFor", &PowerOffFor, 1, 1);
+  JitAdd("Reconf", &Reconf, 0, 1);
+  JitAdd("BoardHelp", &BoardHelp, 0, 1);
+  JitAdd("BrdRd", &BrdRd, 1, 0);
+  JitAdd("BrdWr", &BrdWr, 2, 1);
+  JitAdd("BrdTimeLo", &BrdTimeLo, 0, 0);
 }
 
 U0 JitW(U32 w)

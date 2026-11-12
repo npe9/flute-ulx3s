@@ -66,7 +66,8 @@ ULX3S_REPL_SRCS := ulx3s_repl/ulx3s_memmap.hc \
                    ulx3s_repl/ulx3s_mem.hc \
                    ulx3s_repl/ulx3s_fs.hc \
                    ulx3s_repl/ulx3s_trap.hc \
-                   ulx3s_repl/jit.hc
+                   ulx3s_repl/jit.hc \
+                   ulx3s_repl/ulx3s_drv.hc
 
 # The board header is derived from the elaboration-time SoC manifest
 # (../build/soc-memory-map.json), which the Bluespec design emits via
@@ -107,6 +108,8 @@ $(REPL_ROOT)/.setup-stamp: $(ULX3S_REPL_SRCS) $(FLUTE_MAP_SRCS) scripts/gen_boar
 	@cp ulx3s_repl/ulx3s_uart.hc    $(REPL_ROOT)/bootstrap/hc_repl/uart.hc
 	@cp ulx3s_repl/ulx3s_start.hc   $(REPL_ROOT)/bootstrap/hc_repl/start.hc
 	@cp ulx3s_repl/jit.hc          $(REPL_ROOT)/bootstrap/hc_repl/jit.hc
+	@rm -f $(REPL_ROOT)/bootstrap/hc_repl/ulx3s_drv.hc
+	@cp ulx3s_repl/ulx3s_drv.hc    $(REPL_ROOT)/bootstrap/hc_repl/ulx3s_drv.hc
 	@# Regenerate seed_embed.hc so the embedded seed files use ULX3S addresses
 	@# (e.g., MEMFS_BASE=0x81000000) instead of the upstream QEMU-virt values.
 	@# GEN_MAX_EMBED=96 keeps MemfsSeed ~5 KB: the full ~100 KB seed hashes

@@ -924,6 +924,7 @@ U0 Exit()
 
 U0 PowerOff()
 {
+  BrdPowerOff;                // the board's shutdown pin (ulx3s_drv.hc); returns if still on
   Quit;
 }
 // Fail -- Fail()
