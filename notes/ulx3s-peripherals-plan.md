@@ -336,8 +336,20 @@ syscon-poweroff, the flute-audio ALSA driver); ci/bluesim_gate.sh PASS.
 
 Board: hw suite 76/0/2; hw_board_drv 10/0; rtc_test ok (alarm fired, VBATEN on). Linux:
 rtc-ds1307 set the system clock from the RTC, `keys` input0, ALSA card 0 "ULX3S Flute audio",
-ttyS1, ran 6 min. Not run (the user's call): PowerOff / PowerOffFor / Reconf, and Linux
-`poweroff`.
+ttyS1, ran 6 min.
+
+**Power-off, tested 2026-11-12 (user asked), board powered from US1:** TempleOS
+`PowerOffFor(20)` wrote POFF (gpio1 0x10 reads back 1, the shutdown pin driven) and the board
+stayed on, as expected while the FT231X holds it on through D18; the alarm fired (0x0D ALM0IF
+set, ALMPOL 0). Linux: init now takes console commands, `poweroff` (sysfs wakealarm "+20", then
+syscon-poweroff: "reboot: Power down", then "Unable to poweroff system" because US1 holds the
+power) and `reboot` (syscon-reboot = RECONF, not run: it reloads the user's flash bitstream). The
+RTC node needs `wakeup-source` (no IRQ), or rtc-ds1307 drops the alarm feature; its
+mcp794xx_set_alarm keeps ALMPOL 0 and matches the full date, and its alarm fired too. A real
+power cut needs the board powered from US2 or the battery connector (the user's test).
+
+**lx44 PROMOTED 2026-11-12** (user: "promote the one you recommend"): `build/ulx3s_top.bit` =
+lx44 247fd603, lx40 kept as `build/ulx3s_top.lx40.bit`. CI run 43171873099 all green.
 
 **ESP32: no reply.** esp32_probe released EN with GPIO0 low and got 0 bytes: no ROM banner, no
 SYNC reply. Likely cause, not confirmed: the strap pins share the SD lines. GPIO2 = `sd_d0`

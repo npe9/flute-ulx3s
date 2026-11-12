@@ -10,7 +10,10 @@
  * /dev/mem and prints "video: ..."; the banner and the tick lines also go to tty0 (fbcon).
  * Board devices (lx44): it mounts devtmpfs on /dev, prints the RTC's time ("rtc: ...", rtc-ds1307 on
  * i2c-ocores), whether the buttons (gpio-keys-polled) and the audio card are there, and from then on
- * one line per button press or release ("key CODE down|up"). */
+ * one line per button press or release ("key CODE down|up").
+ * Console commands (one line each, read once a tick): "poweroff" arms the RTC alarm 20 s ahead
+ * through /sys/class/rtc/rtc0/wakealarm and powers off (syscon-poweroff, the shutdown pin; MFP
+ * powers the board back on); "reboot" reloads the FPGA from flash (syscon-reboot, PROGRAMN). */
 #define SYS_write 64
 #define SYS_clone 220
 #define SYS_getpid 172
@@ -21,6 +24,8 @@
 #define SYS_mmap2 222
 #define SYS_ioctl 29
 #define SYS_mount 40
+#define SYS_reboot 142
+#define SYS_sync 81
 #define O_NONBLOCK 0x800
 #define RTC_RD_TIME 0x80247009   /* _IOR('p', 0x09, struct rtc_time) */
 #define AT_FDCWD (-100)
@@ -88,6 +93,7 @@ static void put2(u32 v) { char b[3] = { '0' + v / 10 % 10, '0' + v % 10, 0 }; pu
 
 /* lx44 board devices.  keys_fd stays open for the tick loop. */
 static long keys_fd = -1;
+static long con_fd = -1;    /* /dev/console, non-blocking: console commands */
 static void board_devices(void)
 {
 	long r = sys5(SYS_mount, (long)"devtmpfs", (long)"/dev", (long)"devtmpfs", 0, 0);
@@ -109,6 +115,40 @@ static void board_devices(void)
 	fd = sys5(SYS_openat, AT_FDCWD, (long)"/dev/snd/controlC0", 0, 0, 0);
 	if (fd >= 0) sys3(SYS_close, fd, 0, 0);
 	puts1(fd >= 0 ? "audio: card 0\n" : "audio: none\n");
+	con_fd = sys5(SYS_openat, AT_FDCWD, (long)"/dev/console", O_NONBLOCK, 0, 0);
+}
+/* console commands; con_fd is /dev/console opened non-blocking (canonical mode: whole lines) */
+static int streq(const char *a, const char *b) { while (*a && *a == *b) a++, b++; return *a == *b; }
+static void write_file(const char *path, const char *v)
+{
+	long fd = sys5(SYS_openat, AT_FDCWD, (long)path, 1 /* O_WRONLY */, 0, 0);
+	long r = fd < 0 ? fd : sys3(SYS_write, fd, (long)v, slen(v));
+	if (fd >= 0) sys3(SYS_close, fd, 0, 0);
+	puts1(path); puts1(r < 0 ? ": write failed " : ": ok\n");
+	if (r < 0) { putu((u32)-r); puts1("\n"); }
+}
+static void console_poll(void)
+{
+	static char line[64];
+	if (con_fd < 0) return;
+	long n = sys3(SYS_read, con_fd, (long)line, sizeof line - 1);
+	if (n <= 0) return;
+	while (n > 0 && (line[n - 1] == '\n' || line[n - 1] == '\r')) n--;
+	line[n] = 0;
+	if (streq(line, "poweroff")) {
+		sys5(SYS_mount, (long)"sysfs", (long)"/sys", (long)"sysfs", 0, 0);
+		write_file("/sys/class/rtc/rtc0/wakealarm", "0");
+		write_file("/sys/class/rtc/rtc0/wakealarm", "+20");
+		puts1("poweroff: wake in 20 s\n");
+		sys3(SYS_sync, 0, 0, 0);
+		sys5(SYS_reboot, 0xfee1dead, 672274793, 0x4321fedc /* POWER_OFF */, 0, 0);
+		puts1("poweroff: still running\n");
+	} else if (streq(line, "reboot")) {
+		puts1("reboot: reconfigure from flash\n");
+		sys3(SYS_sync, 0, 0, 0);
+		sys5(SYS_reboot, 0xfee1dead, 672274793, 0x01234567 /* RESTART */, 0, 0);
+		puts1("reboot: still running\n");
+	} else if (n) { puts1("commands: poweroff, reboot\n"); }
 }
 /* button events since the last call: struct input_event on rv32 (time64) is 16 bytes */
 static void keys_poll(void)
@@ -198,6 +238,7 @@ static void run(int tag)
 		if (chain_d(tag) != d0 || chain_s(tag) != s0) { puts1("FP CHAIN MISMATCH proc "); putu(tag); puts1("\n"); bad = 1; }
 		if (tag == 1) {
 			keys_poll();
+			console_poll();
 			sys3(SYS_clock_gettime64, 1, (long)&now, 0);
 			puts1("tick "); putu(n); puts1("  uptime "); putu((u32)now.sec);
 			puts1(bad ? " s  fp BAD\n" : " s  fp ok\n");

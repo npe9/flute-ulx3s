@@ -133,6 +133,8 @@
 			rtc: rtc@6f {
 				compatible = "microchip,mcp7940x";
 				reg = <0x6f>;
+				/* MFP (alarm 0, ALMPOL 0) powers the board back on: no IRQ, wake only */
+				wakeup-source;
 			};
 		};
 		/* gpio1 BTN (src/Board_IO.v): input only, 1 = pressed; 0 PWR, 1 FIRE1 (also the SoC reset),
@@ -196,6 +198,14 @@
 		regmap = <&board_ctl>;
 		offset = <0x0>;
 		value = <0x504f4646>;
+		mask = <0xffffffff>;
+	};
+	/* reboot = RECONF: PROGRAMN low, the FPGA reloads its configuration from flash */
+	reboot {
+		compatible = "syscon-reboot";
+		regmap = <&board_ctl>;
+		offset = <0x4>;
+		value = <0x52454346>;
 		mask = <0xffffffff>;
 	};
 
