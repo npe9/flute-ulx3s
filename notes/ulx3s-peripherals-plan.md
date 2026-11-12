@@ -22,7 +22,7 @@ be confirmed against the schematic of the board revision in hand.
 | Real-time clock (MCP7940N, check) + battery | I2C on `gpdi_sda/scl` | phase 3: I2C host |
 | Audio jack: 4-bit resistor DACs L/R + ring2 | `audio_l/r/v[0..3]` | phase 3: tone generator, then PCM via sigma-delta |
 | Composite video / S/PDIF on ring2 | `audio_v` | phase 4 |
-| SPI ADC, 8 channels (MAX11125 here, MAX11123 in the LPF: check the board) | `adc_*` | phase 3: second SPI instance |
+| SPI ADC, 8 channels (MAX11125, confirmed on the board 2026-11-09; the LPF comment says MAX11123) | `adc_*` | phase 3: second SPI instance |
 | OLED/LCD header (7-pin SPI) | `oled_*` | phase 3: SPI instance (or the framebuffer mirrored to an ST7789-class LCD) |
 | GPIO headers: 28 differential pairs | `gp/gn[0..27]` | phase 3: PMOD GPIO; phase 4: Ethernet PMOD (RMII), LVDS |
 | HDMI Ethernet pair, CEC | `gpdi_ethp/ethn`, `gpdi_cec` | phase 4 (experimental) |
@@ -258,7 +258,7 @@ Pins checked against the official `emard/ulx3s` `doc/constraints/ulx3s_v20.lpf`.
 |---|---|---|
 | Buttons, switches, RTC, HDMI DDC | `src/Board_IO.v`: IP proved, 8/8 mutants; strict sim passes; lx41 gates running; **not yet run on the board** | board test of `io_test`; Linux `i2c-ocores` and RTC device tree |
 | Audio jack L/R | `src/Audio.v`: IP proved, 7/7 mutants; **not on the SoC yet** | integrate after lx41 at `0xC000_9000`; needs someone listening; volume resets to mute |
-| 8-channel ADC | none | second SPI instance at `0xC000_A000`, see below |
+| 8-channel ADC | lx43 (gating): `spi2`, a second `AXI4_SPI` at `0xC000_A000`, IRQ 3; `test/adc_test` against an echo stand-in; `test/adc_probe.bin` prints the chip's raw replies | work out the protocol on the board; Linux: `spidev`, or a driver if one exists (no kernel tree here to check) |
 | USB host (US2) | none | largest remaining item: low-speed HID host |
 | ESP32 UART | none | `uart1`; shares SD pins, so needs care with `wifi_en` |
 | OLED header | none | SPI instance at `0xC000_B000` |
@@ -282,8 +282,8 @@ Verified pins not yet in `constraints/ulx3s_85f.lpf`:
 - **Datasheet not read.** Analog Devices' PDF timed out from here, and the mirrors gave only page 1.
   Page 1 of Rev 1, 4/12 gives the family as 12/10/8-bit, 4/8/16-channel, 1 Msps, 16 MHz 3-wire SPI;
   it does not map part numbers to those figures.
-- **The part number is unconfirmed.** The LPF says MAX11123; this plan said MAX11125. Read the chip
-  on the board or the schematic.
+- **The part is a MAX11125** (the user read the board, 2026-11-09); the official LPF's comment saying
+  MAX11123 is wrong for this board.
 - The analog inputs share `gp/gn[14..17]` (AIN0 = gn14, AIN1 = gp14, ... AIN7 = gp17), so those
   header pairs must stay high-impedance in a build that uses the ADC. Input range and any series
   resistors are not confirmed.
@@ -292,3 +292,35 @@ Verified pins not yet in `constraints/ulx3s_85f.lpf`:
 - **Design consequence:** use the proved `AXI4_SPI` as a generic host and keep the chip's protocol in
   software. Only the SPI mode and SCLK limit then come from the chip, and SCKMODE and SCKDIV are
   software-settable. Do not write a hardware scanner against unread register definitions.
+
+### lx43 on the board (2026-11-11, seed 5: sys_clk 56.36 MHz, `build/lx43/ulx3s_top.bit` 0ddd9815)
+
+- **ADC link: up; data not decoded.** `test/adc_probe.bin` (emard's init words): with echo on
+  (0x8404) the MODE_CONTROL word 0x4006 comes back exactly on the next frame, so SPI mode 0, SCLK
+  and CS framing work. Every conversion frame then reads `0x3ffc`, and so did frames before any
+  configuration in a second run, so the reply format (channel id in [15:12]?) is not established.
+  Needs the datasheet's register map before an IIO driver.
+- **hw suite 73 PASS / 1 FAIL / 2 WARN** (`EXPECT_HZ=50000000 EXPECT_MISA=4014112f`). The FAIL is
+  real: the devROM record for spi2 reported IRQ 2, because `SoC_Map.bsv` listed it with
+  `irq_num_spi0` (copy-paste). The PLIC wiring in `SoC_Top.bsv` was already `irq_num_spi2`.
+  Fixed in source for lx44; the lx43 bitstream keeps the wrong table entry.
+- **SoC Info TIMER_HZ was wrong on every SYS_CLK_HZ build:** it repeated CPU_HZ (50 MHz), but
+  `Near_Mem_IO_AXI4` ticks mtime at a fixed 25 MHz (measured on the board: about 49.3M ticks in
+  about 1.96 s). Fixed in `src/SoC_Info.bsv` for lx44, with a hw-suite check. Linux was unaffected
+  (DT timebase 25 MHz).
+
+### TempleOS (HolyC REPL) board drivers: `templeos/ulx3s_repl/ulx3s_drv.hc`
+
+Included from `jit.hc`, registered in `JitInit`; `PowerOff` (ulx3s_trap.hc) now drives the
+shutdown pin first. Nothing touches a device at boot: each call finds its base in the live SoC
+Info device table (ids 9 i2c0, 10 gpio1, 11 audio), so the same blob still boots on the 25 MHz
+main SoC and in Bluesim. `BoardHelp;` lists: RtcShow, RtcSet (24 h; battery backup and oscillator
+on, per the datasheet's stop-ST/wait-OSCRUN sequence; weekday 1 = Sunday, as Linux's rtc-ds1307),
+RtcAlarmIn/RtcAlarmOff, I2cRd/I2cWr, Btns, Sws, BtnWait, Snd(ona) (TempleOS Ona2Freq, 60 = A440),
+SndHz, SndVol (default 2 of 8: it drives headphones), Beep, Sleep, BrdRd/BrdWr, PowerOff,
+PowerOffFor(s), Reconf. Notes: `reg` is a HolyC keyword (not a parameter name); the REPL evaluator
+takes no casts (`*(U32 *)a` fails), hence BrdRd; rdtime is not used (mtime over the bus).
+
+Board bench `scripts/hw_board_drv.py` (never calls PowerOff/Reconf; tone checked at volume 0):
+10/0 on lx43, the RTC set to UTC (`--set-rtc`). Full hw suite with the driver blob
+(`HW_BLOB=templeos/build-drv/repl.blob.bin`): 73/1/2, the same as the old blob.

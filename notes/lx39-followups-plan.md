@@ -14,7 +14,7 @@ in that directory); leave peer sessions' bsc/yosys/sby processes alone.
 | Area | Tooling | Last result |
 |---|---|---|
 | RV32IMC instruction smoke (10 checks) | `formal/run.sh`, upstream riscv-formal | **10/10 on lx39** (2026-11-06; 44 min at -j4, not ~4 min: the CPU has grown) |
-| A, B/Zk, S-mode, CSRs, traps, F/D (313 checks) | forks `~/src/riscv-formal-{a,dev,s,fp}`; `fp-ext` contains `s-mode` | FP 60/60 and S 15/15 on 2026-10-21..23; **not run since** (uDTLB, lx50, SFENCE urgency, ...) |
+| A, B/Zk, S-mode, CSRs, traps, F/D (313 checks) | forks `~/src/riscv-formal-{a,dev,s,fp}`; `fp-ext` contains `s-mode` | **2026-11-08/09 on the lx39+ netlist: 289 PASS** of the 298 that ran; the 9 FAILs are the 8 M checks (netlist without the ALTOPS stand-in; 8/8 PASS on the fixed one, row below) and `liveness` (latency, A6). 12 `csrc_*` targets have no template by design (`formal/csrs_msu_fd.cfg`) and their `csrw_*` checks PASS. Deep `freg` / `pc_fwd` / `reg` still running |
 | M (8 checks, FP config) | private checkout `~/src/riscv-formal-m`, netlist with the MBox ALTOPS stand-in | **8/8 PASS** 2026-11-09; operand-swap mutant fails `div`. Covers operands, dispatch, rd, unit timing; **not the arithmetic**, which only the ISA tests exercise |
 | `reg` / `pc_fwd` (deep) | `formal/run.sh deep` | pc_fwd PASS on E8d; reg stalls at step 75 (use `REG_DEPTH=74`) |
 | AXI4 protocol | vendored FVIP `formal/axi4_fvip` | Mem_Controller slave, AXI4_Deburster only |

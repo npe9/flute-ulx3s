@@ -362,6 +362,9 @@ module mkSoC_Boot_Tb (Empty);
 `ifdef INCLUDE_SPI0
       dut.flash_miso (1'b1); // blank flash: no boot image
 `endif
+`ifdef INCLUDE_SPI2
+      dut.adc_miso (1'b1);   // no ADC model in Bluesim
+`endif
 `ifdef INCLUDE_VIDEO
       // the video block is Verilog (src/Top.v): ack every register-bus access, reads return 0
       dut.rb_ack (pack (rg_rb_ack), 0);

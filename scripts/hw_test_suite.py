@@ -32,9 +32,9 @@ EXPECT_HZ = int(os.environ.get('EXPECT_HZ', '25000000'))
 # misa of the bitstream under test: main (ACIMU) by default, EXPECT_MISA=4014112f for the
 # linux-isa build (ACDFIMSU).
 EXPECT_MISA = os.environ.get('EXPECT_MISA', '40101105').lower()
-# SoC_Info device-table entries: 13 with spi0, the video block's two regions, i2c0, gpio1, audio; 10 before lx42 and with
+# SoC_Info device-table entries: 14 with spi0, spi2 (lx43), the video block's two regions, i2c0, gpio1, audio; 10 before lx42 and with
 # only video (INCLUDE_VIDEO); EXPECT_NDEV=8 for lx38 and older, 7 before spi0.
-EXPECT_NDEV = int(os.environ.get('EXPECT_NDEV', '13'))
+EXPECT_NDEV = int(os.environ.get('EXPECT_NDEV', '14'))
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dmi import DMI  # noqa: E402
@@ -42,7 +42,7 @@ from dmi import DMI  # noqa: E402
 PORT = '/dev/cu.usbserial-120001'
 BAUD = 625000
 BITSTREAM = os.environ.get('HW_BITSTREAM', 'build/ulx3s_top.bit')
-BLOB = 'templeos/build/ulx3s_repl.blob.bin'
+BLOB = os.environ.get('HW_BLOB', 'templeos/build/ulx3s_repl.blob.bin')
 if not os.path.exists(BLOB):              # no local TempleOS build: the committed image
     BLOB = 'templeos/prebuilt/ulx3s_repl.blob.bin'
 CHUNK = 256
@@ -460,7 +460,7 @@ def main():
         if rom:
             names = {0: 'boot_rom', 1: 'sdram', 2: 'clint', 3: 'uart0',
                      4: 'gpio', 5: 'plic', 6: 'soc_info', 7: 'spi0', 8: 'video', 9: 'i2c0',
-                     10: 'gpio1', 11: 'audio'}
+                     10: 'gpio1', 11: 'audio', 12: 'spi2'}
             recs = [rom[i * 8:(i + 1) * 8] for i in range(EXPECT_NDEV)]
             byname = {names.get(r[0], str(r[0])): r for r in recs}
             dmi_check('devROM uart0',
@@ -488,6 +488,11 @@ def main():
                 dmi_check('devROM i2c0, gpio1, audio have their own ids',
                           lambda: [byname[n][2] for n in ('i2c0', 'gpio1', 'audio')]
                           == [0xC0006000, 0xC0008000, 0xC0009000],
+                          lambda v: v)
+            if EXPECT_NDEV >= 14:
+                dmi_check('devROM spi2 (ADC host, IRQ 3)',
+                          lambda: byname['spi2'][2] == 0xC000A000
+                          and byname['spi2'][4] == 3,
                           lambda v: v)
 
         print('\n== E. bus error monitor ==', flush=True)

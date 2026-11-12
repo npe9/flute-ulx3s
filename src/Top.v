@@ -37,6 +37,10 @@ module ulx3s_top(
     inout  wire        gpdi_scl,    //   E12
     output wire [3:0]  audio_l,     // jack DACs (src/Audio.v), mute until software sets VOLUME
     output wire [3:0]  audio_r,
+    output wire        adc_sclk,    // on-board ADC (MAX11125) on the second SPI host: P17
+    output wire        adc_mosi,    //   R16
+    output wire        adc_csn,     //   R17
+    input  wire        adc_miso,    //   U16
     output wire [3:0]  gpdi_dp,     // DVI: blue A16, green A14, red A12, clock A17 (LVCMOS33D:
                                     // the _dn pins are driven as the complements)
     output wire        sdram_clk,   // F19
@@ -247,6 +251,10 @@ module ulx3s_top(
         .flash_mosi(flash_mosi),
         .flash_cs_n(flash_csn),
         .flash_miso_v(flash_miso),
+        .adc_sclk(adc_sclk),
+        .adc_mosi(adc_mosi),
+        .adc_cs_n(adc_csn),
+        .adc_miso_v(adc_miso),
         .rb_valid(rb_valid),
         .rb_we(rb_we),
         .rb_addr(rb_addr),

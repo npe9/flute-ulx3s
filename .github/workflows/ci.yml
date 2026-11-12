@@ -118,6 +118,8 @@ jobs:
           - { test: io, bin: io_test }
           # src/Audio.v, silent (VOLUME stays 0): registers, FIFO accounting, drain rate
           - { test: audio, bin: audio_test }
+          # spi2 (the ADC host) + sim/common/spi_echo_model.v: 16-bit words under CS hold
+          - { test: adc, bin: adc_test }
           # microSD host + sim/common/sd_spi_model.v: init, CSD, CMD17/18 reads, CMD24/25 writes
           - { test: sd, bin: sd_test_w, deadline: 100000000 }
     container:

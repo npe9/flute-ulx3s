@@ -70,6 +70,13 @@ interface ULX3S_Top_IFC;
    (* always_ready *)   method Bit #(1) flash_cs_n;
    (* always_enabled *) method Action   flash_miso (Bit #(1) v);
 `endif
+`ifdef INCLUDE_SPI2
+   // on-board ADC (MAX11125): adc_sclk, adc_mosi, adc_csn, adc_miso
+   (* always_ready *)   method Bit #(1) adc_sclk;
+   (* always_ready *)   method Bit #(1) adc_mosi;
+   (* always_ready *)   method Bit #(1) adc_cs_n;
+   (* always_enabled *) method Action   adc_miso (Bit #(1) v);
+`endif
 
 `ifdef INCLUDE_VIDEO
    // Register bus to the Verilog devices in src/Top.v (src/Video_DVI.v); protocol in
@@ -240,6 +247,14 @@ module mkULX3S_Top (ULX3S_Top_IFC);
    method Bit #(1) flash_cs_n = soc_top.flash_cs_n;
    method Action flash_miso (Bit #(1) v);
       soc_top.flash_miso (v);
+   endmethod
+`endif
+`ifdef INCLUDE_SPI2
+   method Bit #(1) adc_sclk = soc_top.adc_sclk;
+   method Bit #(1) adc_mosi = soc_top.adc_mosi;
+   method Bit #(1) adc_cs_n = soc_top.adc_cs_n;
+   method Action adc_miso (Bit #(1) v);
+      soc_top.adc_miso (v);
    endmethod
 `endif
 

@@ -182,3 +182,14 @@ LOCATE COMP "audio_r[2]"   SITE "D5" ;
 IOBUF  PORT "audio_r[2]"   PULLMODE=NONE IO_TYPE=LVCMOS33 DRIVE=16 ;
 LOCATE COMP "audio_r[3]"   SITE "C5" ;
 IOBUF  PORT "audio_r[3]"   PULLMODE=NONE IO_TYPE=LVCMOS33 DRIVE=16 ;
+
+# On-board ADC (MAX11125) on spi2: official ulx3s_v20.lpf.  Its inputs share gp/gn[14..17]:
+# keep those out of this file, so the FPGA pins stay high-impedance with no pull-up.
+LOCATE COMP "adc_csn"     SITE "R17" ;
+IOBUF  PORT "adc_csn"     PULLMODE=UP IO_TYPE=LVCMOS33 DRIVE=4 ;
+LOCATE COMP "adc_mosi"     SITE "R16" ;
+IOBUF  PORT "adc_mosi"     IO_TYPE=LVCMOS33 DRIVE=4 ;
+LOCATE COMP "adc_miso"     SITE "U16" ;
+IOBUF  PORT "adc_miso"     IO_TYPE=LVCMOS33 DRIVE=4 ;
+LOCATE COMP "adc_sclk"     SITE "P17" ;
+IOBUF  PORT "adc_sclk"     IO_TYPE=LVCMOS33 DRIVE=4 ;

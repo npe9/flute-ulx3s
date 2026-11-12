@@ -21,7 +21,7 @@ for f in "$BSC_LIB"/*.v; do
 done
 FILES+=("$ROOT/src/ASSIGN1.v"
         "$VERILOG_ALL"
-        "$ROOT/src/Top.v" "$ROOT/src/Video_DVI.v" "$ROOT/src/Board_IO.v" "$ROOT/src/Audio.v" "$ROOT/sim/common/i2c_slave_model.v"
+        "$ROOT/src/Top.v" "$ROOT/src/Video_DVI.v" "$ROOT/src/Board_IO.v" "$ROOT/src/Audio.v" "$ROOT/sim/common/i2c_slave_model.v" "$ROOT/sim/common/spi_echo_model.v"
         ./BRAM2.v
         ./ecp5_cells.v
         ./sdram_model.v

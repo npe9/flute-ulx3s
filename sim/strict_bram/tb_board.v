@@ -55,6 +55,10 @@ module sim_board (
     assign gpdi_sda = i2c_slave_low ? 1'b0 : 1'bz;
     i2c_slave_model i2c_slaves (.clk (clk), .scl (gpdi_scl), .sda (gpdi_sda), .sda_low (i2c_slave_low));
 
+    // the ADC's place: a stand-in that echoes the previous 16-bit word (sim/common/spi_echo_model.v)
+    wire adc_sclk, adc_mosi, adc_csn, adc_miso;
+    spi_echo_model adc (.clk (clk), .sck (adc_sclk), .mosi (adc_mosi), .cs_n (adc_csn), .miso (adc_miso));
+
     ulx3s_top top (
         .CLK      (clk),
         .BTN1     (btn1),
@@ -84,6 +88,10 @@ module sim_board (
         .gpdi_scl    (gpdi_scl),
         .audio_l     (),
         .audio_r     (),
+        .adc_sclk    (adc_sclk),
+        .adc_mosi    (adc_mosi),
+        .adc_csn     (adc_csn),
+        .adc_miso    (adc_miso),
         .gpdi_dp     (),
         .sdram_clk   (sdram_clk_o),
         .sdram_cke   (sdram_cke),

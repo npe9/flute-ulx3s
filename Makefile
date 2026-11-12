@@ -57,7 +57,7 @@ DEFINES := -D RV32 -D ISA_I -D ISA_M -D ISA_A -D ISA_C \
            -D ISA_PRIV_M -D ISA_PRIV_U -D ISA_PRIV_S -D SV32 -D SV32_ITLB \
            -D SHIFT_BARREL -D MULT_SYNTH \
            -D Near_Mem_Caches -D FABRIC64 \
-           -D INCLUDE_ACCEL0 -D INCLUDE_SPI0 -D INCLUDE_VIDEO \
+           -D INCLUDE_ACCEL0 -D INCLUDE_SPI0 -D INCLUDE_VIDEO -D INCLUDE_SPI2 \
            -D INCLUDE_GDB_CONTROL -D JTAG_TAP
 
 # FP=1: F and D extensions (stock Flute FBox).  Off by default: the stock FBox does not fit the
