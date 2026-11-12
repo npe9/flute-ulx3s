@@ -47,6 +47,11 @@ import Jtag_Control_Adapter :: *;
 interface ULX3S_Top_IFC;
    (* always_ready *)   method Bit #(1) serial_txd;
    (* always_enabled *) method Action  serial_rxd (Bit #(1) v);
+`ifdef INCLUDE_UART1
+   // ESP32 UART0 at 115200 (uart1): wifi_rxd is the FPGA's TX, wifi_txd its RX
+   (* always_ready *)   method Bit #(1) esp32_txd;
+   (* always_enabled *) method Action  esp32_rxd (Bit #(1) v);
+`endif
 
    (* always_ready *) method Bit #(8) leds;
 
@@ -136,6 +141,12 @@ module mkULX3S_Top (ULX3S_Top_IFC);
    SoC_Top_IFC          soc_top <- mkSoC_Top (fromInteger (sys_clk_hz));
    Sdram_Controller_IFC mem     <- mkSdram_Controller (sys_clk_hz);
    UART_Pins_IFC        uart    <- mkUART_Pins (sys_clk_hz, uart_baud);
+`ifdef INCLUDE_UART1
+   // the ESP32 ROM bootloader's rate (40 MHz crystal); the 16550 divisor is not used
+   UART_Pins_IFC        uart_esp32 <- mkUART_Pins (sys_clk_hz, 115_200);
+   mkConnection (soc_top.get_to_esp32, uart_esp32.put);
+   mkConnection (uart_esp32.get, soc_top.put_from_esp32);
+`endif
 
    // SoC raw memory port -> SDRAM controller
    mkConnection (soc_top.to_raw_mem, mem.mem_server);
@@ -211,6 +222,12 @@ module mkULX3S_Top (ULX3S_Top_IFC);
    // INTERFACE
 
    method serial_txd = uart.txd;
+`ifdef INCLUDE_UART1
+   method esp32_txd = uart_esp32.txd;
+   method Action esp32_rxd (Bit #(1) v);
+      uart_esp32.rxd (v);
+   endmethod
+`endif
 
    method Action serial_rxd (Bit #(1) v);
       uart.rxd (v);

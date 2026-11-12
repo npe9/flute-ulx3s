@@ -120,6 +120,10 @@ jobs:
           - { test: audio, bin: audio_test }
           # spi2 (the ADC host) + sim/common/spi_echo_model.v: 16-bit words under CS hold
           - { test: adc, bin: adc_test }
+          # uart1 + the ESP32 EN register; the bench loops the ESP32's RX to its TX while EN is high
+          - { test: esp32, bin: esp32_test }
+          # MCP7940N battery backup + alarm 0 (sim/common/i2c_slave_model.v seconds match)
+          - { test: rtc, bin: rtc_test }
           # microSD host + sim/common/sd_spi_model.v: init, CSD, CMD17/18 reads, CMD24/25 writes
           - { test: sd, bin: sd_test_w, deadline: 100000000 }
     container:

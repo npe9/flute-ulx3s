@@ -1,4 +1,5 @@
-// ULX3S Flute SoC: RV32IMAC (+S, U, Sv32, PMP), 32 MB SDRAM, CLINT, PLIC (2 contexts), 16550 UART.
+// ULX3S Flute SoC: RV32IMAC (+S, U, Sv32, PMP), 32 MB SDRAM, CLINT, PLIC (2 contexts), two 16550 UARTs,
+// two SPI hosts, I2C (RTC, HDMI DDC), buttons, switches, audio, power-off.  lx44 or later bitstream.
 // Map: Flute/src_Testbench/SoC/SoC_Map.bsv.  mtime ticks once per core clock (25 MHz board clock
 // by default; 32.142857 MHz with SYS_PLL=1).
 /dts-v1/;
@@ -16,6 +17,8 @@
 
 	aliases {
 		serial0 = &uart0;
+		serial1 = &uart1;
+		rtc0 = &rtc;
 	};
 
 	cpus {
@@ -104,6 +107,77 @@
 				disable-wp;
 			};
 		};
+		/* ESP32 UART0 (uart1, a fixed 115200 baud; clock-frequency is not used by the hardware).  The
+		 * ESP32 is held in reset unless gpio1 0x0C EN is set, and then only runs its ROM bootloader. */
+		uart1: serial@c0007000 {
+			compatible = "ns16550a";
+			reg = <0xc0007000 0x80>;
+			reg-shift = <2>;
+			reg-io-width = <4>;
+			clock-frequency = <25000000>;
+			current-speed = <115200>;
+			interrupt-parent = <&plic0>;
+			interrupts = <5>;
+		};
+		/* src/Board_IO.v: OpenCores I2C registers at a 4-byte stride, no IRQ (the driver polls).
+		 * The bus is shared by the MCP7940N RTC and the HDMI DDC (the monitor's EDID at 0x50). */
+		i2c0: i2c@c0006000 {
+			compatible = "opencores,i2c-ocores";
+			reg = <0xc0006000 0x20>;
+			reg-shift = <2>;
+			reg-io-width = <4>;
+			opencores,ip-clock-frequency = <50000000>;
+			clock-frequency = <100000>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			rtc: rtc@6f {
+				compatible = "microchip,mcp7940x";
+				reg = <0x6f>;
+			};
+		};
+		/* gpio1 BTN (src/Board_IO.v): input only, 1 = pressed; 0 PWR, 1 FIRE1 (also the SoC reset),
+		 * 2 FIRE2, 3 UP, 4 DOWN, 5 LEFT, 6 RIGHT */
+		buttons: gpio@c0008004 {
+			compatible = "wd,mbl-gpio";
+			reg = <0xc0008004 0x4>;
+			reg-names = "dat";
+			no-output;
+			gpio-controller;
+			#gpio-cells = <2>;
+		};
+		/* gpio1 SW: the four DIP switches, 1 = on */
+		switches: gpio@c0008008 {
+			compatible = "wd,mbl-gpio";
+			reg = <0xc0008008 0x4>;
+			reg-names = "dat";
+			no-output;
+			gpio-controller;
+			#gpio-cells = <2>;
+		};
+		/* gpio1 POWER (0x10) and RECONF (0x14): each acts only on its full-word magic value */
+		board_ctl: syscon@c0008010 {
+			compatible = "syscon";
+			reg = <0xc0008010 0x8>;
+		};
+		/* src/Audio.v: PCM FIFO and tone on the jack's 4-bit DACs (driver: kernel/patches) */
+		audio@c0009000 {
+			compatible = "ulx3s,flute-audio";
+			reg = <0xc0009000 0x1000>;
+			clock-frequency = <50000000>;
+		};
+		/* Second SPI host (src/AXI4_SPI.bsv) on the MAX11125 ADC, chip select 0.  The ADC has no
+		 * driver in Linux 6.12; it gets one once its protocol is checked on the board. */
+		spi2: spi@c000a000 {
+			compatible = "sifive,spi0";
+			reg = <0xc000a000 0x1000>;
+			clocks = <&spiclk>;
+			interrupt-parent = <&plic0>;
+			interrupts = <4>;
+			sifive,fifo-depth = <8>;
+			sifive,max-bits-per-word = <8>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+		};
 		/* DVI framebuffer (src/Video_DVI.v): 320x240 RGB565, scanned out doubled to 640x480.
 		 * simplefb does not program the hardware; /init sets MODE (0xc0010004) to 2. */
 		framebuffer@c1000000 {
@@ -114,5 +188,26 @@
 			stride = <640>;
 			format = "r5g6b5";
 		};
+	};
+
+	/* POWER: "POFF" raises SHUTDOWN.  While US1 powers the board the FT231X keeps it on. */
+	poweroff {
+		compatible = "syscon-poweroff";
+		regmap = <&board_ctl>;
+		offset = <0x0>;
+		value = <0x504f4646>;
+		mask = <0xffffffff>;
+	};
+
+	/* the buttons as keys (FIRE1 is left out: it is the SoC reset) */
+	keys {
+		compatible = "gpio-keys-polled";
+		poll-interval = <20>;
+		key-power { label = "PWR"; linux,code = <116>; gpios = <&buttons 0 0>; };
+		key-enter { label = "FIRE2"; linux,code = <28>; gpios = <&buttons 2 0>; };
+		key-up    { label = "UP"; linux,code = <103>; gpios = <&buttons 3 0>; };
+		key-down  { label = "DOWN"; linux,code = <108>; gpios = <&buttons 4 0>; };
+		key-left  { label = "LEFT"; linux,code = <105>; gpios = <&buttons 5 0>; };
+		key-right { label = "RIGHT"; linux,code = <106>; gpios = <&buttons 6 0>; };
 	};
 };

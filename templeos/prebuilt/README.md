@@ -7,6 +7,6 @@ checked out (`git submodule update --init templeos/tos`); CI does that on every 
 
 | file | md5 | built from |
 |---|---|---|
-| ulx3s_repl.blob.bin | 400a7be9109bad833498f1c39212d19e | templeos-cursor-riscv `ulx3s-repl` 7dc41b58 (the `templeos/tos` submodule), `make -C templeos holyc repl` for the 25 MHz main SoC map, 2026-10-28; board REPL eval checks pass |
+| ulx3s_repl.blob.bin | e798ec12726a7e2b0bb2a520efd4ec4f | templeos-cursor-riscv `ulx3s-repl` 7dc41b58 (the `templeos/tos` submodule) plus the ULX3S overlays with the board drivers (`ulx3s_repl/ulx3s_drv.hc`), `make -C templeos holyc repl` for the 25 MHz main SoC map, 2026-11-12; `ci/bluesim_gate.sh` PASS; on lx44 hw suite 76/0/2 and `scripts/hw_board_drv.py` 10/0 |
 
 Replace it only together with a passing `ci/bluesim_gate.sh` and board bench.

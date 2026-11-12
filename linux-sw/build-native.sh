@@ -37,6 +37,10 @@ fi
 OPENSBI_SRC=${OPENSBI_SRC:-$W/opensbi}
 [ -f "$OPENSBI_SRC/Makefile" ] || git clone -q --depth 1 -b $OPENSBI_TAG https://github.com/riscv-software-src/opensbi "$OPENSBI_SRC"
 
+# Our drivers (kernel/drivers): copied into the tree, hooked into Kconfig/Makefile once
+cp "$W/kernel/drivers/flute-audio.c" "$LINUX_SRC/sound/drivers/flute-audio.c"
+grep -q SND_FLUTE_AUDIO "$LINUX_SRC/sound/drivers/Kconfig" || sed -i '/^config SND_DUMMY$/i config SND_FLUTE_AUDIO\n\ttristate "ULX3S Flute SoC audio"\n\tdepends on OF\n\tselect SND_PCM\n\thelp\n\t  The audio jack of the ULX3S Flute SoC (src/Audio.v).\n' "$LINUX_SRC/sound/drivers/Kconfig"
+grep -q flute-audio "$LINUX_SRC/sound/drivers/Makefile" || echo 'obj-$(CONFIG_SND_FLUTE_AUDIO) += flute-audio.o' >> "$LINUX_SRC/sound/drivers/Makefile"
 # /init: no libc
 ${X}gcc -march=$MARCH -mabi=$MABI $CFLAGS_EXTRA -Os -static -nostdlib -ffreestanding -fno-pic -no-pie \
   -Wl,--build-id=none -o "$INIT/init" "$INIT/init.c"

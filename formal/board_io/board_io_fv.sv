@@ -1,5 +1,7 @@
 // Formal harness for src/Board_IO.v (formal/board_io/board_io.sby).  Unbounded by k-induction.
-//   bus:     rb_ack one cycle per request, one cycle after it; ID registers; GPIO reads the pins
+//   bus:     rb_ack one cycle per request, one cycle after it; ID registers; GPIO reads the pins;
+//            ESP32 EN resets to held and changes only on its own register's write; POWER and RECONF
+//            latch only on their magic words
 //   i2c:     both lines released when disabled or reset (they can only ever be pulled low);
 //            SDA changes while SCL is high only as the START or STOP step of a command;
 //            a byte written goes out MSB first, the bit on the wire at each SCL high matching the
@@ -17,7 +19,7 @@ module board_io_fv (input clk, input [15:0] rb_addr, input rb_valid_i, input rb_
     always @(posedge clk) if (rst) rc <= rc + 1;
     reg pv = 0; always @(posedge clk) pv <= 1;
 
-    wire rb_ack; wire [31:0] rb_rdata; wire scl_low, sda_low;
+    wire rb_ack; wire [31:0] rb_rdata; wire scl_low, sda_low, esp32_en, shutdown, reconf;
     wire [2:0] st, ph; wire [3:0] bits; wire en, c_wr, c_rd, c_sto, is_tick, tip, scl_s, sda_s; wire [7:0] sh, rxr, txr;
     // the bridge's side of the protocol: valid held with its payload until ack, dropped after it
     wire rb_valid = rb_valid_i && !rst;
@@ -32,7 +34,7 @@ module board_io_fv (input clk, input [15:0] rb_addr, input rb_valid_i, input rb_
     wire scl = !(scl_low || slave_scl_low), sda = !(sda_low || slave_sda_low);
     board_io dut (.clk(clk), .rst(rst), .rb_valid(rb_valid), .rb_we(rb_we), .rb_addr(rb_addr), .rb_wdata(rb_wdata),
                   .rb_wstrb(rb_wstrb), .rb_ack(rb_ack), .rb_rdata(rb_rdata), .btn_i(btn_i), .sw_i(sw_i),
-                  .scl_i(scl), .sda_i(sda), .scl_low(scl_low), .sda_low(sda_low),
+                  .scl_i(scl), .sda_i(sda), .scl_low(scl_low), .sda_low(sda_low), .esp32_en(esp32_en), .shutdown(shutdown), .reconf(reconf),
                   .f_state(st), .f_ph(ph), .f_bits(bits), .f_en(en), .f_wr(c_wr), .f_rd(c_rd), .f_sto(c_sto),
                   .f_shift(sh), .f_is_tick(is_tick), .f_tip(tip), .f_scl_s(scl_s), .f_sda_s(sda_s), .f_rxr(rxr), .f_txr(txr));
 
@@ -40,15 +42,39 @@ module board_io_fv (input clk, input [15:0] rb_addr, input rb_valid_i, input rb_
     always @(posedge clk) if (pv && !rst) begin
         if (rb_ack) assert ($past(rb_valid) && !$past(rb_ack));
         if ($past(rb_valid) && !$past(rb_ack) && !$past(rst)) assert (rb_ack);
-        if (rb_ack && !we_q && addr_q[15:12] == 4'h8 && addr_q[3:2] == 0) assert (rb_rdata == 32'h47504931);
+        if (rb_ack && !we_q && addr_q[15:12] == 4'h8 && addr_q[4:2] == 3'd0) assert (rb_rdata == 32'h47504931);
         if (rb_ack && !we_q && addr_q[15:12] == 4'h6 && addr_q[4:2] == 3'd7) assert (rb_rdata == 32'h49324331);
+    end
+    // ESP32 EN: held (0) through reset; changes only on a write to gpio1 0x0C, and reads back
+    always @(posedge clk) if (pv) begin
+        if ($past(rst)) assert (!esp32_en);
+        if (!rst && !$past(rst)) begin
+            if ($past(rb_valid && !rb_ack && rb_we && rb_addr[15:12] == 4'h8 && rb_addr[4:2] == 3'd3 && rb_wstrb[0]))
+                assert (esp32_en == $past(rb_wdata[0]));
+            else
+                assert (esp32_en == $past(esp32_en));
+            if (rb_ack && !we_q && addr_q[15:12] == 4'h8 && addr_q[4:2] == 3'd3) assert (rb_rdata == {31'b0, $past(esp32_en)});
+        end
+    end
+    // POWER / RECONF: clear through reset; set only by the full-word magic write to their own register;
+    // once set, held until reset (the board is going away); read back
+    always @(posedge clk) if (pv) begin
+        if ($past(rst)) assert (!shutdown && !reconf);
+        if (!rst && !$past(rst)) begin
+            assert (shutdown == ($past(shutdown) || $past(rb_valid && !rb_ack && rb_we && rb_addr[15:12] == 4'h8
+                    && rb_addr[4:2] == 3'd4 && rb_wstrb == 4'hF && rb_wdata == 32'h504F4646)));
+            assert (reconf == ($past(reconf) || $past(rb_valid && !rb_ack && rb_we && rb_addr[15:12] == 4'h8
+                    && rb_addr[4:2] == 3'd5 && rb_wstrb == 4'hF && rb_wdata == 32'h52454346)));
+            if (rb_ack && !we_q && addr_q[15:12] == 4'h8 && addr_q[4:2] == 3'd4) assert (rb_rdata == {31'b0, $past(shutdown)});
+            if (rb_ack && !we_q && addr_q[15:12] == 4'h8 && addr_q[4:2] == 3'd5) assert (rb_rdata == {31'b0, $past(reconf)});
+        end
     end
     // the pins reach the registers through exactly two flops, PWR inverted
     reg [6:0] b1, b2; reg [3:0] s1, s2;
     always @(posedge clk) begin b1 <= btn_i; b2 <= b1; s1 <= sw_i; s2 <= s1; end
     always @(posedge clk) if (pv && !rst && $past(pv) && $past(!rst)) begin
-        if (rb_ack && !we_q && addr_q[15:12] == 4'h8 && addr_q[3:2] == 1) assert (rb_rdata == {25'b0, $past(b2[6:1]), ~$past(b2[0])});
-        if (rb_ack && !we_q && addr_q[15:12] == 4'h8 && addr_q[3:2] == 2) assert (rb_rdata == {28'b0, $past(s2)});
+        if (rb_ack && !we_q && addr_q[15:12] == 4'h8 && addr_q[4:2] == 3'd1) assert (rb_rdata == {25'b0, $past(b2[6:1]), ~$past(b2[0])});
+        if (rb_ack && !we_q && addr_q[15:12] == 4'h8 && addr_q[4:2] == 3'd2) assert (rb_rdata == {28'b0, $past(s2)});
     end
 
     // ---------------- engine invariants, for induction ----------------

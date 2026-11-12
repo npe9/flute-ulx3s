@@ -1,5 +1,5 @@
 // i2c_slave_model: the board's I2C bus for benches, clocked so it builds under Verilator as well.
-// At 0x6F the MCP7940N registers (register 0 = seconds in BCD, bit 7 = ST; while ST is set it counts
+// At 0x6F the MCP7940N registers (alarm 0 matches on seconds only, ALM0MSK = 000) (register 0 = seconds in BCD, bit 7 = ST; while ST is set it counts
 // every TICK clocks, much faster than a real second so benches finish), at 0x50 a 128-byte EDID
 // with a valid header and checksum.  Open-drain: sda_low = 1 pulls the line low.
 module i2c_slave_model #(parameter TICK = 200000) (
@@ -41,6 +41,8 @@ module i2c_slave_model #(parameter TICK = 200000) (
             if (rtc[0][7]) rtc[0] <= (s_lo == 9) ? {1'b1, (s_hi == 5) ? 3'd0 : s_hi + 3'd1, 4'd0}
                                                  : {1'b1, s_hi, s_lo + 4'd1};
         end
+        // alarm 0, seconds match only (ALM0MSK = 000): sets ALM0IF while ALM0EN
+        if (rtc[7][4] && rtc[13][6:4] == 3'b000 && rtc[0][6:0] == rtc[10][6:0]) rtc[13][3] <= 1'b1;
         if (scl && scl_q && sda_q && !sda) begin            // START
             active = 1; n = 0; addressed = 0; have_ptr = 0; in_ack = 0; sending = 0; sda_low <= 0;
         end
@@ -72,7 +74,11 @@ module i2c_slave_model #(parameter TICK = 200000) (
                 end
                 else if (!rw) begin
                     if (!have_ptr) begin ptr = sr; have_ptr = 1; end
-                    else begin if (is_rtc) rtc[ptr[4:0]] <= sr; ptr = ptr + 1; end
+                    else begin
+                        // ALM0IF / ALM1IF cannot be written to 1, and a write to ALMxWKDAY clears them
+                        if (is_rtc) rtc[ptr[4:0]] <= (ptr[4:0] == 5'd13 || ptr[4:0] == 5'd20) ? (sr & 8'hF7) : sr;
+                        ptr = ptr + 1;
+                    end
                     sda_low <= 1;
                 end
                 else sda_low <= 0;                          // released for the master's ack

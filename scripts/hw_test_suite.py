@@ -32,9 +32,9 @@ EXPECT_HZ = int(os.environ.get('EXPECT_HZ', '25000000'))
 # misa of the bitstream under test: main (ACIMU) by default, EXPECT_MISA=4014112f for the
 # linux-isa build (ACDFIMSU).
 EXPECT_MISA = os.environ.get('EXPECT_MISA', '40101105').lower()
-# SoC_Info device-table entries: 14 with spi0, spi2 (lx43), the video block's two regions, i2c0, gpio1, audio; 10 before lx42 and with
+# SoC_Info device-table entries: 15 with spi0, spi2 (lx43), uart1 (lx44), the video block's two regions, i2c0, gpio1, audio; 10 before lx42 and with
 # only video (INCLUDE_VIDEO); EXPECT_NDEV=8 for lx38 and older, 7 before spi0.
-EXPECT_NDEV = int(os.environ.get('EXPECT_NDEV', '14'))
+EXPECT_NDEV = int(os.environ.get('EXPECT_NDEV', '15'))
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dmi import DMI  # noqa: E402
@@ -441,6 +441,11 @@ def main():
         dmi_check(f'SoCInfo cpu_hz {EXPECT_HZ}',
                   lambda: dmi.mem_read32(0xC0003010),
                   lambda v: v == EXPECT_HZ)
+        # mtime runs at 25 MHz on every ULX3S build (Near_Mem_IO_AXI4); before lx44 this
+        # register repeated CPU_HZ
+        dmi_check('SoCInfo timer_hz 25000000 (mtime rate)',
+                  lambda: dmi.mem_read32(0xC0003014),
+                  lambda v: v == 25000000)
         dmi_check('SoCInfo memory 32MB',
                   lambda: dmi.mem_read32(0xC0003018),
                   lambda v: v == 0x2000000)
@@ -460,7 +465,7 @@ def main():
         if rom:
             names = {0: 'boot_rom', 1: 'sdram', 2: 'clint', 3: 'uart0',
                      4: 'gpio', 5: 'plic', 6: 'soc_info', 7: 'spi0', 8: 'video', 9: 'i2c0',
-                     10: 'gpio1', 11: 'audio', 12: 'spi2'}
+                     10: 'gpio1', 11: 'audio', 12: 'spi2', 13: 'uart1'}
             recs = [rom[i * 8:(i + 1) * 8] for i in range(EXPECT_NDEV)]
             byname = {names.get(r[0], str(r[0])): r for r in recs}
             dmi_check('devROM uart0',
@@ -493,6 +498,11 @@ def main():
                 dmi_check('devROM spi2 (ADC host, IRQ 3)',
                           lambda: byname['spi2'][2] == 0xC000A000
                           and byname['spi2'][4] == 3,
+                          lambda v: v)
+            if EXPECT_NDEV >= 15:
+                dmi_check('devROM uart1 (ESP32 UART, IRQ 4)',
+                          lambda: byname['uart1'][2] == 0xC0007000
+                          and byname['uart1'][4] == 4,
                           lambda v: v)
 
         print('\n== E. bus error monitor ==', flush=True)

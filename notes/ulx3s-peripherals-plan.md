@@ -324,3 +324,24 @@ takes no casts (`*(U32 *)a` fails), hence BrdRd; rdtime is not used (mtime over 
 Board bench `scripts/hw_board_drv.py` (never calls PowerOff/Reconf; tone checked at volume 0):
 10/0 on lx43, the RTC set to UTC (`--set-rtc`). Full hw suite with the driver blob
 (`HW_BLOB=templeos/build-drv/repl.blob.bin`): 73/1/2, the same as the old blob.
+
+### lx44 (2026-11-12, seed 7: sys_clk 52.95 MHz, `build/lx44/ulx3s_top.bit` 247fd603)
+
+uart1 (ESP32 UART0, 115200) at 0xC000_7000 IRQ 4, ESP32 EN (gpio1 0x0C), POWER (0x10, "POFF")
+to `shutdown` G16, RECONF (0x14, "RECF") to `user_programn` M4, RTC alarm 0 in the sim model,
+the spi2 device-table IRQ and TIMER_HZ fixes. Board_IO formal: prove PASS, 13/13 mutants.
+Gate: ISA 94/94; strict cache amo sd fb io audio adc rtc esp32 PASS; PPM identical; J1 PASS;
+Linux F1 strict PASS (out-fp rebuilt: uart1, i2c-ocores + rtc-ds1307, gpio-keys-polled,
+syscon-poweroff, the flute-audio ALSA driver); ci/bluesim_gate.sh PASS.
+
+Board: hw suite 76/0/2; hw_board_drv 10/0; rtc_test ok (alarm fired, VBATEN on). Linux:
+rtc-ds1307 set the system clock from the RTC, `keys` input0, ALSA card 0 "ULX3S Flute audio",
+ttyS1, ran 6 min. Not run (the user's call): PowerOff / PowerOffFor / Reconf, and Linux
+`poweroff`.
+
+**ESP32: no reply.** esp32_probe released EN with GPIO0 low and got 0 bytes: no ROM banner, no
+SYNC reply. Likely cause, not confirmed: the strap pins share the SD lines. GPIO2 = `sd_d0`
+(J3) is an FPGA input with PULLMODE=UP, so the strap reads GPIO0=0/GPIO2=1, which is not download
+mode; GPIO15 = `sd_cmd` (MOSI) idling low silences the ROM's boot log. Fix to try in lx45: drive
+`sd_d0` low (and `sd_cmd` high) while EN is held and for a few ms after release, only while the SD
+CS is high (the card's DO is then high-impedance). GPIO12 = `sd_d2` must stay low (flash voltage).

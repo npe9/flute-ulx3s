@@ -59,6 +59,10 @@ module sim_board (
     wire adc_sclk, adc_mosi, adc_csn, adc_miso;
     spi_echo_model adc (.clk (clk), .sck (adc_sclk), .mosi (adc_mosi), .cs_n (adc_csn), .miso (adc_miso));
 
+    // the ESP32's place: its RX looped to its TX while EN is high (a stand-in, not the ROM)
+    wire wifi_gpio0, wifi_rxd;
+    wire wifi_txd = wifi_en ? wifi_rxd : 1'b1;
+
     ulx3s_top top (
         .CLK      (clk),
         .BTN1     (btn1),
@@ -82,7 +86,12 @@ module sim_board (
         .flash_wpn   (flash_wpn),
         .flash_holdn (flash_holdn),
         .btn_pwr_n   (1'b1),
-        .btn_rest    (5'b0),
+             .shutdown    (),
+        .user_programn (),
+        .wifi_gpio0  (wifi_gpio0),
+        .wifi_rxd    (wifi_rxd),
+        .wifi_txd    (wifi_txd),
+   .btn_rest    (5'b0),
         .sw          (4'b0101),
         .gpdi_sda    (gpdi_sda),
         .gpdi_scl    (gpdi_scl),

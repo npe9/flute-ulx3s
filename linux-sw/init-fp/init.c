@@ -7,7 +7,10 @@
  * It also reads block 0 of /dev/mmcblk0 (microSD over spi-sifive + mmc_spi) once the card has
  * been probed (retried for 30 ticks) and prints "sd: sig XXXX first ..." or "sd: none".
  * The DVI framebuffer: it sets the scan-out to 320x240 RGB565 (simplefb's format) through
- * /dev/mem and prints "video: ..."; the banner and the tick lines also go to tty0 (fbcon). */
+ * /dev/mem and prints "video: ..."; the banner and the tick lines also go to tty0 (fbcon).
+ * Board devices (lx44): it mounts devtmpfs on /dev, prints the RTC's time ("rtc: ...", rtc-ds1307 on
+ * i2c-ocores), whether the buttons (gpio-keys-polled) and the audio card are there, and from then on
+ * one line per button press or release ("key CODE down|up"). */
 #define SYS_write 64
 #define SYS_clone 220
 #define SYS_getpid 172
@@ -16,6 +19,10 @@
 #define SYS_close 57
 #define SYS_read 63
 #define SYS_mmap2 222
+#define SYS_ioctl 29
+#define SYS_mount 40
+#define O_NONBLOCK 0x800
+#define RTC_RD_TIME 0x80247009   /* _IOR('p', 0x09, struct rtc_time) */
 #define AT_FDCWD (-100)
 #define VIDEO_PAGE 0xc0010   /* 0xc0010000 >> 12: ID at +0, MODE at +4 */
 
@@ -76,6 +83,43 @@ static void putx(u32 v)
 {
 	char b[9]; for (int i = 7; i >= 0; i--, v >>= 4) b[i] = "0123456789abcdef"[v & 15];
 	b[8] = 0; puts1(b);
+}
+static void put2(u32 v) { char b[3] = { '0' + v / 10 % 10, '0' + v % 10, 0 }; puts1(b); }
+
+/* lx44 board devices.  keys_fd stays open for the tick loop. */
+static long keys_fd = -1;
+static void board_devices(void)
+{
+	long r = sys5(SYS_mount, (long)"devtmpfs", (long)"/dev", (long)"devtmpfs", 0, 0);
+	if (r < 0) { puts1("devtmpfs: mount failed "); putu((u32)-r); puts1("\n"); }
+	struct { int sec, min, hour, mday, mon, year, wday, yday, isdst; } tm;
+	long fd = sys5(SYS_openat, AT_FDCWD, (long)"/dev/rtc0", 0, 0, 0);
+	if (fd < 0) puts1("rtc: no /dev/rtc0\n");
+	else {
+		r = sys3(SYS_ioctl, fd, RTC_RD_TIME, (long)&tm);
+		sys3(SYS_close, fd, 0, 0);
+		if (r < 0) { puts1("rtc: read error "); putu((u32)-r); puts1(" (time not set?)\n"); }
+		else {
+			puts1("rtc: "); putu(tm.year + 1900); puts1("-"); put2(tm.mon + 1); puts1("-"); put2(tm.mday);
+			puts1(" "); put2(tm.hour); puts1(":"); put2(tm.min); puts1(":"); put2(tm.sec); puts1("\n");
+		}
+	}
+	keys_fd = sys5(SYS_openat, AT_FDCWD, (long)"/dev/input/event0", O_NONBLOCK, 0, 0);
+	puts1(keys_fd >= 0 ? "keys: /dev/input/event0\n" : "keys: none\n");
+	fd = sys5(SYS_openat, AT_FDCWD, (long)"/dev/snd/controlC0", 0, 0, 0);
+	if (fd >= 0) sys3(SYS_close, fd, 0, 0);
+	puts1(fd >= 0 ? "audio: card 0\n" : "audio: none\n");
+}
+/* button events since the last call: struct input_event on rv32 (time64) is 16 bytes */
+static void keys_poll(void)
+{
+	struct { u32 sec, usec; unsigned short type, code; int value; } ev[8];
+	if (keys_fd < 0) return;
+	long n = sys3(SYS_read, keys_fd, (long)ev, sizeof ev);
+	for (long i = 0; n > 0 && i < n / (long)sizeof ev[0]; i++)
+		if (ev[i].type == 1 /* EV_KEY */ && ev[i].value != 2) {
+			puts1("key "); putu(ev[i].code); puts1(ev[i].value ? " down\n" : " up\n");
+		}
 }
 
 /* fld f0-f31 from a, fscsr fcsr, clock_nanosleep(CLOCK_MONOTONIC, 0, ts, 0), then fsd
@@ -153,6 +197,7 @@ static void run(int tag)
 		if (got != fcsr) { puts1("FCSR MISMATCH proc "); putu(tag); puts1(" got "); putx(got); puts1("\n"); }
 		if (chain_d(tag) != d0 || chain_s(tag) != s0) { puts1("FP CHAIN MISMATCH proc "); putu(tag); puts1("\n"); bad = 1; }
 		if (tag == 1) {
+			keys_poll();
 			sys3(SYS_clock_gettime64, 1, (long)&now, 0);
 			puts1("tick "); putu(n); puts1("  uptime "); putu((u32)now.sec);
 			puts1(bad ? " s  fp BAD\n" : " s  fp ok\n");
@@ -164,6 +209,7 @@ static void run(int tag)
 
 void _start_c(void)
 {
+	board_devices();
 	video_on();
 	puts1("\nHello from Linux user space on Flute RV32IMAFDC (ULX3S): FP context test\n");
 	long pid = sys5(SYS_clone, 17 /* SIGCHLD */, 0, 0, 0, 0);

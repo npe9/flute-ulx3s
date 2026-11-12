@@ -20,7 +20,12 @@ module ulx3s_top(
     input  wire        jtag_tdi,    // J1_5-  (gn[0], C11)
     output wire        jtag_tdo,    // J1_7+  (gp[1], A10)
 `endif
-    output wire        wifi_en,     // ESP32 hold in reset, F1
+    output wire        wifi_en,     // ESP32 EN, F1: 0 holds it in reset (gpio1 0x0C, src/Board_IO.v)
+    output wire        wifi_gpio0,  // ESP32 GPIO0, L2: held low, so it can only start its ROM bootloader
+    output wire        shutdown,    // G16: 1 turns the board off (gpio1 0x10 POWER, src/Board_IO.v)
+    output wire        user_programn, // M4: pulled low to reconfigure from flash (gpio1 0x14 RECONF), else released
+    output wire        wifi_rxd,    // ESP32 UART0 RX, K3: the FPGA transmits (uart1)
+    input  wire        wifi_txd,    // ESP32 UART0 TX, K4: the FPGA receives
     output wire        sd_clk,      // microSD SPI mode: SCLK, H2
     output wire        sd_cmd,      //   MOSI, J1
     input  wire        sd_d0,       //   MISO, J3
@@ -219,7 +224,8 @@ module ulx3s_top(
         .rb_valid(rb_valid && !rb_sel_video && !rb_sel_audio), .rb_we(rb_we), .rb_addr(rb_addr[15:0]),
         .rb_wdata(rb_wdata), .rb_wstrb(rb_wstrb), .rb_ack(io_ack), .rb_rdata(io_rdata),
         .btn_i({btn_rest, BTN1, btn_pwr_n}), .sw_i(sw),
-        .scl_i(gpdi_scl), .sda_i(gpdi_sda), .scl_low(i2c_scl_low), .sda_low(i2c_sda_low)
+        .scl_i(gpdi_scl), .sda_i(gpdi_sda), .scl_low(i2c_scl_low), .sda_low(i2c_sda_low),
+        .esp32_en(esp32_en), .shutdown(shutdown), .reconf(board_reconf)
     );
 
     wire [9:0]  tmds_r, tmds_g, tmds_b;
@@ -241,6 +247,8 @@ module ulx3s_top(
         .RST_N(top_rst),
         .serial_txd(ftdi_rxd),
         .serial_rxd_v(ftdi_txd),
+        .esp32_txd(wifi_rxd),
+        .esp32_rxd_v(wifi_txd),
         .leds(led),
         .btn1_v(BTN1),
         .sd_sclk(sd_clk),
@@ -283,6 +291,10 @@ module ulx3s_top(
         .sdram_dq_in_v(sdram_dq_iob)
     );
 
-    // Keep the ESP32 from interfering with the FTDI UART
-    assign wifi_en = 1'b0;
+    // The ESP32: released only by software (Board_IO, reset 0), and then only into its ROM
+    // bootloader: GPIO0 low at EN's rising edge selects download mode, never the flashed firmware.
+    wire esp32_en, board_reconf;
+    assign user_programn = board_reconf ? 1'b0 : 1'bz;
+    assign wifi_en    = esp32_en;
+    assign wifi_gpio0 = 1'b0;
 endmodule

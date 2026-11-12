@@ -21,6 +21,13 @@
 //       0x04 BTN     RO  [6:0] buttons, 1 = pressed: 0 PWR, 1 FIRE1 (also the SoC reset),
 //                        2 FIRE2, 3 UP, 4 DOWN, 5 LEFT, 6 RIGHT.  Not debounced.
 //       0x08 SW      RO  [3:0] DIP switches, 1 = on
+//       0x0C ESP32   RW  [0] EN: 1 releases the ESP32 from reset (reset value 0: held).  src/Top.v
+//                        holds its GPIO0 low, so released it can only run its ROM bootloader.
+//       0x10 POWER   RW  write 0x504F4646 ("POFF", all four byte lanes): raise SHUTDOWN, which turns the
+//                        board off (wake: BTN0, the RTC alarm, re-plugging US1; while US1 powers it, the
+//                        FT231X's D18 keeps it on).  Any other write is ignored.  Reads [0] = SHUTDOWN.
+//       0x14 RECONF  RW  write 0x52454346 ("RECF", all four lanes): pull PROGRAMN low, so the FPGA leaves
+//                        user mode and reconfigures from the flash.  Any other write is ignored.
 // ================================================================
 
 module board_io (
@@ -40,7 +47,10 @@ module board_io (
     input  wire        scl_i,
     input  wire        sda_i,
     output reg         scl_low,     // 1 = drive the line low, 0 = release it
-    output reg         sda_low
+    output reg         sda_low,
+    output reg         esp32_en,    // the ESP32's EN pin: 0 = held in reset
+    output reg         shutdown,    // 1 = turn the board off
+    output reg         reconf       // 1 = pull PROGRAMN low (reconfigure from flash)
 `ifdef FORMAL
     ,
     output wire [2:0]  f_state,
@@ -118,12 +128,14 @@ module board_io (
             rb_ack   <= 1'b1;
             rb_rdata <= 32'b0;
             if (!rb_we) begin
-                if (sel_gpio)
+                if (sel_gpio && rb_addr[4])
+                    rb_rdata <= {31'b0, rb_addr[2] ? reconf : shutdown};
+                else if (sel_gpio)
                     case (rb_addr[3:2])
                         2'd0: rb_rdata <= 32'h47504931;
                         2'd1: rb_rdata <= {25'b0, btn_s};
                         2'd2: rb_rdata <= {28'b0, sw_s};
-                        default: ;
+                        2'd3: rb_rdata <= {31'b0, esp32_en};
                     endcase
                 else if (sel_i2c)
                     case (reg_a)
@@ -137,6 +149,13 @@ module board_io (
                     endcase
             end
         end
+
+        if (take && rb_we && sel_gpio && rb_addr[4:2] == 3'd4 && rb_wstrb == 4'hF && rb_wdata == 32'h504F4646)
+            shutdown <= 1'b1;
+        if (take && rb_we && sel_gpio && rb_addr[4:2] == 3'd5 && rb_wstrb == 4'hF && rb_wdata == 32'h52454346)
+            reconf <= 1'b1;
+        if (take && rb_we && sel_gpio && rb_addr[4:2] == 3'd3 && rb_wstrb[0])
+            esp32_en <= rb_wdata[0];
 
         if (wr_i2c)
             case (reg_a)
@@ -242,6 +261,9 @@ module board_io (
             ph      <= 3'd0;
         end
         if (rst) begin
+            esp32_en <= 1'b0;
+            shutdown <= 1'b0;
+            reconf   <= 1'b0;
             rb_ack   <= 1'b0;
             rb_rdata <= 32'b0;
             prer     <= 16'hFFFF;

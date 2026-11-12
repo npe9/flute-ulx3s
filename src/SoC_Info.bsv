@@ -93,6 +93,15 @@ Bit #(32) soc_magic = 32'h464C_5331;    // "FLS1"
 (* synthesize *)
 module mkSoC_Info #(int clk_hz) (SoC_Info_IFC);
 
+   // TIMER_HZ is the CLINT mtime rate: Near_Mem_IO_AXI4 ticks mtime at a fixed 25 MHz (the DTB
+   // timebase-frequency) when SYS_CLK_HZ is defined, at the system clock otherwise.  It used to
+   // repeat CPU_HZ, which was wrong on every SYS_CLK_HZ build (50 MHz lx: 2x).
+`ifdef SYS_CLK_HZ
+   Bit #(32) timer_hz = 25_000_000;
+`else
+   Bit #(32) timer_hz = pack (clk_hz);
+`endif
+
    Reg #(Bit #(Wd_Addr)) rg_addr_base <- mkRegU;
    Reg #(Bit #(Wd_Addr)) rg_addr_lim  <- mkRegU;
 
@@ -240,7 +249,7 @@ module mkSoC_Info #(int clk_hz) (SoC_Info_IFC);
       else if (w == 1)
          v = (high ? features : build_date);               // 0x08 BUILD_DATE, 0x00C FEATURES
       else if (w == 2)
-         v = pack (clk_hz);                               // 0x010 CPU_HZ, 0x014 TIMER_HZ
+         v = (high ? timer_hz : pack (clk_hz));        // 0x010 CPU_HZ, 0x014 TIMER_HZ
       else if (w == 3)
          v = (high ? fromInteger (n_devices)              // 0x018 MEMORY_SIZE, 0x01C DEVICE_COUNT
               : truncate (mem0_controller_addr_size));
