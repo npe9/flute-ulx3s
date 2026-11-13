@@ -238,8 +238,8 @@ $(SYNTH_VERILOG): $(VERILOG) src/RO_TRNG.v
 NO_RW_CHECK_MEMS ?= *btb_bramcore2*
 YOSYS_RW_CHECK = $(if $(strip $(NO_RW_CHECK_MEMS)),synth_ecp5 -top $(TOP) -run :map_ram; $(foreach m,$(NO_RW_CHECK_MEMS),select -list t:$$mem_v2 n:$(m) %i; setattr -set no_rw_check 1 t:$$mem_v2 n:$(m) %i;) synth_ecp5 -top $(TOP) -run map_ram: -json $@,synth_ecp5 -top $(TOP) -json $@)
 
-$(JSON): $(SYNTH_VERILOG) src/Top.v src/Video_DVI.v src/Board_IO.v src/Audio.v src/ASSIGN1.v
-	$(YOSYS) -p 'read_verilog -DINCLUDE_GDB_CONTROL $(YOSYS_DEFS) $(BSC_VERILOG_FILES) src/ASSIGN1.v $(SYNTH_VERILOG) src/Top.v src/Video_DVI.v src/Board_IO.v src/Audio.v; $(YOSYS_RW_CHECK)'
+$(JSON): $(SYNTH_VERILOG) src/Top.v src/Video_DVI.v src/Board_IO.v src/Audio.v src/Spdif_Tx.v src/ASSIGN1.v
+	$(YOSYS) -p 'read_verilog -DINCLUDE_GDB_CONTROL $(YOSYS_DEFS) $(BSC_VERILOG_FILES) src/ASSIGN1.v $(SYNTH_VERILOG) src/Top.v src/Video_DVI.v src/Board_IO.v src/Audio.v src/Spdif_Tx.v; $(YOSYS_RW_CHECK)'
 
 synth: $(JSON)
 

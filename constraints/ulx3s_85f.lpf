@@ -201,3 +201,22 @@ LOCATE COMP "shutdown"      SITE "G16" ;
 IOBUF  PORT "shutdown"      PULLMODE=DOWN IO_TYPE=LVCMOS33 DRIVE=4 ;
 LOCATE COMP "user_programn" SITE "M4" ;
 IOBUF  PORT "user_programn" PULLMODE=UP IO_TYPE=LVCMOS33 DRIVE=4 ;
+
+# Jack ring 2 (S/PDIF out: audio 0x1C PINS) and the HDMI utility lines: official ulx3s_v20.lpf
+# sites.  HPD and Utility are inputs here (the reference LPF makes them a LVCMOS33D output pair for
+# HDMI Ethernet, which this board's bare pins cannot carry); HPD comes through 549 ohm and a 3.6 V
+# zener.  CEC is open drain (src/Top.v) with the board's pull-up.
+LOCATE COMP "audio_v[3]"   SITE "E5" ;
+LOCATE COMP "audio_v[2]"   SITE "F5" ;
+LOCATE COMP "audio_v[1]"   SITE "F2" ;
+LOCATE COMP "audio_v[0]"   SITE "H5" ;
+IOBUF  PORT "audio_v[3]"   PULLMODE=NONE IO_TYPE=LVCMOS33 DRIVE=16 ;
+IOBUF  PORT "audio_v[2]"   PULLMODE=NONE IO_TYPE=LVCMOS33 DRIVE=16 ;
+IOBUF  PORT "audio_v[1]"   PULLMODE=NONE IO_TYPE=LVCMOS33 DRIVE=16 ;
+IOBUF  PORT "audio_v[0]"   PULLMODE=NONE IO_TYPE=LVCMOS33 DRIVE=16 ;
+LOCATE COMP "gpdi_cec"     SITE "A18" ;
+LOCATE COMP "gpdi_hpd"     SITE "B20" ;
+LOCATE COMP "gpdi_util"    SITE "A19" ;
+IOBUF  PORT "gpdi_cec"     PULLMODE=UP   IO_TYPE=LVCMOS33 DRIVE=4 ;
+IOBUF  PORT "gpdi_hpd"     PULLMODE=DOWN IO_TYPE=LVCMOS33 ;
+IOBUF  PORT "gpdi_util"    PULLMODE=NONE IO_TYPE=LVCMOS33 ;

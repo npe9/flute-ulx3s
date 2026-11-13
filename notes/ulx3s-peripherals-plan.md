@@ -450,6 +450,26 @@ io PASS, J1 PASS (hello banner at cycle 289393; 449928 on lx45d: faster UART, an
 old ROM), Bluesim boot / REPL / virtual board PASS, ROM check MATCH. Board s3 and s5: suite 76/0,
 hw_board_drv 14/0, Linux esp32 ok, zero_test 0 wrong, JTAG ROM reads exact, esptool chip_id.
 **Promoted (user): build/ulx3s_top.bit = lx46 s5, md5 13ae8846**; lx45d s5 kept as
-build/ulx3s_top.lx45d.bit (d7f3cd13), lx44 as build/ulx3s_top.lx44.bit. The flash image at
-0xD00000 is still lx44 at 625000 baud: a board that boots from flash talks at the old rate until
-that image is rewritten.
+build/ulx3s_top.lx45d.bit (d7f3cd13), lx44 as build/ulx3s_top.lx44.bit. Configuration flash (2026-11-13, user OK'd):
+offset 0 = the ULX3S factory self-test (power-on loads it; untouched); 0xD00000 = lx46 s5 packed
+`--bootaddr 0` (build/multiboot/lx46_flash_D00000.bit, written with `openFPGALoader -f -o
+0xD00000 --verify`), reached by Reconf from build/multiboot/lx46_sram_jumpD00000.bit (bootaddr
+0xD00000). build/multiboot/mb_test46.py: SRAM REPL -> Reconf -> the flash image's ROM banner at
+1000000 baud, REPL loads -> Reconf -> factory test at 115200. Replaced lx44 there.
+
+### lx47: HDMI lines (CEC, HPD, Utility) and S/PDIF (2026-11-13)
+
+HDMI: CEC (A18, open drain, 10 k pull-up), HPD (B20) and Utility/HEAC+ (A19) are gpio1 0x18
+([0] CEC_LOW; read [8] CEC, [9] HPD, [10] Utility, 2-flop synchronised). HDMI Ethernet (HEC)
+needs an analog hybrid on HEAC+/-, so it is not possible on this board; the pins are inputs only.
+CEC is bit-banged (Linux cec-gpio needs an IRQ-capable GPIO): TempleOS CecSelf/CecPoll, Linux init
+`hdmi` (rdtime for timing: the CLINT is PMP-protected from U mode).
+S/PDIF: src/Spdif_Tx.v (biphase, 128 cells per sample via a fractional accumulator, B/M/W
+preambles, parity, channel status SFREQ), audio 0x1C ([3:0] pins on audio_v E5/F5/F2/H5, [11:8]
+SFREQ). Formal: formal/spdif (receiver-style decoder harness, prove + mutants), audio/board_io
+harnesses extended; sim/spdif_ut decodes 420 samples exactly. Linux flute-audio "IEC958 Playback
+Switch", TempleOS SpdifSet/PcmTone.
+Gate: seeds s3 54.71 / s5 47.72 / s7 48.97 MHz (only s3 >= 50: the margin is shrinking), ISA
+94/94, strict cache/esp32/io/audio PASS, J1 PASS, spdif_ut PASS, Bluesim PASS. Board (s3,
+bc4fc576): suite 76/0, hw_board_drv 19/0, Linux `hdmi ok`. WARNs: HPD reads 0 with the TV
+attached, no CEC ACK from the TV (address 0); S/PDIF not yet checked with a receiver.

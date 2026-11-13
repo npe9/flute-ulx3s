@@ -16,9 +16,11 @@ smtbmc boolector
 
 [script]
 read_verilog -formal -D FORMAL Audio.v
+read_verilog -formal -D FORMAL Spdif_Tx.v
 read_verilog -formal -sv audio_fv.sv
 prep -top audio_fv
 
 [files]
 ../../src/Audio.v
+../../src/Spdif_Tx.v
 audio_fv.sv

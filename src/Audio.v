@@ -13,6 +13,12 @@
 //                    [17] UNDERRUN since last write here (FIFO empty at a sample time: the last
 //                    sample is held)
 //                W   clears both sticky bits
+//   0x1C SPDIF   RW  [3:0] PINS: the jack's ring 2 DAC bits (audio_v) that carry S/PDIF, 0 = off
+//                    (reset: the ring idles low); 0xF drives all four (about 0.5 V into a 75 ohm
+//                    coax load).  [11:8] SFREQ, channel status byte 3 bits 0-3: 0000 44.1 kHz,
+//                    0010 48 kHz, 0011 32 kHz; it should match RATE.  The stream (src/Spdif_Tx.v)
+//                    carries the PCM samples as played (before VOLUME; not the tone), one frame per
+//                    RATE + 1 clocks, so it keeps running, silent, while CTRL[0] is off.
 //
 // Each DAC is a first-order sigma-delta at the system clock: 16 bits in, the top 4 bits plus the
 // carry of the 12-bit error accumulator out, so the mean level is the sample's.  The top code is
@@ -32,7 +38,8 @@ module audio #(
     output reg         rb_ack,
     output reg  [31:0] rb_rdata,
     output reg  [3:0]  audio_l,
-    output reg  [3:0]  audio_r
+    output reg  [3:0]  audio_r,
+    output reg  [3:0]  audio_v
 `ifdef FORMAL
     ,
     input  wire [7:0]  f_idx,       // the harness's symbolic FIFO slot
@@ -49,7 +56,8 @@ module audio #(
     output wire [15:0] f_rate,
     output wire        f_do_pop,
     output wire        f_push,
-    output wire [3:0]  f_volume
+    output wire [3:0]  f_volume,
+    output wire [7:0]  f_spdif
 `endif
 );
     reg [1:0]  ctrl;
@@ -64,6 +72,8 @@ module audio #(
     reg        pop;
     reg [15:0] rate_cnt, tone_cnt;
     reg        tone_hi;
+    reg [3:0]  spdif_pins, spdif_sfreq;
+    wire       spdif_out;
 
     wire take    = rb_valid && !rb_ack;
     wire wr      = take && rb_we && (rb_wstrb != 0);
@@ -117,6 +127,7 @@ module audio #(
                     4'd3: rb_rdata <= {16'b0, rate};
                     4'd4: rb_rdata <= {16'b0, tone};
                     4'd6: rb_rdata <= {14'b0, underrun, drop, 7'b0, level};
+                    4'd7: rb_rdata <= {20'b0, spdif_sfreq, 4'b0, spdif_pins};
                     default: ;
                 endcase
         end
@@ -126,6 +137,7 @@ module audio #(
                 4'd2: volume <= rb_wdata[3:0];
                 4'd3: rate   <= rb_wdata[15:0];
                 4'd4: tone   <= rb_wdata[15:0];
+                4'd7: begin spdif_pins <= rb_wdata[3:0]; spdif_sfreq <= rb_wdata[11:8]; end
                 default: ;
             endcase
 
@@ -154,6 +166,7 @@ module audio #(
         acc_r <= nx_r[11:0];
         audio_l <= (u_l[15:12] == 4'hF) ? 4'hF : u_l[15:12] + {3'b0, nx_l[12]};
         audio_r <= (u_r[15:12] == 4'hF) ? 4'hF : u_r[15:12] + {3'b0, nx_r[12]};
+        audio_v <= spdif_pins & {4{spdif_out}};
 
         if (rst) begin
             rb_ack   <= 1'b0;
@@ -173,8 +186,15 @@ module audio #(
             u_l <= 16'h8000; u_r <= 16'h8000;
             acc_l <= 12'd0; acc_r <= 12'd0;
             audio_l <= 4'h8; audio_r <= 4'h8;
+            audio_v <= 4'h0;
+            spdif_pins <= 4'h0; spdif_sfreq <= 4'h0;
         end
     end
+
+    spdif_tx spdif (
+        .clk(clk), .rst(rst), .en(spdif_pins != 4'h0), .tick(tick), .period({1'b0, rate} + 17'd1),
+        .left(pcm_l), .right(pcm_r), .sfreq(spdif_sfreq), .out(spdif_out)
+    );
 
 `ifdef FORMAL
     assign f_slot = mem[f_idx];
@@ -191,5 +211,6 @@ module audio #(
     assign f_do_pop = do_pop;
     assign f_push = push;
     assign f_volume = volume;
+    assign f_spdif = {spdif_sfreq, spdif_pins};
 `endif
 endmodule

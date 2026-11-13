@@ -6,14 +6,16 @@
 //   DAC:     outside the clipped top code, each output step conserves the level exactly:
 //            code * 4096 + next accumulator = sample + accumulator, so the mean output is the sample
 //   muted:   at volume 0 the sample register holds silence
+//   S/PDIF:  SPDIF resets to 0 and reads back what was written; audio_v stays low while PINS = 0
+//            and only ever drives PINS bits (the stream itself: formal/spdif)
 module audio_fv (input clk, input rb_valid_i, input rb_we, input [11:0] rb_addr, input [31:0] rb_wdata,
                  input [3:0] rb_wstrb);
     reg [1:0] rc = 0; wire rst = rc != 2'd3;
     always @(posedge clk) if (rst) rc <= rc + 1;
     reg pv = 0; always @(posedge clk) pv <= 1;
     (* anyconst *) reg [7:0] idx;
-    wire rb_ack; wire [31:0] rb_rdata; wire [3:0] al, ar;
-    wire [31:0] slot, q, cur; wire [7:0] wp, rp; wire [8:0] level; wire pop; wire [11:0] acc; wire [15:0] u, rc2, rate; wire do_pop, dpush; wire [3:0] volume;
+    wire rb_ack; wire [31:0] rb_rdata; wire [3:0] al, ar, av;
+    wire [31:0] slot, q, cur; wire [7:0] wp, rp; wire [8:0] level; wire pop; wire [11:0] acc; wire [15:0] u, rc2, rate; wire do_pop, dpush; wire [3:0] volume; wire [7:0] fsp;
     wire rb_valid = rb_valid_i && !rst;
     reg ack_q = 0, valid_q = 0; reg [11:0] addr_q; reg we_q; reg [31:0] wd_q; reg [3:0] st_q;
     always @(posedge clk) begin ack_q <= rb_ack; valid_q <= rb_valid; addr_q <= rb_addr; we_q <= rb_we; wd_q <= rb_wdata; st_q <= rb_wstrb; end
@@ -23,9 +25,9 @@ module audio_fv (input clk, input rb_valid_i, input rb_we, input [11:0] rb_addr,
         assume (rb_addr[1:0] == 0);
     end
     audio #(.RATE_RESET(16'd2)) dut (.clk(clk), .rst(rst), .rb_valid(rb_valid), .rb_we(rb_we), .rb_addr(rb_addr), .rb_wdata(rb_wdata),
-               .rb_wstrb(rb_wstrb), .rb_ack(rb_ack), .rb_rdata(rb_rdata), .audio_l(al), .audio_r(ar),
+               .rb_wstrb(rb_wstrb), .rb_ack(rb_ack), .rb_rdata(rb_rdata), .audio_l(al), .audio_r(ar), .audio_v(av),
                .f_idx(idx), .f_slot(slot), .f_wp(wp), .f_rp(rp), .f_level(level), .f_pop(pop), .f_q(q), .f_cur(cur),
-               .f_acc_l(acc), .f_u_l(u), .f_rate_cnt(rc2), .f_rate(rate), .f_do_pop(do_pop), .f_push(dpush), .f_volume(volume));
+               .f_acc_l(acc), .f_u_l(u), .f_rate_cnt(rc2), .f_rate(rate), .f_do_pop(do_pop), .f_push(dpush), .f_volume(volume), .f_spdif(fsp));
     wire take = rb_valid && !rb_ack;
     wire is_push = take && rb_we && rb_addr[5:2] == 4'd5 && rb_wstrb == 4'hF;
     wire full = level[8], empty = level == 0;
@@ -43,6 +45,21 @@ module audio_fv (input clk, input rb_valid_i, input rb_we, input [11:0] rb_addr,
     always @(posedge clk) if (rst) vol <= 0; else if (take && rb_we && rb_wstrb != 0 && rb_addr[5:2] == 4'd2) vol <= rb_wdata[3:0];
 
     always @(*) if (pv && !rst) assert (vol == volume);
+
+    // ---------------- S/PDIF register and pins ----------------
+    reg [3:0] pins = 0, sfq = 0;
+    always @(posedge clk) if (rst) begin pins <= 0; sfq <= 0; end
+        else if (take && rb_we && rb_wstrb != 0 && rb_addr[5:2] == 4'd7) begin pins <= rb_wdata[3:0]; sfq <= rb_wdata[11:8]; end
+    reg [3:0] pins_q = 0;
+    always @(posedge clk) pins_q <= pins;
+    always @(posedge clk) if (pv && !rst && $past(pv)) begin
+        if ($past(rst)) assert (av == 4'h0);
+        if (!$past(rst)) begin
+            assert ((av & ~pins_q) == 4'h0);                    // only the chosen bits
+            if (rb_ack && !we_q && addr_q[5:2] == 4'd7) assert (rb_rdata == {20'b0, $past(sfq), 4'b0, $past(pins)});
+        end
+    end
+    always @(*) if (pv && !rst) assert (fsp == {sfq, pins});
 
     // ---------------- FIFO ----------------
     always @(*) if (pv) begin

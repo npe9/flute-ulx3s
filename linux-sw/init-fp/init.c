@@ -18,13 +18,17 @@
  * through /dev/mem (the ALSA volume stays as it is: muted after boot, so this is silent);
  * "adc" prints the eight MAX11125 channels from /sys/bus/iio/devices/iio:device0 (max1112x);
  * "esp32" resets the ESP32 into its ROM's download mode (gpio1 0x0C through /dev/mem: EN, STRAP)
- * and sends esptool's SYNC on /dev/ttyS1 (raw), printing whether the ROM answered. */
+ * and sends esptool's SYNC on /dev/ttyS1 (raw), printing whether the ROM answered; "hdmi" prints
+ * the HDMI HPD / CEC / Utility levels (gpio1 0x18), checks the CEC pin (pulled low 50 us, released)
+ * and sends a CEC polling message to the TV (logical address 0), timed by the time CSR.
+ * The kernel's cec-gpio needs an interrupting GPIO, which this SoC does not have. */
 #define SYS_write 64
 #define SYS_clone 220
 #define SYS_getpid 172
 #define SYS_clock_gettime64 403
 #define SYS_openat 56
 #define SYS_close 57
+#define SYS_munmap 215
 #define SYS_read 63
 #define SYS_mmap2 222
 #define SYS_ioctl 29
@@ -238,6 +242,52 @@ static void esp32_test(void)
 	g[3] = 0;                            /* hold it in reset again */
 	puts1(ok ? "the ROM answered SYNC  esp32 ok\n" : "no SYNC reply  esp32 BAD\n");
 }
+/* CEC by hand, timed by the time CSR (mtime, 25 MHz; the CLINT itself is M-mode only under PMP) */
+static volatile u32 *g_g1;
+static u32 g_ct;
+static inline u32 rdtime(void) { u32 t; __asm__ volatile ("rdtime %0" : "=r" (t)); return t; }
+static void cec_until(u32 us) { while (rdtime() - g_ct < us * 25u) ; }
+static int cec_line(void) { return (g_g1[6] >> 8) & 1; }
+static int cec_bit(int b)
+{
+	int s = 0;
+	g_g1[6] = 1;
+	if (b) { cec_until(600); g_g1[6] = 0; cec_until(1050); s = cec_line(); }
+	else   { cec_until(1500); g_g1[6] = 0; }
+	cec_until(2400);
+	g_ct += 2400 * 25;
+	return s;
+}
+static void hdmi_test(void)
+{
+	long m = sys5(SYS_openat, AT_FDCWD, (long)"/dev/mem", 2 | 0x101000, 0, 0);
+	long p = m < 0 ? -1 : sys6(SYS_mmap2, 0, 4096, 3, 1, m, 0xc0008 /* gpio1 */);
+	if (m >= 0) sys3(SYS_close, m, 0, 0);
+	if ((unsigned long)p >= 0xfffff000ul) { puts1("hdmi: no /dev/mem\n"); return; }
+	g_g1 = (volatile u32 *)p;
+	u32 r = g_g1[6];
+	puts1("hdmi: HPD "); putu((r >> 9) & 1); puts1(" CEC "); putu((r >> 8) & 1);
+	puts1(" Utility "); putu((r >> 10) & 1);
+	g_ct = rdtime();
+	g_g1[6] = 1; cec_until(50); int lo = cec_line();
+	g_g1[6] = 0; cec_until(150); int hi = cec_line();
+	int pin = lo == 0 && hi == 1;
+	puts1(pin ? ", CEC pin ok" : ", CEC pin BAD");
+	/* polling message from "unregistered" (15) to the TV (0), after 7 idle bit periods */
+	int busy = 0;
+	g_ct = rdtime();
+	while (rdtime() - g_ct < 16800u * 25u) if (!cec_line()) { busy = 1; break; }
+	if (busy || !pin) puts1(", CEC line busy\n");
+	else {
+		g_ct = rdtime();
+		g_g1[6] = 1; cec_until(3700); g_g1[6] = 0; cec_until(4500); g_ct += 4500 * 25;
+		for (int i = 7; i >= 0; i--) cec_bit((0xF0 >> i) & 1);
+		cec_bit(1);                          /* EOM */
+		puts1(cec_bit(1) ? ", TV: no CEC ACK\n" : ", TV: CEC ACK\n");
+	}
+	puts1(pin ? "hdmi ok\n" : "hdmi BAD\n");
+	sys3(SYS_munmap, p, 4096, 0);
+}
 static void console_poll(void)
 {
 	static char line[64];
@@ -265,7 +315,9 @@ static void console_poll(void)
 		adc_show();
 	} else if (streq(line, "esp32")) {
 		esp32_test();
-	} else if (n) { puts1("commands: poweroff, reboot, beep, adc, esp32\n"); }
+	} else if (streq(line, "hdmi")) {
+		hdmi_test();
+	} else if (n) { puts1("commands: poweroff, reboot, beep, adc, esp32, hdmi\n"); }
 }
 /* button events since the last call: struct input_event on rv32 (time64) is 16 bytes */
 static void keys_poll(void)

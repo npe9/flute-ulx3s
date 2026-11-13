@@ -90,7 +90,7 @@ for f in "$BSC_LIB"/*.v; do
 done
 FILES+=("$ROOT/src/ASSIGN1.v"
         "$VERILOG_ALL"
-        "$ROOT/src/Top.v" "$ROOT/src/Video_DVI.v" "$ROOT/src/Board_IO.v" "$ROOT/src/Audio.v" "$ROOT/sim/common/i2c_slave_model.v" "$ROOT/sim/common/spi_echo_model.v"
+        "$ROOT/src/Top.v" "$ROOT/src/Video_DVI.v" "$ROOT/src/Board_IO.v" "$ROOT/src/Audio.v" "$ROOT/src/Spdif_Tx.v" "$ROOT/sim/common/i2c_slave_model.v" "$ROOT/sim/common/spi_echo_model.v"
         "$SB/BRAM2.v"
         "$SB/ecp5_cells.v"
         "$SB/sdram_model.v"

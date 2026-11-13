@@ -15,7 +15,7 @@
 //   open:    arbitration lost is reached only through that unmodelled master's write path here.
 module board_io_fv (input clk, input [15:0] rb_addr, input rb_valid_i, input rb_we, input [31:0] rb_wdata,
                     input [3:0] rb_wstrb, input [6:0] btn_i, input [3:0] sw_i, input slave_sda_low, input slave_scl_low,
-                    input etx_i);
+                    input etx_i, input cec_i, input hpd_i, input util_i);
     reg [1:0] rc = 0; wire rst = rc != 2'd3;
     always @(posedge clk) if (rst) rc <= rc + 1;
     reg pv = 0; always @(posedge clk) pv <= 1;
@@ -33,10 +33,11 @@ module board_io_fv (input clk, input [15:0] rb_addr, input rb_valid_i, input rb_
     end
     // a slave only pulls the wires low; the harness models the wires
     wire scl = !(scl_low || slave_scl_low), sda = !(sda_low || slave_sda_low);
-    wire esp32_strap;
+    wire esp32_strap, cec_low;
     board_io dut (.clk(clk), .rst(rst), .rb_valid(rb_valid), .rb_we(rb_we), .rb_addr(rb_addr), .rb_wdata(rb_wdata),
                   .rb_wstrb(rb_wstrb), .rb_ack(rb_ack), .rb_rdata(rb_rdata), .btn_i(btn_i), .sw_i(sw_i), .esp32_tx_i(etx_i),
                   .scl_i(scl), .sda_i(sda), .scl_low(scl_low), .sda_low(sda_low), .esp32_en(esp32_en), .esp32_strap(esp32_strap), .shutdown(shutdown), .reconf(reconf),
+                  .cec_i(cec_i), .hpd_i(hpd_i), .util_i(util_i), .cec_low(cec_low),
                   .f_state(st), .f_ph(ph), .f_bits(bits), .f_en(en), .f_wr(c_wr), .f_rd(c_rd), .f_sto(c_sto),
                   .f_shift(sh), .f_is_tick(is_tick), .f_tip(tip), .f_scl_s(scl_s), .f_sda_s(sda_s), .f_rxr(rxr), .f_txr(txr));
 
@@ -59,6 +60,22 @@ module board_io_fv (input clk, input [15:0] rb_addr, input rb_valid_i, input rb_
             else
                 assert (esp32_en == $past(esp32_en) && esp32_strap == $past(esp32_strap));
             if (rb_ack && !we_q && addr_q[15:12] == 4'h8 && addr_q[4:2] == 3'd3) assert (rb_rdata[31:0] == {29'b0, $past(esp32_strap), $past(e2), $past(esp32_en)});
+        end
+    end
+    // HDMI (gpio1 0x18): CEC_LOW released through reset, changes only on a write there, reads back;
+    // CEC, HPD and Utility levels through exactly two flops; 0x1C reads 0
+    reg c1, c2, h1, h2, u1, u2;
+    always @(posedge clk) begin c1 <= cec_i; c2 <= c1; h1 <= hpd_i; h2 <= h1; u1 <= util_i; u2 <= u1; end
+    always @(posedge clk) if (pv) begin
+        if ($past(rst)) assert (!cec_low);
+        if (!rst && !$past(rst)) begin
+            if ($past(rb_valid && !rb_ack && rb_we && rb_addr[15:12] == 4'h8 && rb_addr[4:2] == 3'd6 && rb_wstrb[0]))
+                assert (cec_low == $past(rb_wdata[0]));
+            else
+                assert (cec_low == $past(cec_low));
+            if (rb_ack && !we_q && addr_q[15:12] == 4'h8 && addr_q[4:2] == 3'd6)
+                assert (rb_rdata == {21'b0, $past(u2), $past(h2), $past(c2), 7'b0, $past(cec_low)});
+            if (rb_ack && !we_q && addr_q[15:12] == 4'h8 && addr_q[4:2] == 3'd7) assert (rb_rdata == 32'b0);
         end
     end
     // POWER / RECONF: clear through reset; set only by the full-word magic write to their own register;

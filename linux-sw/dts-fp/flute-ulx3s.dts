@@ -167,6 +167,17 @@
 			ngpios = <3>;
 			gpio-line-names = "ESP32_EN", "ESP32_TXD", "ESP32_GPIO2_LOW";
 		};
+		/* gpio1 HDMI (0x18, lx47): line 0 pulls CEC low (open drain); 8 CEC, 9 HPD, 10 Utility (in) */
+		hdmi_gpio: gpio@c0008018 {
+			compatible = "wd,mbl-gpio";
+			reg = <0xc0008018 0x4>;
+			reg-names = "dat";
+			gpio-controller;
+			#gpio-cells = <2>;
+			ngpios = <11>;
+			gpio-line-names = "HDMI_CEC_LOW", "", "", "", "", "", "", "",
+					  "HDMI_CEC", "HDMI_HPD", "HDMI_UTIL";
+		};
 		/* gpio1 POWER (0x10) and RECONF (0x14): each acts only on its full-word magic value */
 		board_ctl: syscon@c0008010 {
 			compatible = "syscon";

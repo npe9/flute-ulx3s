@@ -48,6 +48,10 @@ module ulx3s_top(
     inout  wire        gpdi_scl,    //   E12
     output wire [3:0]  audio_l,     // jack DACs (src/Audio.v), mute until software sets VOLUME
     output wire [3:0]  audio_r,
+    output wire [3:0]  audio_v,     // jack ring 2 DAC (E5 F5 F2 H5): S/PDIF when audio 0x1C PINS is set
+    inout  wire        gpdi_cec,    // HDMI CEC, A18: open drain (gpio1 0x18 [0] pulls it low)
+    input  wire        gpdi_hpd,    // HDMI HPD, B20 (pin 19, HEAC-): input only
+    input  wire        gpdi_util,   // HDMI Utility, A19 (pin 14, HEAC+): input only
     output wire        adc_sclk,    // on-board ADC (MAX11125) on the second SPI host: P17
     output wire        adc_mosi,    //   R16
     output wire        adc_csn,     //   R17
@@ -219,13 +223,15 @@ module ulx3s_top(
         .clk(sys_clk), .rst(~rst_n),
         .rb_valid(rb_valid && rb_sel_audio), .rb_we(rb_we), .rb_addr(rb_addr[11:0]),
         .rb_wdata(rb_wdata), .rb_wstrb(rb_wstrb), .rb_ack(audio_ack), .rb_rdata(audio_rdata),
-        .audio_l(audio_l), .audio_r(audio_r)
+        .audio_l(audio_l), .audio_r(audio_r), .audio_v(audio_v)
     );
 
     wire i2c_scl_low, i2c_sda_low;
     assign gpdi_scl = i2c_scl_low ? 1'b0 : 1'bz;
     assign gpdi_sda = i2c_sda_low ? 1'b0 : 1'bz;
     wire esp32_en, esp32_strap, board_reconf;
+    wire cec_low;
+    assign gpdi_cec = cec_low ? 1'b0 : 1'bz;     // open drain: only ever pulled low
 `ifndef VERILATOR
     // ESP32 boot strap: GPIO2 low while EN rises (download mode), only while the card is deselected
     // (its DO is then high-impedance)
@@ -237,7 +243,8 @@ module ulx3s_top(
         .rb_wdata(rb_wdata), .rb_wstrb(rb_wstrb), .rb_ack(io_ack), .rb_rdata(io_rdata),
         .btn_i({btn_rest, BTN1, btn_pwr_n}), .sw_i(sw), .esp32_tx_i(wifi_txd),
         .scl_i(gpdi_scl), .sda_i(gpdi_sda), .scl_low(i2c_scl_low), .sda_low(i2c_sda_low),
-        .esp32_en(esp32_en), .esp32_strap(esp32_strap), .shutdown(shutdown), .reconf(board_reconf)
+        .esp32_en(esp32_en), .esp32_strap(esp32_strap), .shutdown(shutdown), .reconf(board_reconf),
+        .cec_i(gpdi_cec), .hpd_i(gpdi_hpd), .util_i(gpdi_util), .cec_low(cec_low)
     );
 
     wire [9:0]  tmds_r, tmds_g, tmds_b;

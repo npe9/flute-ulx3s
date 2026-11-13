@@ -4,8 +4,12 @@
  * tone generator on the jack's 4-bit sigma-delta DACs.  Registers (32-bit):
  *   0x00 ID "AUD1"  0x04 CTRL [0] PCM [1] tone  0x08 VOLUME 0 (mute) .. 8  0x0C RATE clocks per sample - 1
  *   0x10 TONE  0x14 FIFO [15:0] left [31:16] right, signed  0x18 STATUS [8:0] level [16] drop [17] underrun
+ *   0x1C SPDIF [3:0] ring-2 pins that carry S/PDIF (0 = off) [11:8] channel status sample rate (lx47)
  * The device has no interrupt, so an hrtimer keeps the FIFO topped up from the ALSA buffer.
  * Playback only: S16_LE, 2 channels, 8-48 kHz.  "Master Playback Volume" 0-8, muted at probe.
+ * "IEC958 Playback Switch" (off at probe) sends the same samples, before the volume, as S/PDIF on
+ * the jack's ring 2 (a coax S/PDIF input through a 3.5 mm TRRS adapter); the channel status gives
+ * 44.1, 48 or 32 kHz, else "not indicated".  On a bitstream without it the register does nothing.
  * The tone generator is also an input device with EV_SND SND_TONE / SND_BELL (like pcspkr), so the
  * console bell, KDMKTONE and a write of an EV_SND event to its /dev/input node sound it; it plays at
  * the ALSA volume (muted until that is raised).  TONE is 16 bits of half periods, so tones below
@@ -30,6 +34,7 @@
 #define FA_TONE    0x10
 #define FA_FIFO    0x14
 #define FA_STATUS  0x18
+#define FA_SPDIF   0x1C
 #define FA_ID_VAL  0x41554431
 #define FA_DEPTH   256
 #define FA_LEVEL   0x1FF
@@ -46,6 +51,8 @@ struct flute_audio {
 	snd_pcm_uframes_t in_period;
 	u32 volume;
 	u32 ctrl;                             /* CTRL shadow: PCM and tone share it */
+	u32 spdif;                            /* IEC958 switch */
+	u32 sfreq;                            /* channel status rate code of the last prepare */
 	struct input_dev *beep;
 };
 
@@ -121,6 +128,11 @@ static int fa_close(struct snd_pcm_substream *ss)
 	return 0;
 }
 
+static void fa_spdif(struct flute_audio *fa)
+{
+	writel((fa->spdif ? 0xF : 0) | fa->sfreq << 8, fa->base + FA_SPDIF);
+}
+
 static int fa_prepare(struct snd_pcm_substream *ss)
 {
 	struct flute_audio *fa = snd_pcm_substream_chip(ss);
@@ -129,6 +141,9 @@ static int fa_prepare(struct snd_pcm_substream *ss)
 	fa_ctrl(fa, 1, 0);
 	spin_unlock_irq(&fa->lock);
 	writel(DIV_ROUND_CLOSEST(fa->clk_hz, ss->runtime->rate) - 1, fa->base + FA_RATE);
+	fa->sfreq = ss->runtime->rate == 44100 ? 0 : ss->runtime->rate == 48000 ? 2 :
+		    ss->runtime->rate == 32000 ? 3 : 1;
+	fa_spdif(fa);
 	writel(0, fa->base + FA_STATUS);
 	fa->pos = 0;
 	fa->in_period = 0;
@@ -215,6 +230,34 @@ static const struct snd_kcontrol_new fa_vol = {
 	.put = fa_vol_put,
 };
 
+static int fa_iec_get(struct snd_kcontrol *k, struct snd_ctl_elem_value *u)
+{
+	struct flute_audio *fa = snd_kcontrol_chip(k);
+
+	u->value.integer.value[0] = fa->spdif;
+	return 0;
+}
+
+static int fa_iec_put(struct snd_kcontrol *k, struct snd_ctl_elem_value *u)
+{
+	struct flute_audio *fa = snd_kcontrol_chip(k);
+	u32 v = !!u->value.integer.value[0];
+
+	if (v == fa->spdif)
+		return 0;
+	fa->spdif = v;
+	fa_spdif(fa);
+	return 1;
+}
+
+static const struct snd_kcontrol_new fa_iec = {
+	.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+	.name = "IEC958 Playback Switch",
+	.info = snd_ctl_boolean_mono_info,
+	.get = fa_iec_get,
+	.put = fa_iec_put,
+};
+
 /* EV_SND: value = Hz for SND_TONE (0 = off), nonzero = on (1 kHz) for SND_BELL */
 static int fa_beep_event(struct input_dev *dev, unsigned int type, unsigned int code, int value)
 {
@@ -266,6 +309,7 @@ static int fa_probe(struct platform_device *pdev)
 		fa->clk_hz = 50000000;
 	fa_ctrl(fa, 3, 0);
 	writel(0, fa->base + FA_VOLUME);    /* muted: it drives real headphones */
+	writel(0, fa->base + FA_SPDIF);     /* ring 2 idle */
 	fa->volume = 0;
 	hrtimer_init(&fa->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	fa->timer.function = fa_timer;
@@ -278,6 +322,8 @@ static int fa_probe(struct platform_device *pdev)
 	snd_pcm_set_ops(pcm, SNDRV_PCM_STREAM_PLAYBACK, &fa_ops);
 	snd_pcm_set_managed_buffer_all(pcm, SNDRV_DMA_TYPE_VMALLOC, NULL, 0, 0);
 	err = snd_ctl_add(card, snd_ctl_new1(&fa_vol, fa));
+	if (!err)
+		err = snd_ctl_add(card, snd_ctl_new1(&fa_iec, fa));
 	if (err < 0)
 		return err;
 	strscpy(card->driver, "FluteAudio", sizeof(card->driver));

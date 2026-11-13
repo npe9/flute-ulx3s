@@ -34,6 +34,12 @@
 //                        FT231X's D18 keeps it on).  Any other write is ignored.  Reads [0] = SHUTDOWN.
 //       0x14 RECONF  RW  write 0x52454346 ("RECF", all four lanes): pull PROGRAMN low, so the FPGA leaves
 //                        user mode and reconfigures from the flash.  Any other write is ignored.
+//       0x18 HDMI    RW  [0] CEC_LOW: 1 pulls the HDMI CEC line low (open drain: 0 releases it; reset 0).
+//                    RO  [8] the CEC line, [9] HPD (the sink's hot plug detect, HDMI pin 19), [10] the
+//                        Utility line (pin 14), each through a 2-flop synchronizer.  HPD and Utility are
+//                        inputs only: they are also the HDMI Ethernet pair (HEAC+ on 14, HEAC- on 19),
+//                        which needs an analog hybrid this board does not have.
+//       0x1C         RO  0
 // ================================================================
 
 module board_io (
@@ -50,6 +56,9 @@ module board_io (
     input  wire [6:0]  btn_i,       // at the pin: btn_i[0] is active low, the others active high
     input  wire [3:0]  sw_i,
     input  wire        esp32_tx_i,  // the ESP32's TX pin (pulled down)
+    input  wire        cec_i,       // HDMI CEC, A18
+    input  wire        hpd_i,       // HDMI HPD, B20 (549 ohm and a 3.6 V zener on the board)
+    input  wire        util_i,      // HDMI Utility, A19
 
     input  wire        scl_i,
     input  wire        sda_i,
@@ -58,7 +67,8 @@ module board_io (
     output reg         esp32_en,    // the ESP32's EN pin: 0 = held in reset
     output reg         esp32_strap, // 1 = hold GPIO2 (sd_d0) low while the SD card is deselected
     output reg         shutdown,    // 1 = turn the board off
-    output reg         reconf       // 1 = pull PROGRAMN low (reconfigure from flash)
+    output reg         reconf,      // 1 = pull PROGRAMN low (reconfigure from flash)
+    output reg         cec_low      // 1 = drive the CEC line low, 0 = release it
 `ifdef FORMAL
     ,
     output wire [2:0]  f_state,
@@ -84,6 +94,7 @@ module board_io (
     reg [6:0] btn_m, btn_s;
     reg [3:0] sw_m, sw_s;
     reg [1:0] etx_m;
+    reg [1:0] cec_m, hpd_m, util_m;
     wire scl_s = scl_m[1];
     wire sda_s = sda_m[1];
     always @(posedge clk) begin
@@ -92,6 +103,9 @@ module board_io (
         btn_m <= btn_i;  btn_s <= {btn_m[6:1], ~btn_m[0]};
         sw_m  <= sw_i;   sw_s  <= sw_m;
         etx_m <= {etx_m[0], esp32_tx_i};
+        cec_m <= {cec_m[0], cec_i};
+        hpd_m <= {hpd_m[0], hpd_i};
+        util_m <= {util_m[0], util_i};
     end
 
     // ---------------- registers ----------------
@@ -138,14 +152,16 @@ module board_io (
             rb_ack   <= 1'b1;
             rb_rdata <= 32'b0;
             if (!rb_we) begin
-                if (sel_gpio && rb_addr[4])
-                    rb_rdata <= {31'b0, rb_addr[2] ? reconf : shutdown};
-                else if (sel_gpio)
-                    case (rb_addr[3:2])
-                        2'd0: rb_rdata <= 32'h47504931;
-                        2'd1: rb_rdata <= {25'b0, btn_s};
-                        2'd2: rb_rdata <= {28'b0, sw_s};
-                        2'd3: rb_rdata <= {29'b0, esp32_strap, etx_m[1], esp32_en};
+                if (sel_gpio)
+                    case (rb_addr[4:2])
+                        3'd0: rb_rdata <= 32'h47504931;
+                        3'd1: rb_rdata <= {25'b0, btn_s};
+                        3'd2: rb_rdata <= {28'b0, sw_s};
+                        3'd3: rb_rdata <= {29'b0, esp32_strap, etx_m[1], esp32_en};
+                        3'd4: rb_rdata <= {31'b0, shutdown};
+                        3'd5: rb_rdata <= {31'b0, reconf};
+                        3'd6: rb_rdata <= {21'b0, util_m[1], hpd_m[1], cec_m[1], 7'b0, cec_low};
+                        default: ;
                     endcase
                 else if (sel_i2c)
                     case (reg_a)
@@ -166,6 +182,8 @@ module board_io (
             reconf <= 1'b1;
         if (take && rb_we && sel_gpio && rb_addr[4:2] == 3'd3 && rb_wstrb[0])
             begin esp32_en <= rb_wdata[0]; esp32_strap <= rb_wdata[2]; end
+        if (take && rb_we && sel_gpio && rb_addr[4:2] == 3'd6 && rb_wstrb[0])
+            cec_low <= rb_wdata[0];
 
         if (wr_i2c)
             case (reg_a)
@@ -275,6 +293,7 @@ module board_io (
             esp32_strap <= 1'b0;
             shutdown <= 1'b0;
             reconf   <= 1'b0;
+            cec_low  <= 1'b0;
             rb_ack   <= 1'b0;
             rb_rdata <= 32'b0;
             prer     <= 16'hFFFF;

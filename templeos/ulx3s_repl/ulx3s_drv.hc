@@ -641,6 +641,147 @@ I64 Esp32Sync()
   return 0;
 }
 
+// ---------------- HDMI: CEC, hot plug detect, Utility (gpio1 0x18) ----------------
+// [0] CEC_LOW pulls the CEC line low (open drain); read [8] CEC line, [9] HPD, [10] Utility.
+U32 g_hdmi;
+U32 g_cec_tpu;                              // timer ticks per microsecond
+U32 g_cec_t;                                // the current bit's start (timer ticks)
+
+U32 HdmiBase()
+{
+  if (!g_hdmi)
+    g_hdmi = BrdNeed(BRD_DEV_GPIO1, "gpio1");
+  g_cec_tpu = BrdTimerHz() / 1000000;
+  return g_hdmi;
+}
+
+// Prints the three lines; returns [0] HPD (a sink is connected), [1] CEC (1 = idle), [2] Utility.
+I64 HdmiStat()
+{
+  U32 r;
+  if (!HdmiBase())
+    return -1;
+  r = BrdRd(g_hdmi + 0x18);
+  Print("hdmi: HPD %d  CEC %d  Utility %d\n", (r >> 9) & 1, (r >> 8) & 1, (r >> 10) & 1);
+  return ((r >> 9) & 1) | (((r >> 8) & 1) << 1) | (((r >> 10) & 1) << 2);
+}
+
+I64 CecLine()
+{
+  return (BrdRd(g_hdmi + 0x18) >> 8) & 1;
+}
+
+U0 CecUntil(I64 us)
+{
+  while (BrdTimeLo() - g_cec_t < us * g_cec_tpu)
+    ;
+}
+
+// The pin itself: pull low for 50 us (shorter than any CEC bit), it must read 0; release, it must
+// read 1 again.  1 = both.
+I64 CecSelf()
+{
+  I64 lo, hi;
+  if (!HdmiBase())
+    return 0;
+  g_cec_t = BrdTimeLo();
+  BrdWr(g_hdmi + 0x18, 1);
+  CecUntil(50);
+  lo = CecLine();
+  BrdWr(g_hdmi + 0x18, 0);
+  CecUntil(150);
+  hi = CecLine();
+  return lo == 0 && hi == 1;
+}
+
+// One data bit: low 0.6 ms (1) or 1.5 ms (0), 2.4 ms in all.  Returns the line at 1.05 ms: a
+// follower acknowledges by holding a 1 low there.
+I64 CecBit(I64 b)
+{
+  I64 s = 0;
+  BrdWr(g_hdmi + 0x18, 1);
+  if (b) {
+    CecUntil(600);
+    BrdWr(g_hdmi + 0x18, 0);
+    CecUntil(1050);
+    s = CecLine();
+  } else {
+    CecUntil(1500);
+    BrdWr(g_hdmi + 0x18, 0);
+  }
+  CecUntil(2400);
+  g_cec_t += 2400 * g_cec_tpu;
+  return s;
+}
+
+// The CEC polling message (a header block only) from "unregistered" (15) to logical address dst
+// (0 = TV): 1 when a device there acknowledges, 0 when none does, -1 when the line is not idle.
+I64 CecPoll(I64 dst)
+{
+  I64 i, hdr, ack;
+  if (!HdmiBase())
+    return -1;
+  // the line must stay idle (high) for 7 bit periods first
+  g_cec_t = BrdTimeLo();
+  while (BrdTimeLo() - g_cec_t < 16800 * g_cec_tpu)
+    if (!CecLine())
+      return -1;
+  g_cec_t = BrdTimeLo();
+  BrdWr(g_hdmi + 0x18, 1);                  // start bit: low 3.7 ms, 4.5 ms in all
+  CecUntil(3700);
+  BrdWr(g_hdmi + 0x18, 0);
+  CecUntil(4500);
+  g_cec_t += 4500 * g_cec_tpu;
+  hdr = 0xF0 | (dst & 15);
+  for (i = 7; i >= 0; i--)
+    CecBit((hdr >> i) & 1);
+  CecBit(1);                                // EOM
+  ack = CecBit(1);                          // ACK: sent as 1, pulled to 0 by the follower
+  return !ack;
+}
+
+// ---------------- S/PDIF (audio 0x1C) and PCM ----------------
+// S/PDIF on the jack's ring 2: pins = which of its four DAC bits carry it (0 = off, 15 = all, about
+// 0.5 V into a 75 ohm coax load), sfreq = channel status sample rate (0 44.1 kHz, 2 48 kHz).  It
+// carries the PCM FIFO's samples (PcmTone), not the tone generator (Snd).
+U0 SpdifSet(I64 pins, I64 sfreq)
+{
+  U32 b = SndBase();
+  if (b)
+    BrdWr(b + 0x1C, (pins & 15) | ((sfreq & 15) << 8));
+}
+
+// A square wave of hz through the PCM FIFO for ms (44.1 kHz), at SndVol on the jack and full scale
+// on S/PDIF.  Returns the samples written.
+I64 PcmTone(I64 hz, I64 ms)
+{
+  U32 b = SndBase();
+  I64 n, total, half, ph = 0, v;
+  if (!b || hz <= 0)
+    return 0;
+  BrdWr(b + 0x0C, BrdCpuHz() / 44100 - 1);
+  BrdWr(b + 0x08, g_snd_vol);
+  half = 44100 / (2 * hz);
+  if (half < 1)
+    half = 1;
+  total = 44100 * ms / 1000;
+  for (n = 0; n < total; n++) {
+    while ((BrdRd(b + 0x18) & 0x1FF) >= 250)
+      ;
+    v = 0x2000;
+    if ((ph / half) & 1)
+      v = 0xE000;
+    BrdWr(b + 0x14, v | (v << 16));
+    ph++;
+    if (n == 64)
+      BrdWr(b + 0x04, 1);                   // play once some samples are queued
+  }
+  while (BrdRd(b + 0x18) & 0x1FF)
+    ;
+  BrdWr(b + 0x04, 0);
+  return total;
+}
+
 U0 BoardHelp()
 {
   UartStr(
@@ -653,6 +794,8 @@ U0 BoardHelp()
     "Snd(ona) SndHz(hz) SndVol(0-8) Beep()   tone on the audio jack (Snd(0) = off)\n"
     "AdcRd(ch) AdcShow()       MAX11125 ADC: channel 0-7 (12 bits), all eight in mV\n"
     "Esp32Download() Esp32Sync() Esp32Off()   ESP32 ROM download mode, esptool SYNC\n"
+    "HdmiStat() CecSelf() CecPoll(dst)   HDMI HPD/CEC/Utility; CEC pin check, poll (1 = ACK)\n"
+    "SpdifSet(pins,sfreq) PcmTone(hz,ms)   S/PDIF on jack ring 2; PCM square wave\n"
     "Sleep(ms) BrdRd(addr) BrdWr(addr,v)   32-bit register access\n"
     "PowerOff() PowerOffFor(s) Reconf()\n");
 }

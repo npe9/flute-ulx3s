@@ -5,7 +5,9 @@ Programs the bitstream, loads the REPL blob, then checks: BoardHelp, the RTC (it
 seconds advance), buttons and DIP switches (read, nothing pressed), BtnWait timeout, Sleep timing,
 the tone generator by register readback at volume 0 (silent), and the ADC (channels 0 and 7
 answer with their own channel id), and the ESP32 (Esp32Download sees its TX driven, its ROM
-answers Esp32Sync; Esp32Off after).  Never calls PowerOff, PowerOffFor or Reconf.  --set-rtc sets the RTC to the host's UTC time first.
+answers Esp32Sync; Esp32Off after), and on lx47 and later (HW_LX47=0 skips) the HDMI lines
+(HdmiStat, HPD WARN when no sink), the CEC pin (CecSelf), a CEC poll of the TV (WARN without ACK)
+and the S/PDIF register.  Never calls PowerOff, PowerOffFor or Reconf.  --set-rtc sets the RTC to the host's UTC time first.
 
   HW_BITSTREAM=build/lx43/ulx3s_top.bit python3 scripts/hw_board_drv.py --blob templeos/build-drv/repl.blob.bin
 """
@@ -102,6 +104,22 @@ def main():
                         expect=('ans=0x0000000000000001',))
     hw.check_repl(R, 'Esp32Sync() answered by the ROM', fd, 'Esp32Sync();', expect=('ans=0x0000000000000001',))
     hw.send_line(fd, 'Esp32Off();')
+    if os.environ.get('HW_LX47', '1') == '1':          # lx47+: HDMI lines (gpio1 0x18), S/PDIF (audio 0x1C)
+        out = hw.check_repl(R, 'HdmiStat() answers', fd, 'HdmiStat();', expect=('hdmi: HPD', 'ans='))
+        if out is not None:
+            v = ans(out)
+            hw.record(R, 'HDMI HPD high (a sink is plugged in)', 'PASS' if v is not None and v & 1 else 'WARN',
+                      f'HdmiStat {v}')
+        hw.check_repl(R, 'CecSelf() pin pulls low and releases', fd, 'CecSelf();', expect=('ans=0x0000000000000001',))
+        out = hw.check_repl(R, 'CecPoll(0) answers', fd, 'CecPoll(0);', expect=('ans=',))
+        if out is not None:
+            v = ans(out)
+            hw.record(R, 'CEC: TV (0) acknowledges', 'PASS' if v == 1 else 'WARN',
+                      {1: 'ACK', 0: 'no ACK (sink without CEC?)'}.get(v, f'line busy ({v:#x})'))
+        hw.send_line(fd, 'SpdifSet(15, 2);')
+        hw.check_repl(R, 'SpdifSet(15, 2) reads back 0x20F', fd, 'BrdRd(0xC000901C);', expect=('ans=0x000000000000020f',))
+        hw.send_line(fd, 'SpdifSet(0, 0);')
+        hw.check_repl(R, 'S/PDIF off reads back 0', fd, 'BrdRd(0xC000901C);', expect=('ans=0x0000000000000000',))
     n_fail = sum(1 for r in hw.results if r[2] == 'FAIL')
     print(f'== summary: {sum(1 for r in hw.results if r[2] == "PASS")} PASS, {n_fail} FAIL ==')
     return 1 if n_fail else 0

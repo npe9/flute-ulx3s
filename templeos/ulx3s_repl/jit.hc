@@ -161,6 +161,11 @@ U0 JitInit()
   JitAdd("Esp32Download", &Esp32Download, 0, 0);
   JitAdd("Esp32Sync", &Esp32Sync, 0, 0);
   JitAdd("Esp32Off", &Esp32Off, 0, 1);
+  JitAdd("HdmiStat", &HdmiStat, 0, 0);
+  JitAdd("CecSelf", &CecSelf, 0, 0);
+  JitAdd("CecPoll", &CecPoll, 1, 0);
+  JitAdd("SpdifSet", &SpdifSet, 2, 1);
+  JitAdd("PcmTone", &PcmTone, 2, 0);
   JitAdd("PowerOffFor", &PowerOffFor, 1, 1);
   JitAdd("Reconf", &Reconf, 0, 1);
   JitAdd("BoardHelp", &BoardHelp, 0, 1);
