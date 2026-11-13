@@ -1,0 +1,20 @@
+# src/Audio.v register map (window 0xC000_9000; decoded on addr[5:2]: aliases every 64 bytes).
+# <offset> <field> <bits> <access> <reset>.  Writes: any nonzero strobe writes the whole field.
+!window 6
+!unmapped zero
+!writes any
+0x00 ID      31:0     ro   0x41554431
+0x04 CTRL    1:0      rw   0             # [0] play the FIFO, [1] test tone
+0x04 -       31:2     zero
+0x08 VOLUME  3:0      rw   0             # 0 mute, 8 full
+0x08 -       31:4     zero
+0x0C RATE    15:0     rw   2             # sample period - 1, in clocks (RATE_RESET: audio_env sets 2)
+0x0C -       31:16    zero
+0x10 TONE    15:0     rw   28408         # tone half period
+0x10 -       31:16    zero
+0x14 FIFO    31:0     zero               # write-only: {right, left}
+0x18 STATUS  31:0     vol                # [8:0] level, [16] drop, [17] underrun (checked in audio_wb)
+0x1C PINS    3:0      rw   0             # S/PDIF output pins
+0x1C -       7:4      zero
+0x1C SFREQ   11:8     rw   0
+0x1C -       31:12    zero

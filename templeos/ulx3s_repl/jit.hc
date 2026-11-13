@@ -166,6 +166,10 @@ U0 JitInit()
   JitAdd("CecPoll", &CecPoll, 1, 0);
   JitAdd("SpdifSet", &SpdifSet, 2, 1);
   JitAdd("PcmTone", &PcmTone, 2, 0);
+  JitAdd("SdhInit", &SdhInit, 0, 0);
+  JitAdd("SdhShow", &SdhShow, 1, 0);
+  JitAdd("SdhRead", &SdhRead, 2, 0);
+  JitAdd("SdhCmd", &SdhCmd, 3, 0);
   JitAdd("PowerOffFor", &PowerOffFor, 1, 1);
   JitAdd("Reconf", &Reconf, 0, 1);
   JitAdd("BoardHelp", &BoardHelp, 0, 1);

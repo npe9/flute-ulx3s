@@ -466,10 +466,60 @@ CEC is bit-banged (Linux cec-gpio needs an IRQ-capable GPIO): TempleOS CecSelf/C
 `hdmi` (rdtime for timing: the CLINT is PMP-protected from U mode).
 S/PDIF: src/Spdif_Tx.v (biphase, 128 cells per sample via a fractional accumulator, B/M/W
 preambles, parity, channel status SFREQ), audio 0x1C ([3:0] pins on audio_v E5/F5/F2/H5, [11:8]
-SFREQ). Formal: formal/spdif (receiver-style decoder harness, prove + mutants), audio/board_io
-harnesses extended; sim/spdif_ut decodes 420 samples exactly. Linux flute-audio "IEC958 Playback
+SFREQ). Formal: now formal/fv/ips/spdif (IEC 60958 monitor, prove + mutants), audio, board_io; sim/spdif_ut decodes 420 samples exactly. Linux flute-audio "IEC958 Playback
 Switch", TempleOS SpdifSet/PcmTone.
 Gate: seeds s3 54.71 / s5 47.72 / s7 48.97 MHz (only s3 >= 50: the margin is shrinking), ISA
 94/94, strict cache/esp32/io/audio PASS, J1 PASS, spdif_ut PASS, Bluesim PASS. Board (s3,
 bc4fc576): suite 76/0, hw_board_drv 19/0, Linux `hdmi ok`. WARNs: HPD reads 0 with the TV
 attached, no CEC ACK from the TV (address 0); S/PDIF not yet checked with a receiver.
+
+### lx48: microSD in native 4-bit SD mode (2026-11-13, in progress)
+
+src/Sd_Host.v at 0xC000_D000 (register bus, SoC Info device 14): CTRL (MODE, WIDE, WPROT, CLKEN,
+DIV), ARG, CMD, STATUS, RESP0-3, BLKSIZE, BLKCNT, DTMO, FIFO (one 512-byte block buffer, PIO),
+ABORT. The card clock is sys / (2 (DIV+1)) with DIV >= 1 (12.5 MHz at most); commands and data are
+driven on the falling edge and sampled on the system-clock edge that launches the next falling edge,
+so a 14 ns card output delay plus pads fits. A received block holds the clock low until software
+has drained it (multi-block reads with one buffer). Stopping the clock finishes the high phase.
+Pins: the mux lives in Sd_Host; outside native mode the pins are exactly SPI0 + the ESP32 GPIO2
+strap (DAT0 low while CS is high). Native mode needs gpio1 0x0C == 0 (ESP32 in reset: its download
+ROM is an SDIO slave on the same six lines, and the strap released). sd_d1 H1, sd_d2 K1 added
+(PULLMODE=UP; GPIO12/MTDI is ignored, efuse XPD_SDIO_FORCE). WPROT is set by reset: CMD24/25/27/
+28/29/38/42/56 and any write-flagged command are refused and DAT is never driven -- the board's
+card stays read-only; writes are tested only against sim/common/sd_native_model.v.
+A card that has seen CMD0 in SPI mode stays in SPI mode until power is removed, so the board test
+needs a power cycle first: native tests (TempleOS SdhInit/SdhShow, Linux flute-sdh) before anything
+uses SPI mode; the lx47 payload (mmc-spi DT) afterwards checks the SPI pass-through.
+Verification:
+- sim/sdh_ut (iverilog, 37 checks): init, CRC vectors on the wire (CMD0 ...95, CMD8 ...87, CRC16 of
+  512 x FF = 7FA1), 1/4-bit reads, multi-block with a slow reader, CRC and end-bit errors, WPROT,
+  sim writes. test/sdh_test(_w).bin on the strict bench with +sd_native.
+- formal/fv/ips/sdh (the framework below; the RTL carries no formal code): safety (k-induction:
+  pins, ESP32 exclusion, WPROT, clock phases >= 2), frame (k-induction: every command written
+  while the host is idle goes out as 0 1 index ARG CRC7 1, the CRC by long division), rd
+  (k-induction on the real divider: a 4-byte block in 1- or 4-bit mode with any data, per-line
+  CRCs and end bits from the card VIP: no timeout, buffer-ready only after the end bit, the CRC
+  flag exactly when a CRC (long division) or end bit is wrong, the first FIFO word = the data).
+  fvgen mutate: 12 mutants, all caught (nohold, startbit by sim/sdh_ut only).
+  Formal found two bugs the sims missed: a runt clock pulse when CLKEN dropped mid-high-phase, and
+  the stopping falling edge not counted as a protocol fall.
+- Linux: kernel/drivers/flute-sdh.c (mmc host, PIO, 4-bit, read-only unless flute_sdh.writable=1),
+  DT mmc@c000d000 replaces mmc-spi-slot. TempleOS: SdhInit, SdhShow(lba), SdhRead(lba,buf).
+Board facts for comparison: the slot's card is a 7.50 GiB SDHC, CID name "asdfg", block 0 all FF
+(as every SPI-mode Linux boot has read it).
+
+### formal/fv: verification kept out of the RTL (2026-11-13)
+
+Asked for: formal work reusable for arbitrary IP, on riscv-formal and the AXI4 FVIP as a baseline,
+with the verification separate from the implementation.  formal/fv/README.md has the method:
+one cfg per IP -> generated sby checks (riscv-formal style); protocol VIPs with a role parameter
+(FVIP style: regbus, SD CMD monitor, SD read card, IEC 60958 monitor, CRC long division); the RTL
+read without defines and linted for formal constructs; the env only instantiates the DUT; the
+checker is attached with `bind` (sv-yosys) and its attachment counted; properties on ports
+against a register model generated from a register spec; internals only in an INVARIANTS section
+(linted); `fvgen mutate` needs every mutant caught by FAIL/UNKNOWN or a sim catcher.
+Ported: sdh (12 mutants), spdif (12), audio (9); src/Sd_Host.v, Spdif_Tx.v, Audio.v stripped of
+their `ifdef FORMAL taps (preprocess-equivalent) and formal/spdif, formal/audio retired.
+To port: board_io (an I2C host VIP; the termination ranking stays a declared whitebox lemma),
+video, then the BSV blocks (AXI4_RegBus, AXI4_SPI, Sdram_Controller).  RVFI stays: riscv-formal
+needs the core to emit its trace port; it is output-only and off unless RISCV_FORMAL is defined.

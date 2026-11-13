@@ -28,14 +28,13 @@ module ulx3s_top(
     output wire        user_programn, // M4: pulled low to reconfigure from flash (gpio1 0x14 RECONF), else released
     output wire        wifi_rxd,    // ESP32 UART0 RX, K3: the FPGA transmits (uart1)
     input  wire        wifi_txd,    // ESP32 UART0 TX, K4: the FPGA receives
-    output wire        sd_clk,      // microSD SPI mode: SCLK, H2
-    output wire        sd_cmd,      //   MOSI, J1
-`ifdef VERILATOR
-    input  wire        sd_d0,       //   MISO, J3 (the benches have no ESP32 strap model)
-`else
-    inout  wire        sd_d0,       //   MISO, J3; also the ESP32's GPIO2 strap (gpio1 0x0C [2])
-`endif
-    output wire        sd_d3,       //   CS (active low), K2
+    // microSD: SPI mode (spi0) or native SD mode (src/Sd_Host.v), muxed in Sd_Host
+    output wire        sd_clk,      //   SCLK / CLK, H2
+    inout  wire        sd_cmd,      //   MOSI / CMD, J1
+    inout  wire        sd_d0,       //   MISO / DAT0, J3; also the ESP32's GPIO2 strap (gpio1 0x0C [2])
+    inout  wire        sd_d1,       //   DAT1, H1
+    inout  wire        sd_d2,       //   DAT2, K1
+    inout  wire        sd_d3,       //   CS (active low) / DAT3, K2
     output wire        flash_csn,   // configuration flash: CS, R2
     output wire        flash_mosi,  //   D0, W2
     input  wire        flash_miso,  //   D1, V2
@@ -214,10 +213,11 @@ module ulx3s_top(
     // (0xC001_xxxx) tell the video windows from the 0xC000_6000+ small devices.
     wire        rb_sel_video = rb_addr[24] || rb_addr[16];
     wire        rb_sel_audio = !rb_sel_video && (rb_addr[15:12] == 4'h9);
-    wire        video_ack, io_ack, audio_ack;
-    wire [31:0] video_rdata, io_rdata, audio_rdata;
-    assign rb_ack   = video_ack || io_ack || audio_ack;
-    assign rb_rdata = io_ack ? io_rdata : audio_ack ? audio_rdata : video_rdata;
+    wire        rb_sel_sdh   = !rb_sel_video && (rb_addr[15:12] == 4'hD);
+    wire        video_ack, io_ack, audio_ack, sdh_ack;
+    wire [31:0] video_rdata, io_rdata, audio_rdata, sdh_rdata;
+    assign rb_ack   = video_ack || io_ack || audio_ack || sdh_ack;
+    assign rb_rdata = io_ack ? io_rdata : audio_ack ? audio_rdata : sdh_ack ? sdh_rdata : video_rdata;
 
     audio audio_0 (
         .clk(sys_clk), .rst(~rst_n),
@@ -232,14 +232,30 @@ module ulx3s_top(
     wire esp32_en, esp32_strap, board_reconf;
     wire cec_low;
     assign gpdi_cec = cec_low ? 1'b0 : 1'bz;     // open drain: only ever pulled low
-`ifndef VERILATOR
-    // ESP32 boot strap: GPIO2 low while EN rises (download mode), only while the card is deselected
-    // (its DO is then high-impedance)
-    assign sd_d0 = (esp32_strap && sd_d3) ? 1'b0 : 1'bz;
-`endif
+    // microSD pins: SPI0 (SPI mode) plus the ESP32's GPIO2 strap, or the native SD host.  The ESP32
+    // strap pulls DAT0 low only in SPI mode while the card is deselected (its DO is then
+    // high-impedance); native mode needs the ESP32 in reset with the strap released.
+    wire        spi_sclk, spi_mosi, spi_cs_n, spi_miso;
+    wire        sdh_clk, sdh_cmd_o, sdh_cmd_oe;
+    wire [3:0]  sdh_dat_o, sdh_dat_oe;
+    assign sd_clk = sdh_clk;
+    assign sd_cmd = sdh_cmd_oe    ? sdh_cmd_o    : 1'bz;
+    assign sd_d0  = sdh_dat_oe[0] ? sdh_dat_o[0] : 1'bz;
+    assign sd_d1  = sdh_dat_oe[1] ? sdh_dat_o[1] : 1'bz;
+    assign sd_d2  = sdh_dat_oe[2] ? sdh_dat_o[2] : 1'bz;
+    assign sd_d3  = sdh_dat_oe[3] ? sdh_dat_o[3] : 1'bz;
+    sd_host sdh (
+        .clk(sys_clk), .rst(~rst_n),
+        .rb_valid(rb_valid && rb_sel_sdh), .rb_we(rb_we), .rb_addr(rb_addr[11:0]),
+        .rb_wdata(rb_wdata), .rb_wstrb(rb_wstrb), .rb_ack(sdh_ack), .rb_rdata(sdh_rdata),
+        .spi_sclk(spi_sclk), .spi_mosi(spi_mosi), .spi_cs_n(spi_cs_n), .spi_miso(spi_miso),
+        .esp32_en(esp32_en), .esp32_strap(esp32_strap),
+        .clk_o(sdh_clk), .cmd_o(sdh_cmd_o), .cmd_oe(sdh_cmd_oe), .cmd_i(sd_cmd),
+        .dat_o(sdh_dat_o), .dat_oe(sdh_dat_oe), .dat_i({sd_d3, sd_d2, sd_d1, sd_d0})
+    );
     board_io board_io_0 (
         .clk(sys_clk), .rst(~rst_n),
-        .rb_valid(rb_valid && !rb_sel_video && !rb_sel_audio), .rb_we(rb_we), .rb_addr(rb_addr[15:0]),
+        .rb_valid(rb_valid && !rb_sel_video && !rb_sel_audio && !rb_sel_sdh), .rb_we(rb_we), .rb_addr(rb_addr[15:0]),
         .rb_wdata(rb_wdata), .rb_wstrb(rb_wstrb), .rb_ack(io_ack), .rb_rdata(io_rdata),
         .btn_i({btn_rest, BTN1, btn_pwr_n}), .sw_i(sw), .esp32_tx_i(wifi_txd),
         .scl_i(gpdi_scl), .sda_i(gpdi_sda), .scl_low(i2c_scl_low), .sda_low(i2c_sda_low),
@@ -290,10 +306,10 @@ module ulx3s_top(
         .esp32_rxd_v(esp32_en ? wifi_txd : 1'b1),   // idle while held (the pin is pulled down)
         .leds(led),
         .btn1_v(BTN1),
-        .sd_sclk(sd_clk),
-        .sd_mosi(sd_cmd),
-        .sd_cs_n(sd_d3),
-        .sd_miso_v(sd_d0),
+        .sd_sclk(spi_sclk),
+        .sd_mosi(spi_mosi),
+        .sd_cs_n(spi_cs_n),
+        .sd_miso_v(spi_miso),
         .flash_sclk(flash_sclk),
         .flash_mosi(flash_mosi),
         .flash_cs_n(flash_csn),

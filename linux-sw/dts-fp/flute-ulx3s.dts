@@ -99,13 +99,16 @@
 			sifive,max-bits-per-word = <8>;
 			#address-cells = <1>;
 			#size-cells = <0>;
-			mmc@0 {
-				compatible = "mmc-spi-slot";
-				reg = <0>;
-				spi-max-frequency = <10000000>;
-				voltage-ranges = <3300 3300>;
-				disable-wp;
-			};
+			/* lx48: the card is driven in native SD mode by mmc@c000d000 instead of mmc-spi-slot
+			 * here; a card cannot be in both modes (SPI mode sticks until power is cycled). */
+		};
+		/* The microSD slot in native 4-bit SD mode: src/Sd_Host.v, programmed I/O, read-only
+		 * unless flute_sdh.writable=1.  Needs the ESP32 held in reset (an SDIO slave on the
+		 * same lines). */
+		sdh: mmc@c000d000 {
+			compatible = "flute,sd-host";
+			reg = <0xc000d000 0x1000>;
+			clocks = <&spiclk>;
 		};
 		/* ESP32 UART0 (uart1, a fixed 115200 baud; clock-frequency is not used by the hardware).  The
 		 * ESP32 is held in reset unless gpio1 0x0C EN is set, and then only runs its ROM bootloader. */

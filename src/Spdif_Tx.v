@@ -29,17 +29,6 @@ module spdif_tx (
     input  wire [15:0] right,
     input  wire [3:0]  sfreq,       // channel status byte 3 bits 0-3
     output reg         out
-`ifdef FORMAL
-    ,
-    output wire [6:0]  f_cell,
-    output wire        f_adv,
-    output wire [7:0]  f_frame,
-    output wire [16:0] f_acc,
-    output wire [15:0] f_lq,
-    output wire [15:0] f_rq,
-    output wire        f_base,
-    output wire        f_par
-`endif
 );
     reg [6:0]  cidx;            // 0-127: [6] subframe (0 left), [5:1] slot, [0] half
     reg [16:0] acc;
@@ -119,14 +108,4 @@ module spdif_tx (
         end
     end
 
-`ifdef FORMAL
-    assign f_cell  = cidx;
-    assign f_adv   = adv;
-    assign f_frame = frame;
-    assign f_base  = base;
-    assign f_par   = par;
-    assign f_acc   = acc;
-    assign f_lq    = l_q;
-    assign f_rq    = r_q;
-`endif
 endmodule

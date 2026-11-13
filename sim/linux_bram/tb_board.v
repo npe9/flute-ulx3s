@@ -34,9 +34,25 @@ module sim_board (
 
     tri  [15:0] sdram_dq;
 
-    // microSD (SPI mode): behavioral SDHC card (+sd_none: no card, +sd_image=<hex>: contents)
-    wire sd_clk, sd_cmd, sd_cs_n, sd_miso;
-    sd_spi_model sd (.clk (clk), .sck (sd_clk), .mosi (sd_cmd), .cs_n (sd_cs_n), .miso (sd_miso));
+    // microSD: a behavioral SDHC card in SPI mode (sim/common/sd_spi_model.v: +sd_none no card,
+    // +sd_image=<hex> contents), or with +sd_native in native SD mode (sim/common/sd_native_model.v:
+    // +sdn_image=<hex>, writes only here).  Pull-ups on every line, as on the board.
+    wire sd_clk, sd_cmd, sd_d0, sd_d1, sd_d2, sd_d3, sd_spi_miso, sdn_cmd_o, sdn_cmd_oe;
+    wire [3:0] sdn_dat_o, sdn_dat_oe;
+    reg  sd_native;
+    initial sd_native = $test$plusargs ("sd_native");
+    pullup (sd_cmd); pullup (sd_d0); pullup (sd_d1); pullup (sd_d2); pullup (sd_d3);
+    sd_spi_model sd (.clk (clk), .sck (sd_native ? 1'b0 : sd_clk), .mosi (sd_cmd), .cs_n (sd_native ? 1'b1 : sd_d3),
+                     .miso (sd_spi_miso));
+    assign sd_d0 = (!sd_native && !sd_d3) ? sd_spi_miso : 1'bz;     // DO is driven only while selected
+    sd_native_model sdn (.clk (clk), .sck (sd_native ? sd_clk : 1'b0), .cmd_i (sd_cmd), .cmd_o (sdn_cmd_o),
+                         .cmd_oe (sdn_cmd_oe), .dat_i ({sd_d3, sd_d2, sd_d1, sd_d0}), .dat_o (sdn_dat_o),
+                         .dat_oe (sdn_dat_oe));
+    assign sd_cmd = (sd_native && sdn_cmd_oe)    ? sdn_cmd_o    : 1'bz;
+    assign sd_d0  = (sd_native && sdn_dat_oe[0]) ? sdn_dat_o[0] : 1'bz;
+    assign sd_d1  = (sd_native && sdn_dat_oe[1]) ? sdn_dat_o[1] : 1'bz;
+    assign sd_d2  = (sd_native && sdn_dat_oe[2]) ? sdn_dat_o[2] : 1'bz;
+    assign sd_d3  = (sd_native && sdn_dat_oe[3]) ? sdn_dat_o[3] : 1'bz;
 
     // Configuration flash: behavioral SPI NOR (+flash_image=<hex>: contents, else erased).  The
     // clock has no pin on ulx3s_top (USRMCLK drives CCLK), so it is read through the stub.
@@ -70,8 +86,10 @@ module sim_board (
         .wifi_en     (wifi_en),
         .sd_clk      (sd_clk),
         .sd_cmd      (sd_cmd),
-        .sd_d0       (sd_miso),
-        .sd_d3       (sd_cs_n),
+        .sd_d0       (sd_d0),
+        .sd_d1       (sd_d1),
+        .sd_d2       (sd_d2),
+        .sd_d3       (sd_d3),
         .flash_csn   (flash_csn),
         .flash_mosi  (flash_mosi),
         .flash_miso  (flash_miso),

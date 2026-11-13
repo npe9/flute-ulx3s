@@ -1,0 +1,27 @@
+# src/Sd_Host.v register map (window 0xC000_D000).  <offset> <field> <bits> <access> <reset>
+!window 12
+!unmapped zero
+!writes full
+0x00 ID      31:0        ro   0x53444831
+0x04 MODE    0           rw   0
+0x04 WIDE    1           rw   0
+0x04 WPROT   2           rw   1
+0x04 CLKEN   3           rw   0
+0x04 DIV     27:16       rw   62
+0x04 -       31:28,15:4  zero
+0x08 ARG     31:0        rw   0
+0x0C CMD     12:0        vol            # the last accepted command
+0x0C -       31:13       zero
+0x10 STATUS  31:0        vol
+0x14 RESP0   31:0        vol
+0x18 RESP1   31:0        vol
+0x1C RESP2   31:0        vol
+0x20 RESP3   31:0        vol
+0x24 BLKSIZE 9:0         vol            # 4..512, multiple of 4; only while no transfer
+0x24 -       31:10       zero
+0x28 BLKCNT  15:0        vol            # counts down
+0x28 -       31:16       zero
+0x2C DTMO    23:0        rw   0xFFFFFF
+0x2C -       31:24       zero
+0x30 FIFO    31:0        vol
+0x34 ABORT   31:0        zero           # write-only

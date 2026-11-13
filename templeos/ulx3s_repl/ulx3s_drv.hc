@@ -19,6 +19,7 @@
 #define BRD_DEV_AUDIO   11
 #define BRD_DEV_SPI2    12
 #define BRD_DEV_UART1   13
+#define BRD_DEV_SDH     14
 
 U32 BrdRd(U32 a)
 {
@@ -782,6 +783,159 @@ I64 PcmTone(I64 hz, I64 ms)
   return total;
 }
 
+// ---------------- microSD in native SD mode (lx48, src/Sd_Host.v; SoC Info device 14) ----------
+// Read-only: WPROT stays set, so the host refuses write commands and never drives DAT.  The card
+// must not have seen SPI mode since power-up (a card that got CMD0 in SPI mode stays there), and
+// the ESP32 must be held in reset (an SDIO slave on the same lines): SdhInit releases it.
+U32 g_sdh;
+U32 g_sdh_rca;
+U32 g_sdh_ok;
+
+#define SDH_R48   0x100
+#define SDH_R136  0x200
+#define SDH_NOCRC 0x400
+#define SDH_DATA  0x800
+
+U32 SdhBase()
+{
+  if (!g_sdh)
+    g_sdh = BrdNeed(BRD_DEV_SDH, "sdh");
+  return g_sdh;
+}
+
+// One command; returns STATUS ([2] timeout, [3] CRC error, [10] refused), the response in RESP0..3.
+U32 SdhCmd(I64 idx, U32 arg, I64 flags)
+{
+  U32 s, t0;
+  BrdWr(g_sdh + 0x08, arg);
+  BrdWr(g_sdh + 0x0C, (idx & 0x3F) | flags);
+  t0 = BrdTimeLo();
+  do {
+    s = BrdRd(g_sdh + 0x10);
+    if (BrdTimeLo() - t0 > BrdTimerHz())
+      return s | 4;
+  } while (s & 1);
+  return s;
+}
+
+U32 SdhAcmd(I64 idx, U32 arg, I64 flags)
+{
+  U32 s = SdhCmd(55, g_sdh_rca << 16, SDH_R48);
+  if (s & 0xC)
+    return s;
+  return SdhCmd(idx, arg, flags);
+}
+
+// Power-up to the transfer state, 4-bit, 12.5 MHz.  Prints the card; 1 = ready.
+I64 SdhInit()
+{
+  U32 s, ocr, i, csd0, csd1, csd2, cs;
+  g_sdh_ok = 0;
+  if (!SdhBase())
+    return 0;
+  Esp32Off();
+  BrdWr(g_sdh + 0x04, 0x003E000D);          // native, WPROT, clock on, 397 kHz
+  if (!(BrdRd(g_sdh + 0x10) & 0x1000)) {
+    UartStr("sdh: not in native mode (ESP32 running?)\n");
+    return 0;
+  }
+  Sleep(2);                                 // 74+ clocks
+  SdhCmd(0, 0, 0);
+  s = SdhCmd(8, 0x1AA, SDH_R48);
+  if ((s & 0xC) || (BrdRd(g_sdh + 0x14) & 0xFFF) != 0x1AA) {
+    Print("sdh: no answer to CMD8 (status %x): no card, or it is in SPI mode (power-cycle it)\n", s);
+    return 0;
+  }
+  g_sdh_rca = 0;
+  for (i = 0; i < 200; i++) {
+    s = SdhAcmd(41, 0x40FF8000, SDH_R48 | SDH_NOCRC);
+    ocr = BrdRd(g_sdh + 0x14);
+    if (!(s & 0xC) && (ocr & 0x80000000))
+      break;
+    Sleep(5);
+  }
+  if (!(ocr & 0x80000000)) {
+    Print("sdh: ACMD41 never ready (OCR %x)\n", ocr);
+    return 0;
+  }
+  s = SdhCmd(2, 0, SDH_R136 | SDH_NOCRC);
+  Print("sdh: CID %08x %08x %08x %08x\n", BrdRd(g_sdh + 0x14), BrdRd(g_sdh + 0x18),
+        BrdRd(g_sdh + 0x1C), BrdRd(g_sdh + 0x20));
+  s = SdhCmd(3, 0, SDH_R48);
+  g_sdh_rca = BrdRd(g_sdh + 0x14) >> 16;
+  s = SdhCmd(9, g_sdh_rca << 16, SDH_R136 | SDH_NOCRC);
+  csd0 = BrdRd(g_sdh + 0x14);
+  csd1 = BrdRd(g_sdh + 0x18);
+  csd2 = BrdRd(g_sdh + 0x1C);
+  cs = ((csd1 & 0x3F) << 16) | (csd2 >> 16);   // CSD v2 C_SIZE, bits 69:48
+  s = SdhCmd(7, g_sdh_rca << 16, SDH_R48);
+  if (s & 0xC) {
+    Print("sdh: CMD7 failed (status %x)\n", s);
+    return 0;
+  }
+  s = SdhAcmd(6, 2, SDH_R48);               // 4-bit
+  BrdWr(g_sdh + 0x04, 0x0001000F);          // native, 4-bit, WPROT, clock on, 12.5 MHz
+  Print("sdh: OCR %x %s, RCA %x, %d MiB, 4-bit 12.5 MHz\n", ocr,
+        (ocr & 0x40000000) ? "SDHC/SDXC" : "SDSC", g_sdh_rca,
+        ((csd0 >> 30) == 1) ? (cs + 1) / 2 : 0);
+  g_sdh_ok = 1;
+  return 1;
+}
+
+// Block `lba` (512-byte units, SDHC) into buf; 1 = read with a good CRC.
+I64 SdhRead(U32 lba, U32 *buf)
+{
+  U32 s, i, t0;
+  if (!g_sdh_ok && !SdhInit())
+    return 0;
+  BrdWr(g_sdh + 0x24, 512);
+  BrdWr(g_sdh + 0x28, 1);
+  s = SdhCmd(17, lba, SDH_R48 | SDH_DATA);
+  if (s & 0x40C) {
+    Print("sdh: CMD17 status %x\n", s);
+    BrdWr(g_sdh + 0x34, 0);
+    return 0;
+  }
+  t0 = BrdTimeLo();
+  do {
+    s = BrdRd(g_sdh + 0x10);
+    if (BrdTimeLo() - t0 > BrdTimerHz()) {
+      UartStr("sdh: no data\n");
+      BrdWr(g_sdh + 0x34, 0);
+      return 0;
+    }
+  } while (!(s & 0x180));
+  if (s & 0x80) {
+    UartStr("sdh: data timeout\n");
+    BrdWr(g_sdh + 0x34, 0);
+    return 0;
+  }
+  for (i = 0; i < 128; i++)
+    buf[i] = BrdRd(g_sdh + 0x30);
+  s = BrdRd(g_sdh + 0x10);
+  if (s & 0x40) {
+    UartStr("sdh: data CRC error\n");
+    return 0;
+  }
+  return 1;
+}
+
+// Reads block `lba`; prints its first 16 bytes and the 0x55AA signature word.  Returns the word at
+// 510 (0xAA55 as a little-endian U16 for an MBR), -1 on error.
+I64 SdhShow(U32 lba)
+{
+  U32 buf[128];
+  U8 *b = buf;
+  I64 i;
+  if (!SdhRead(lba, buf))
+    return -1;
+  Print("sdh: block %d:", lba);
+  for (i = 0; i < 16; i++)
+    Print(" %02x", b[i]);
+  Print("  sig %02x%02x\n", b[510], b[511]);
+  return (b[510] << 8) | b[511];
+}
+
 U0 BoardHelp()
 {
   UartStr(
@@ -796,6 +950,7 @@ U0 BoardHelp()
     "Esp32Download() Esp32Sync() Esp32Off()   ESP32 ROM download mode, esptool SYNC\n"
     "HdmiStat() CecSelf() CecPoll(dst)   HDMI HPD/CEC/Utility; CEC pin check, poll (1 = ACK)\n"
     "SpdifSet(pins,sfreq) PcmTone(hz,ms)   S/PDIF on jack ring 2; PCM square wave\n"
+    "SdhInit() SdhShow(lba) SdhRead(lba,buf)   microSD, native 4-bit SD mode, read-only\n"
     "Sleep(ms) BrdRd(addr) BrdWr(addr,v)   32-bit register access\n"
     "PowerOff() PowerOffFor(s) Reconf()\n");
 }

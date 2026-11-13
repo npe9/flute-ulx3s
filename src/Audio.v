@@ -26,7 +26,7 @@
 // ================================================================
 
 module audio #(
-    parameter [15:0] RATE_RESET = 16'd1133   // the formal harness shortens it to reach a sample time
+    parameter [15:0] RATE_RESET = 16'd1133   // formal/fv/ips/audio sets 2 to reach a sample time
 ) (
     input  wire        clk,
     input  wire        rst,         // active high
@@ -40,25 +40,6 @@ module audio #(
     output reg  [3:0]  audio_l,
     output reg  [3:0]  audio_r,
     output reg  [3:0]  audio_v
-`ifdef FORMAL
-    ,
-    input  wire [7:0]  f_idx,       // the harness's symbolic FIFO slot
-    output wire [31:0] f_slot,
-    output wire [7:0]  f_wp,
-    output wire [7:0]  f_rp,
-    output wire [8:0]  f_level,
-    output wire        f_pop,
-    output wire [31:0] f_q,
-    output wire [31:0] f_cur,
-    output wire [11:0] f_acc_l,
-    output wire [15:0] f_u_l,
-    output wire [15:0] f_rate_cnt,
-    output wire [15:0] f_rate,
-    output wire        f_do_pop,
-    output wire        f_push,
-    output wire [3:0]  f_volume,
-    output wire [7:0]  f_spdif
-`endif
 );
     reg [1:0]  ctrl;
     reg [3:0]  volume;
@@ -196,21 +177,4 @@ module audio #(
         .left(pcm_l), .right(pcm_r), .sfreq(spdif_sfreq), .out(spdif_out)
     );
 
-`ifdef FORMAL
-    assign f_slot = mem[f_idx];
-    assign f_wp = wp;
-    assign f_rp = rp;
-    assign f_level = level;
-    assign f_pop = pop;
-    assign f_q = q;
-    assign f_cur = cur;
-    assign f_acc_l = acc_l;
-    assign f_u_l = u_l;
-    assign f_rate_cnt = rate_cnt;
-    assign f_rate = rate;
-    assign f_do_pop = do_pop;
-    assign f_push = push;
-    assign f_volume = volume;
-    assign f_spdif = {spdif_sfreq, spdif_pins};
-`endif
 endmodule

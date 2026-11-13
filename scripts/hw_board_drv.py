@@ -28,6 +28,32 @@ def ans(out):
     return int(m[-1], 16) & 0xFFFFFFFF if m else None
 
 
+def sd_native(fd):
+    """lx48 native SD, read-only: SdhInit to 4-bit 12.5 MHz, CID/OCR/capacity, blocks 0, 1, 2048, WPROT
+    still set.  The card must not have seen SPI mode since power-up."""
+    R = 'required'
+    out = hw.check_repl(R, 'SdhInit() brings the card up (4-bit, 12.5 MHz)', fd, 'SdhInit();',
+                        expect=('sdh: OCR', 'ans=0x0000000000000001'), forbid=('sdh: no answer', 'failed'))
+    if out:
+        m = re.search(r'sdh: CID ([0-9a-f]{8}) ([0-9a-f]{8}) ([0-9a-f]{8}) ([0-9a-f]{8})', out)
+        if m:
+            cid = int(''.join(m.groups()), 16)
+            name = (cid >> 64 & ((1 << 40) - 1)).to_bytes(5, 'big').decode('latin-1')
+            hw.record('info', 'CID product name (SPI mode saw "asdfg")', 'PASS' if name == 'asdfg' else 'WARN', repr(name))
+        m = re.search(r'(\d+) MiB', out)
+        if m:
+            hw.record('info', 'capacity (SPI mode saw 7.50 GiB)', 'PASS' if 7600 <= int(m.group(1)) <= 7700 else 'WARN',
+                      f'{m.group(1)} MiB')
+    out = hw.check_repl(R, 'SdhShow(0): block 0 reads with a good CRC', fd, 'SdhShow(0);',
+                        expect=('sdh: block 0:', 'ans='), forbid=('CRC error', 'timeout', 'no data'))
+    if out:
+        hw.record('info', 'block 0 as SPI mode read it (sig ffff)', 'PASS' if ans(out) == 0xffff else 'WARN', hex(ans(out) or 0))
+    for b in (1, 2048, 1000000):
+        hw.check_repl(R, f'SdhShow({b}) reads with a good CRC', fd, f'SdhShow({b});',
+                      expect=(f'sdh: block {b}:', 'ans='), forbid=('CRC error', 'timeout', 'no data'))
+    hw.check_repl(R, 'SD host still write-protected', fd, 'BrdRd(0xC000D004) & 4;', expect=('ans=0x0000000000000004',))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--blob', default=hw.BLOB)
@@ -36,6 +62,8 @@ def main():
     subprocess.run(['openFPGALoader', '-b', 'ulx3s', '-m', hw.BITSTREAM], capture_output=True)
     fd = hw.open_port()
     hw.load_blob(fd, open(args.blob, 'rb').read())
+    if os.environ.get('HW_LX48', '0') == '1':          # lx48: native SD (needs a card fresh from power-up)
+        sd_native(fd)
     boot = b''
     t0 = time.time()
     while time.time() - t0 < 240:

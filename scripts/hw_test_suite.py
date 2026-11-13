@@ -34,7 +34,7 @@ EXPECT_HZ = int(os.environ.get('EXPECT_HZ', '25000000'))
 EXPECT_MISA = os.environ.get('EXPECT_MISA', '40101105').lower()
 # SoC_Info device-table entries: 15 with spi0, spi2 (lx43), uart1 (lx44), the video block's two regions, i2c0, gpio1, audio; 10 before lx42 and with
 # only video (INCLUDE_VIDEO); EXPECT_NDEV=8 for lx38 and older, 7 before spi0.
-EXPECT_NDEV = int(os.environ.get('EXPECT_NDEV', '15'))
+EXPECT_NDEV = int(os.environ.get('EXPECT_NDEV', '16'))
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dmi import DMI  # noqa: E402
@@ -465,7 +465,7 @@ def main():
         if rom:
             names = {0: 'boot_rom', 1: 'sdram', 2: 'clint', 3: 'uart0',
                      4: 'gpio', 5: 'plic', 6: 'soc_info', 7: 'spi0', 8: 'video', 9: 'i2c0',
-                     10: 'gpio1', 11: 'audio', 12: 'spi2', 13: 'uart1'}
+                     10: 'gpio1', 11: 'audio', 12: 'spi2', 13: 'uart1', 14: 'sdh'}
             recs = [rom[i * 8:(i + 1) * 8] for i in range(EXPECT_NDEV)]
             byname = {names.get(r[0], str(r[0])): r for r in recs}
             dmi_check('devROM uart0',
@@ -504,6 +504,13 @@ def main():
                           lambda: byname['uart1'][2] == 0xC0007000
                           and byname['uart1'][4] == 4,
                           lambda v: v)
+            if EXPECT_NDEV >= 16:
+                dmi_check('devROM sdh (native SD host)',
+                          lambda: byname['sdh'][2] == 0xC000D000,
+                          lambda v: v)
+                dmi_check('SD host ID SDH1, CTRL reset (SPI mode, WPROT)',
+                          lambda: (dmi.mem_read32(0xC000D000), dmi.mem_read32(0xC000D004)),
+                          lambda v: v == (0x53444831, 0x003E0004))
 
         print('\n== E. bus error monitor ==', flush=True)
         base_cnt = dmi.mem_read32(0xC000302C)

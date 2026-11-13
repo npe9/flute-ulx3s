@@ -34,9 +34,9 @@ module sim_board (
 
     tri  [15:0] sdram_dq;
 
-    // microSD (SPI mode): no card unless a model drives MISO
-    wire sd_clk, sd_cmd, sd_cs_n;
-    wire sd_miso = 1'b1;
+    // microSD: no card (pulled-up lines)
+    wire sd_clk, sd_cmd, sd_d0, sd_d1, sd_d2, sd_d3;
+    pullup (sd_cmd); pullup (sd_d0); pullup (sd_d1); pullup (sd_d2); pullup (sd_d3);
     wire flash_csn, flash_mosi, flash_wpn, flash_holdn;
     wire flash_miso = 1'b1;    // erased flash: no boot image
 
@@ -62,8 +62,10 @@ module sim_board (
         .wifi_en     (wifi_en),
         .sd_clk      (sd_clk),
         .sd_cmd      (sd_cmd),
-        .sd_d0       (sd_miso),
-        .sd_d3       (sd_cs_n),
+        .sd_d0       (sd_d0),
+        .sd_d1       (sd_d1),
+        .sd_d2       (sd_d2),
+        .sd_d3       (sd_d3),
         .flash_csn   (flash_csn),
         .flash_mosi  (flash_mosi),
         .flash_miso  (flash_miso),
