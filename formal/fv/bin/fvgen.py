@@ -182,7 +182,7 @@ def gen(ip, c, work, rtl_override=None, only=None):
     """Write the work tree for each check (all, or those in `only`); returns {check: dir}.
     Only those checks' directories are replaced: another run's may be in use."""
     os.makedirs(work, exist_ok=True)
-    root = os.path.abspath(os.environ.get('FV_RTL_ROOT', REPO))   # a staged RTL tree (default: the repo)
+    root = os.path.abspath(os.environ.get('FV_RTL_ROOT') or REPO)   # a staged RTL tree (default: the repo)
     rtl = [rtl_override.get(r, os.path.join(root, r)) if rtl_override else os.path.join(root, r)
            for r in c['rtl'].split()]
     bad = lint(rtl)
@@ -279,7 +279,7 @@ def apply_mutant(text, exprs):
 def cmd_mutate(ip, only):
     c = load(ip)
     rtl = c['rtl'].split()
-    root = os.path.abspath(os.environ.get('FV_RTL_ROOT', REPO))
+    root = os.path.abspath(os.environ.get('FV_RTL_ROOT') or REPO)
     tmp = tempfile.mkdtemp(prefix=f'fvmut_{ip}_')
     bad = 0
 

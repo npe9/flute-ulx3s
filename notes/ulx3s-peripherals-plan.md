@@ -520,6 +520,14 @@ against a register model generated from a register spec; internals only in an IN
 (linted); `fvgen mutate` needs every mutant caught by FAIL/UNKNOWN or a sim catcher.
 Ported: sdh (12 mutants), spdif (12), audio (9); src/Sd_Host.v, Spdif_Tx.v, Audio.v stripped of
 their `ifdef FORMAL taps (preprocess-equivalent) and formal/spdif, formal/audio retired.
+Trace ports (user: "all the IP should have traceports that go into the specification"): each IP
+now has always-present `tr_*` outputs (spec events: command accepted/done, buffer writes, S/PDIF
+subframe, audio push/pop/play/DAC), unconnected in Top.v so synthesis prunes them.  The spec is
+split: the IP checker relates the trace to the bus and inputs; a VIP relates the pins to the
+trace (iec60958_mon, sd_rd_card).  Induction-only state still reaches the checker by bind, below
+the INVARIANTS marker.  Proofs: sdh safety/frame/rd + rdcover (4-bit block read with good CRC
+reached at step 120), spdif stream/en/cover, audio prove/cover; mutants 12/12, 12/12, 9/9.
+lx48 gate on the trace-port RTL: s3 53.42, s5 53.70, s7 52.60; all sims and formal/fv PASS.
 To port: board_io (an I2C host VIP; the termination ranking stays a declared whitebox lemma),
 video, then the BSV blocks (AXI4_RegBus, AXI4_SPI, Sdram_Controller).  RVFI stays: riscv-formal
 needs the core to emit its trace port; it is output-only and off unless RISCV_FORMAL is defined.

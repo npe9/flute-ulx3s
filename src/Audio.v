@@ -23,6 +23,11 @@
 // Each DAC is a first-order sigma-delta at the system clock: 16 bits in, the top 4 bits plus the
 // carry of the 12-bit error accumulator out, so the mean level is the sample's.  The top code is
 // saturated: inputs at or above 0xF000 (offset binary) clip to code 15.
+//
+// Trace port (always present; unconnected in the FPGA build): FIFO pushes and drops, sample
+// times with their pop or underrun, each sample entering the player (the clock after its pop),
+// the PCM pair handed on and the DAC input words.  formal/fv/ips/audio proves the trace right
+// against the bus and the pins right against the trace.
 // ================================================================
 
 module audio #(
@@ -39,7 +44,20 @@ module audio #(
     output reg  [31:0] rb_rdata,
     output reg  [3:0]  audio_l,
     output reg  [3:0]  audio_r,
-    output reg  [3:0]  audio_v
+    output reg  [3:0]  audio_v,
+    // trace port (always present; unconnected in the FPGA build; see the header)
+    output wire        tr_push_valid,   // a FIFO write accepted: tr_push_data queued
+    output wire [31:0] tr_push_data,
+    output wire        tr_drop,         // a FIFO write dropped (full)
+    output wire        tr_tick,         // a sample time
+    output wire        tr_pop_valid,    // ... at which a sample leaves the FIFO
+    output wire        tr_underrun,     // ... at which CTRL[0] is set and the FIFO is empty
+    output wire        tr_play_valid,   // the sample tr_play_data enters the player (after a pop)
+    output wire [31:0] tr_play_data,
+    output wire [15:0] tr_pcm_l,        // the samples handed on (S/PDIF, the mixer)
+    output wire [15:0] tr_pcm_r,
+    output wire [15:0] tr_dac_l,        // the DAC input words (offset binary, 0x8000 silence)
+    output wire [15:0] tr_dac_r
 );
     reg [1:0]  ctrl;
     reg [3:0]  volume;
@@ -68,6 +86,15 @@ module audio #(
     wire do_pop  = take_s && !empty;
 
     // ---------------- sample path ----------------
+    assign tr_push_valid = push;
+    assign tr_push_data  = rb_wdata;
+    assign tr_drop       = push_rq && full;
+    assign tr_tick       = tick;
+    assign tr_pop_valid  = do_pop;
+    assign tr_underrun   = take_s && empty;
+    assign tr_play_valid = pop;
+    assign tr_play_data  = q;
+
     function automatic [15:0] mix (input [15:0] pcm, input [15:0] tn);
         reg signed [16:0] sum;
         begin
@@ -86,6 +113,10 @@ module audio #(
     // registered: the cone from the sample registers ends here, ahead of the accumulators
     reg  [15:0] u_l, u_r;      // offset binary: 0x8000 is silence
     reg  [11:0] acc_l, acc_r;
+    assign tr_pcm_l = pcm_l;
+    assign tr_pcm_r = pcm_r;
+    assign tr_dac_l = u_l;
+    assign tr_dac_r = u_r;
     wire [12:0] nx_l = {1'b0, acc_l} + {1'b0, u_l[11:0]};
     wire [12:0] nx_r = {1'b0, acc_r} + {1'b0, u_r[11:0]};
 

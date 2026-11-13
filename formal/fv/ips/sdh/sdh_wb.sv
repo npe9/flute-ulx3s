@@ -1,7 +1,10 @@
 // sdh_wb: the checker for src/Sd_Host.v, bound into the DUT (no RTL changes).
-//   Properties are stated on the DUT's ports, against the register model generated from
-//   sdh.regs and the SD bus VIPs.  The second port group names DUT internals; they appear only in
-//   the INVARIANTS section, which strengthens k-induction and claims nothing on its own.
+//   Properties are stated on the DUT's ports and its trace port, against the register model
+//   generated from sdh.regs and the SD bus VIPs: the trace is checked against the bus (a command
+//   goes out exactly for an accepted CMD write, with its word and ARG; WPROT refusals; the received
+//   word and the CRC verdict of a read block), the pins against the trace (the CMD frame carries
+//   the traced command) and against the card VIP.  The second port group names DUT internals; they
+//   appear only in the INVARIANTS section, which strengthens k-induction and claims nothing.
 // Checks (fvgen -D): (none) safety, CHK_FRAME command frames, CHK_RD a read block.
 `default_nettype none
 module sdh_wb (
@@ -11,6 +14,10 @@ module sdh_wb (
     input wire        spi_sclk, spi_mosi, spi_cs_n, spi_miso, esp32_en, esp32_strap,
     input wire        clk_o, cmd_o, cmd_oe, cmd_i,
     input wire [3:0]  dat_o, dat_oe, dat_i,
+    input wire        tr_cmd_valid, input wire [12:0] tr_cmd, input wire [31:0] tr_cmd_arg,
+    input wire        tr_cmd_reject, tr_cmd_done, tr_cmd_tmo, tr_cmd_crc,
+    input wire        tr_buf_valid, tr_buf_rx, input wire [6:0] tr_buf_addr, input wire [31:0] tr_buf_data,
+    input wire        tr_dat_done, tr_dat_crc, tr_dat_tmo, tr_dat_wrerr,
     // internals (induction only)
     input wire        mode, wide, wprot, clken, sclk, coe, cout, doe,
     input wire [11:0] div, ccnt,
@@ -23,7 +30,7 @@ module sdh_wb (
     input wire [9:0]  blksize, input wire [15:0] blkcnt, input wire [12:0] dcnt, input wire [23:0] dto,
     input wire [15:0] k0, k1, k2, k3, input wire [7:0] byt, input wire [31:0] dsh,
     input wire [6:0]  bptr, cptr, wa_m, input wire rx_ready, we_m, input wire [31:0] wd_m, mem0, q,
-    input wire [3:0]  dat_q, input wire d_crc, d_tmo, d_done
+    input wire [3:0]  dat_q, input wire d_crc, d_tmo, d_done, wr_err
 );
 `ifdef CHK_FRAME
  `define SDH_SW
@@ -80,6 +87,20 @@ module sdh_wb (
     wire cmd_acc = cmd_wr && native && !(s_WPROT && (bw_d[12] || is_wr (bw_d[5:0])));
 `endif
 
+    // ---------------- the command trace ----------------
+    // a command goes out only for a full-word CMD write in native mode, carrying that word and ARG,
+    // and never a write command under WPROT; with the polling contract, every such write is one
+    wire cmd_w  = full_wr && bw_a == 12'h00C;
+    wire cmd_wp = bw_d[12] || is_wr (bw_d[5:0]);
+    always @(*) if (!rst) begin
+        if (tr_cmd_valid) assert (cmd_w && native && !(s_WPROT && cmd_wp) && tr_cmd == bw_d[12:0] && tr_cmd_arg == s_ARG);
+        if (tr_cmd_reject) assert (cmd_w && native && s_WPROT && cmd_wp);
+`ifdef SDH_SW
+        assert (tr_cmd_valid == cmd_acc);
+        assert (tr_cmd_reject == (cmd_w && native && s_WPROT && cmd_wp));
+`endif
+    end
+
     // ---------------- command frames ----------------
 `ifdef CHK_FRAME
     wire [5:0] mn; wire [47:0] msh; wire mdone; wire [5:0] midx; wire [31:0] marg; wire msq;
@@ -88,8 +109,8 @@ module sdh_wb (
     // a CMD write while idle starts exactly one frame carrying its index and ARG, unless WPROT
     // refuses it; nothing else puts a frame on the line
     reg pend = 1'b0; reg [47:0] exp_f;
-    wire accept = cmd_acc;
-    wire [39:0] head = {2'b01, bw_d[5:0], s_ARG};
+    wire accept = tr_cmd_valid;                      // the wire must carry what the trace says
+    wire [39:0] head = {2'b01, tr_cmd[5:0], tr_cmd_arg};
     always @(posedge clk) begin
         if (accept) begin pend <= 1'b1; exp_f <= {head, crc7_ld40 (head), 1'b1}; end
         if (mdone) pend <= 1'b0;
@@ -159,6 +180,12 @@ module sdh_wb (
         if (br_d[8]) assert (p >= T && br_d[6] == bad && br_d[5] && !br_d[4]);
     end
     always @(*) if (!rst && br && br_a == 12'h030 && rseen && !got) assert (br_d == W);
+    // the trace: the block's one word reaches buffer word 0 once the card has sent it, and the
+    // transfer ends with the CRC verdict
+    always @(*) if (!rst) begin
+        if (tr_buf_valid) assert (armed && tr_buf_rx && tr_buf_addr == 7'd0 && tr_buf_data == W && p >= D + 13'd1);   // after the card's last data bit (bit 1 is the start bit)
+        if (tr_dat_done) assert (armed && p >= T && tr_dat_crc == bad && !tr_dat_tmo && !tr_dat_wrerr);
+    end
     // milestones (~125 steps to the last: DIV = 1 is 4 clocks per card clock, 26 card clocks)
     always @(*) if (!rst) begin
         cover (armed && p == 13'd1);                 // the card has started
@@ -236,7 +263,7 @@ module sdh_wb (
         else begin
             assert (native && s_DTMO != 24'd0 && blksize == 10'd4 && blkcnt <= 16'd1);
             if (dst != 3'd3) assert (!we_m);
-            assert (!d_tmo && (dst == 3'd0 || dst == 3'd1 || dst == 3'd2 || dst == 3'd3));
+            assert (!d_tmo && !wr_err && (dst == 3'd0 || dst == 3'd1 || dst == 3'd2 || dst == 3'd3));
             if (sclk && p != 13'd0 && p <= T) assert (s_WIDE ? dat_q == card_dat : dat_q[0] == card_dat[0]);
             if (p == 13'd0) assert (dat_q[0]);
             if (dst != 3'd0) assert (!rx_ready && !d_crc && !d_done && cptr == 7'd0 && !rseen && bptr == (dst == 3'd3));
@@ -277,8 +304,12 @@ bind sd_host sdh_wb wb (
     .esp32_en(esp32_en), .esp32_strap(esp32_strap),
     .clk_o(clk_o), .cmd_o(cmd_o), .cmd_oe(cmd_oe), .cmd_i(cmd_i),
     .dat_o(dat_o), .dat_oe(dat_oe), .dat_i(dat_i),
+    .tr_cmd_valid(tr_cmd_valid), .tr_cmd(tr_cmd), .tr_cmd_arg(tr_cmd_arg), .tr_cmd_reject(tr_cmd_reject),
+    .tr_cmd_done(tr_cmd_done), .tr_cmd_tmo(tr_cmd_tmo), .tr_cmd_crc(tr_cmd_crc), .tr_buf_valid(tr_buf_valid),
+    .tr_buf_rx(tr_buf_rx), .tr_buf_addr(tr_buf_addr), .tr_buf_data(tr_buf_data), .tr_dat_done(tr_dat_done),
+    .tr_dat_crc(tr_dat_crc), .tr_dat_tmo(tr_dat_tmo), .tr_dat_wrerr(tr_dat_wrerr),
     .mode(mode), .wide(wide), .wprot(wprot), .clken(clken), .sclk(sclk), .coe(coe), .cout(cout),
     .doe(doe), .div(div), .ccnt(ccnt), .arg(arg), .dtmo(dtmo), .cst(cst), .dst(dst), .cn(cn), .csh(csh), .crc7(crc7),
     .blksize(blksize), .blkcnt(blkcnt), .dcnt(dcnt), .dto(dto), .k0(k0), .k1(k1), .k2(k2), .k3(k3),
     .byt(byt), .dsh(dsh), .bptr(bptr), .cptr(cptr), .wa_m(wa_m), .rx_ready(rx_ready), .we_m(we_m),
-    .wd_m(wd_m), .mem0(mem[0]), .q(q), .dat_q(dat_q), .d_crc(d_crc), .d_tmo(d_tmo), .d_done(d_done));
+    .wd_m(wd_m), .mem0(mem[0]), .q(q), .dat_q(dat_q), .d_crc(d_crc), .d_tmo(d_tmo), .d_done(d_done), .wr_err(wr_err));

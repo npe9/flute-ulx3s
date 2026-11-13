@@ -34,16 +34,28 @@ The RTL in `src/` is what the FPGA build reads, and nothing else:
    may not appear above its INVARIANTS marker, and nothing below the marker may `assume`.  A
    check that is a deliberate whitebox lemma names the internals it states properties on in the
    cfg's `whitebox =` key.
-6. A sub-block's own interface may be used as an observation point and is then declared as such
-   in the checker's port list (audio: the S/PDIF instance's sample inputs, the DAC's input word):
-   the sub-block is proved on its own ports by its own check.
+6. Observation inside an IP goes through its trace port (below), never through internal names.
 7. Assumptions on a port are discharged by the check of whatever drives that port: the register
    bus rules a device check assumes (`regbus_vip`, DUT_IS_DEST=1) are asserted of the bridge,
    src/AXI4_RegBus.bsv, by formal/regbus.
 
-**Exception: RVFI.**  riscv-formal checks a core through its RVFI trace port, which the core has
-to emit.  Flute's `RISCV_FORMAL` RVFI port is the one formal hook allowed to stay in RTL; it is
-an output-only trace and changes nothing when the define is off.
+## Trace ports
+
+Every IP has a trace port, as a RISC-V core has RVFI for riscv-formal: outputs named `tr_*`,
+**always present** (no ifdef; the RTL that is verified is the RTL that is built), unconnected in
+the FPGA build so synthesis removes them.  A trace carries spec-level events, not internals:
+what the IP says it is doing (sdh: the command accepted and its ARG, buffer words received, the
+CRC verdict of a block; spdif: each subframe's sample, frame and channel status bit; audio: FIFO
+pushes, pops, the sample entering the player, the words handed to the DAC).  The trace's meaning
+is documented in the IP's header and is part of its specification, which is checked in two
+halves:
+
+* **the trace against the inputs and the bus**, in the IP's checker (is the claimed event right?);
+* **the pins against the trace**, in a reusable VIP where the protocol allows (does the wire
+  carry what the trace claims? e.g. `iec60958_mon` takes the subframes from the trace).
+
+Proof-only state still reaches the checker by `bind`, in its INVARIANTS section (rule 5).
+Flute's RVFI port predates this and stays as it is (under `RISCV_FORMAL`).
 
 ## Layout
 
@@ -57,11 +69,11 @@ vip/sd/              sd_cmd_mon (host CMD frames), sd_rd_card (card side of a re
 ips/<ip>/            <ip>.cfg, <ip>.regs, <ip>_env.sv, <ip>_wb.sv (the bound checker)
 ```
 
-| IP | RTL | checks | mutants |
-|----|-----|--------|---------|
-| sdh | src/Sd_Host.v | safety, frame (CMD frames), rd (read block, 1/4-bit, any CRC), cover, rdcover | 12 (2 by sdh_ut only: nohold, startbit) |
-| spdif | src/Spdif_Tx.v | stream (IEC 60958 by k-induction), en, cover | 12 |
-| audio | src/Audio.v | prove (bus, registers, FIFO order, sample clock, DAC error bound, mute, pins), cover | 9 |
+| IP | RTL | trace port | checks | mutants |
+|----|-----|------------|--------|---------|
+| sdh | src/Sd_Host.v | commands accepted/refused/done, buffer words, data done + verdict | safety, frame (CMD frames = the traced command), rd (read block, 1/4-bit, any CRC), cover, rdcover | 12 (nohold, startbit: sdh_ut only) |
+| spdif | src/Spdif_Tx.v | one event per subframe: channel, frame, sample, C bit | stream (trace vs inputs; OUT vs trace as IEC 60958), en, cover | 12 |
+| audio | src/Audio.v | push/drop, sample time + pop/underrun, play, PCM out, DAC words | prove (registers, STATUS, FIFO order, sample clock, player, DAC, mute, pins), cover | 9 |
 
 Work trees go in `build/fv/<ip>/<check>/`.
 

@@ -17,6 +17,12 @@
 // Biphase mark: the level changes at every slot start, and also mid-slot for a 1.  Preambles are
 // the standard 8-cell patterns given for a preceding level of 0 (B 11101000, M 11100010,
 // W 11100100), inverted after a 1; they hold a level for 3 cells, which data never does.
+//
+// Trace port (always present; unconnected in the FPGA build): one event per subframe, in the
+// clock before its first preamble cell appears on OUT -- tr_sf_valid, tr_sf_right (0 left, 1
+// right), tr_sf_frame (0-191; 0 = block start, preamble B), tr_sf_sample (the 16-bit sample it
+// carries), tr_sf_cs (its channel status bit).  The checks (formal/fv/ips/spdif) prove the trace
+// right against the inputs and the stream on OUT right against the trace.
 // ================================================================
 
 module spdif_tx (
@@ -28,7 +34,13 @@ module spdif_tx (
     input  wire [15:0] left,        // signed samples, sampled at tick
     input  wire [15:0] right,
     input  wire [3:0]  sfreq,       // channel status byte 3 bits 0-3
-    output reg         out
+    output reg         out,
+    // trace port
+    output wire        tr_sf_valid,
+    output wire        tr_sf_right,
+    output wire [7:0]  tr_sf_frame,
+    output wire [15:0] tr_sf_sample,
+    output wire        tr_sf_cs
 );
     reg [6:0]  cidx;            // 0-127: [6] subframe (0 left), [5:1] slot, [0] half
     reg [16:0] acc;
@@ -44,6 +56,13 @@ module spdif_tx (
     wire [15:0] smp   = nc[6] ? r_q : l_q;
     wire [7:0]  fr_n  = (frame == 8'd191) ? 8'd0 : frame + 8'd1;
     wire        cbit  =(frame >= 8'd24 && frame <= 8'd27) ? sfreq[frame[1:0]] : 1'b0;
+
+    // trace: a subframe starts (left at the tick, right on entering cell 64)
+    assign tr_sf_valid  = !rst && en && (tick || (adv && cidx == 7'd63));
+    assign tr_sf_right  = !tick;
+    assign tr_sf_frame  = tick ? fr_n : frame;
+    assign tr_sf_sample = tick ? left : r_q;
+    assign tr_sf_cs     = (tr_sf_frame >= 8'd24 && tr_sf_frame <= 8'd27) ? sfreq[tr_sf_frame[1:0]] : 1'b0;
 
     // the data bit of a slot (4-30; 31 is the parity)
     function automatic dbit (input [4:0] s, input [15:0] v, input c);

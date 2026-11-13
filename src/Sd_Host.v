@@ -38,6 +38,13 @@
 // Pins: the card's six lines are shared with SPI0's SPI mode (clk, MOSI = CMD, MISO = DAT0,
 // CS = DAT3) and with the ESP32's GPIO2 strap on DAT0.  The mux is here so the checks
 // (formal/fv/ips/sdh) see it: outside native mode the pins are exactly SPI0 plus the strap.
+//
+// Trace port (always present; unconnected in the FPGA build): tr_cmd_valid when a command is
+// accepted (tr_cmd = the CMD word, tr_cmd_arg = ARG), tr_cmd_reject when WPROT refuses one,
+// tr_cmd_done when one completes (tr_cmd_tmo, tr_cmd_crc); tr_buf_valid for each buffer word
+// written (tr_buf_rx: received from the card, else written by the CPU; tr_buf_addr, tr_buf_data);
+// tr_dat_done when a data transfer ends (tr_dat_crc, tr_dat_tmo, tr_dat_wrerr).
+// formal/fv/ips/sdh proves the trace right against the bus and the pins right against it.
 // ================================================================
 `default_nettype none
 module sd_host (
@@ -65,7 +72,23 @@ module sd_host (
     input  wire        cmd_i,
     output wire [3:0]  dat_o,
     output wire [3:0]  dat_oe,
-    input  wire [3:0]  dat_i
+    input  wire [3:0]  dat_i,
+    // trace port
+    output wire        tr_cmd_valid,
+    output wire [12:0] tr_cmd,
+    output wire [31:0] tr_cmd_arg,
+    output wire        tr_cmd_reject,
+    output wire        tr_cmd_done,
+    output wire        tr_cmd_tmo,
+    output wire        tr_cmd_crc,
+    output wire        tr_buf_valid,
+    output wire        tr_buf_rx,
+    output wire [6:0]  tr_buf_addr,
+    output wire [31:0] tr_buf_data,
+    output wire        tr_dat_done,
+    output wire        tr_dat_crc,
+    output wire        tr_dat_tmo,
+    output wire        tr_dat_wrerr
 );
     // ---------------- registers ----------------
     reg        mode, wide, wprot, clken;
@@ -181,6 +204,25 @@ module sd_host (
     wire fifo_wr = wr && a_lo && (a == 4'd12) && (dst == D_WFILL) && !tx_full;
     wire abort   = wr && a_lo && (a == 4'd13);
     wire dbusy   = (dst != D_IDLE);
+
+    // ---------------- trace port ----------------
+    reg c_done_q, d_done_q;
+    always @(posedge clk) begin c_done_q <= c_done; d_done_q <= d_done; end
+    assign tr_cmd_valid  = cmd_ok;
+    assign tr_cmd        = rb_wdata[12:0];
+    assign tr_cmd_arg    = arg;
+    assign tr_cmd_reject = cmd_go && wprot && cmd_wp;
+    assign tr_cmd_done   = c_done && !c_done_q;
+    assign tr_cmd_tmo    = c_tmo;
+    assign tr_cmd_crc    = c_crc;
+    assign tr_buf_valid  = we_m;
+    assign tr_buf_rx     = !tx_dir;
+    assign tr_buf_addr   = wa_m;
+    assign tr_buf_data   = wd_m;
+    assign tr_dat_done   = d_done && !d_done_q;
+    assign tr_dat_crc    = d_crc;
+    assign tr_dat_tmo    = d_tmo;
+    assign tr_dat_wrerr  = wr_err;
     wire [15:0] status_lo = {3'b0, native, wr_err, wp_rej, dat_q[0],
                              (rx_ready || (dst == D_WFILL && !tx_full)), d_tmo, d_crc, d_done, dbusy,
                              c_crc, c_tmo, c_done, (cst != C_IDLE)};
