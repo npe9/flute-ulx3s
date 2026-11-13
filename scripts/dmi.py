@@ -140,7 +140,7 @@ def read_exact(fd, n, timeout):
 
 
 class DMI:
-    def __init__(self, port, baud=625000):
+    def __init__(self, port, baud=1000000):
         global SCALE
         if sim_port(port):
             SCALE = SIM_SCALE
@@ -509,7 +509,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("-p", "--port", default="/dev/cu.usbserial-120001")
-    ap.add_argument("-b", "--baud", type=int, default=625000)
+    ap.add_argument("-b", "--baud", type=int, default=1000000)
     ap.add_argument("--map", default=os.path.join(
         os.path.dirname(__file__), "..", "templeos", "build", "ulx3s_repl.map"))
     ap.add_argument("--stay", action="store_true",

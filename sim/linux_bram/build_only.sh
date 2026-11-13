@@ -37,7 +37,7 @@ FILES+=("$ROOT/src/ASSIGN1.v"
 
 # Same build knobs as run.sh: TB_NOCOV=1 drops coverage (Linux boots run
 # hundreds of millions of cycles), UART_CPB / SDRAM_TCK_PS for a netlist
-# built at another clock (SYS_PLL=50: UART_CPB=80, SDRAM_TCK_PS=20000).
+# built at another clock (SYS_PLL=50: UART_CPB=50, SDRAM_TCK_PS=20000).
 XFLAGS=()
 if [[ "${TB_NOCOV:-0}" != "1" ]]; then XFLAGS+=(--coverage --coverage-user); fi
 if [[ -n "${UART_CPB:-}" ]]; then XFLAGS+=(-DUART_CPB=$UART_CPB); fi

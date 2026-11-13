@@ -30,7 +30,7 @@
 //      line have been received, the SV scoreboard's golden checks
 //      pass, and no strict-BRAM violation fired
 //
-// UART: 25 MHz sys_clk, 625000 baud -> 40 cycles/bit.  The SV driver
+// UART: 25 MHz sys_clk, 1000000 baud -> 25 cycles/bit.  The SV driver
 // holds each bit for the exact cadence the original C++ bench used.
 //
 // STRICT_BRAM mode: env STRICT_BRAM forwarded as a +STRICT_BRAM=

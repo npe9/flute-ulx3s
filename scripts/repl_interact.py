@@ -76,7 +76,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("image", help="binary image to load")
     ap.add_argument("-p", "--port", default="/dev/cu.usbserial-120001")
-    ap.add_argument("-b", "--baud", type=int, default=625000)
+    ap.add_argument("-b", "--baud", type=int, default=1000000)
     ap.add_argument("-a", "--addr", default="0x80000000")
     args = ap.parse_args()
 

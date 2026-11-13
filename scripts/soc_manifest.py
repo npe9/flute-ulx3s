@@ -12,7 +12,7 @@ Output JSON:
 
     {
       "soc": "flute-ulx3s",
-      "board": {"clk_hz": 12500000, "baud": 625000,
+      "board": {"clk_hz": 12500000, "baud": 1000000,
                 "chip": "W9825G6KH-6", "fpga": "LFE5U-85F", "core": "RV32IMAC"},
       "regions": [{"name": "sdram", "base": "0x80000000", "size": "0x02000000",
                    "bus": "axi", "decoded": true}, ...],

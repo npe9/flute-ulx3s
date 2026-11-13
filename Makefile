@@ -229,6 +229,8 @@ $(SYNTH_VERILOG): $(VERILOG) src/RO_TRNG.v
 	               s/\$$finish[^;]*;/;/gs;                          \
 	               s/#0;/;/g' $$f; \
 	done > $@
+	@# the netlist must hold this build's ROM, not one a parallel build's checkout swapped in
+	python3 scripts/check_rom.py $@ $(BUILD)/boot_loader.memhex || { rm -f $@; exit 1; }
 
 # Memories whose read/write-collision result is a don't-care (yosys otherwise emulates the
 # bsc BRAM2 cross-port collision with bypass logic in front of the read-data flop).  The

@@ -115,7 +115,7 @@ COMMON_FLAGS=(
 # verilator build, so a run without it silently rebuilds that dir without tracing.
 if [[ "${VERILATOR_TRACE:-0}" == "1" ]]; then COMMON_FLAGS+=(--trace --trace-depth 12); fi
 # UART_CPB=<n>: UART agent bit period in clocks for a netlist built at another clock
-# (clk_hz / 625000 rounded down: 51 for the SYS_PLL=1 netlist).  Part of the build too.
+# (clk_hz / 1000000: 50 for the SYS_PLL=50 netlist).  Part of the build too.
 if [[ -n "${UART_CPB:-}" ]]; then COMMON_FLAGS+=(-DUART_CPB=$UART_CPB); fi
 # VERILATOR_EXTRA: extra verilator flags, e.g. -Wno-MULTIDRIVEN for an FP=1 netlist (the FPU's
 # FIFOL1 reset block drives D_OUT from a second always block; benign).

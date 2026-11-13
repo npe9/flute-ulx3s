@@ -129,7 +129,7 @@ module mkUart_DMI_Tb (Empty);
 
    // Feed stimulus with 20-cycle inter-byte gaps: the bridge's replay
    // path drains at 1 byte/cycle, and the DUT's design assumption is
-   // UART spacing (~200 cycles at 625000 baud).  Feeding back-to-back
+   // UART spacing (~250 cycles at 1000000 baud).  Feeding back-to-back
    // would test an impossible-for-hardware scenario.
    Integer byte_gap = 20;
 

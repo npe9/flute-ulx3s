@@ -45,7 +45,7 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("image")
     ap.add_argument("-p", "--port", default="/dev/cu.usbserial-120001")
-    ap.add_argument("-b", "--baud", type=int, default=625000)
+    ap.add_argument("-b", "--baud", type=int, default=1000000)
     ap.add_argument("-a", "--addr", default="0x80000000")
     ap.add_argument("-c", "--cmd")
     ap.add_argument("--prompt", default="> ")

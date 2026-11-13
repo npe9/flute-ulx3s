@@ -6,7 +6,7 @@ set timeout 300
 set image [lindex $argv 0]
 set cmds [lrange $argv 1 end]
 set port "/dev/cu.usbserial-120001"
-set baud 625000
+set baud 1000000
 
 log_file -noappend /tmp/repl_expect2.log
 

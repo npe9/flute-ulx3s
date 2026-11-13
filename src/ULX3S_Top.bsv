@@ -130,7 +130,7 @@ module mkULX3S_Top (ULX3S_Top_IFC);
 `else
    Integer sys_clk_hz = 25_000_000;    // raw 25 MHz board clock (src/Top.v)
 `endif
-   Integer uart_baud  = 625_000;
+   Integer uart_baud  = 1_000_000;   // exact on the FT231X (3 MHz / 3) and at 25/50 MHz
 
    rule rl_emit_board_manifest;
       messageM ("BOARD clk " + integerToString (sys_clk_hz)

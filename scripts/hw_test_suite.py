@@ -40,7 +40,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dmi import DMI  # noqa: E402
 
 PORT = '/dev/cu.usbserial-120001'
-BAUD = 625000
+BAUD = int(os.environ.get('HW_BAUD', '1000000'))   # console rate (625000 before lx46)
 BITSTREAM = os.environ.get('HW_BITSTREAM', 'build/ulx3s_top.bit')
 BLOB = os.environ.get('HW_BLOB', 'templeos/build/ulx3s_repl.blob.bin')
 if not os.path.exists(BLOB):              # no local TempleOS build: the committed image

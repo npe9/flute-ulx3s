@@ -17,7 +17,7 @@
 //   5. PASS when hello.bin's first banner + first "tick 00000000"
 //      line have been received and no strict-BRAM violation fired
 //
-// UART: 25 MHz sys_clk, 625000 baud -> 40 cycles/bit (src/Uart_Pins.bsv
+// UART: 25 MHz sys_clk, 1000000 baud -> 25 cycles/bit (src/Uart_Pins.bsv
 // clk_per_bit = clk_hz/baud).  TX is recovered by mid-bit sampling; RX
 // bits are driven on exact 40-cycle boundaries (the DUT re-syncs on
 // every start bit, so no drift is possible).
@@ -41,7 +41,7 @@
 #include <string>
 #include <vector>
 
-static const int CYCLES_PER_BIT = 40;   // 25 MHz / 625000 baud
+static const int CYCLES_PER_BIT = 25;   // 25 MHz / 1000000 baud
 
 // ----------------------------------------------------------------
 // DUT + board state

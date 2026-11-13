@@ -18,7 +18,7 @@ FPGA (30 s, bulletproof reset), and restarts the whole image.
 import os, termios, fcntl, time, struct, subprocess, sys
 
 PORT = '/dev/cu.usbserial-120001'
-BAUD = 625000
+BAUD = 1000000
 CHUNK = 256
 BITSTREAM = 'build/ulx3s_top.bit'
 blob = open('templeos/build/ulx3s_repl.blob.bin', 'rb').read()

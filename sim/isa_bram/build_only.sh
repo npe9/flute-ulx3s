@@ -33,7 +33,7 @@ FILES+=("$ROOT/src/ASSIGN1.v"
         ./sv_tb_top.sv)
 
 # Same knobs as ../linux_bram/build_only.sh: TB_NOCOV=1 drops coverage, UART_CPB /
-# SDRAM_TCK_PS for a netlist built at another clock (SYS_PLL=50: UART_CPB=80,
+# SDRAM_TCK_PS for a netlist built at another clock (SYS_PLL=50: UART_CPB=50,
 # SDRAM_TCK_PS=20000; the ISA mode waits for the boot-ROM banner).
 XFLAGS=()
 if [[ "${TB_NOCOV:-0}" != "1" ]]; then XFLAGS+=(--coverage --coverage-user); fi

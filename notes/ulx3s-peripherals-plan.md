@@ -406,9 +406,13 @@ CS is high (the card's DO is then high-impedance). GPIO12 = `sd_d2` must stay lo
   change nothing. Workaround: `esp32_bridge.py --read-flash` (digest-checked reads from 16 KB,
   halved on each failure down to 512 B, then the stub's whole-range MD5). Full 4 MB backup
   2026-11-12 on lx45d: 528 s, 332 retries, md5 fd656393ff7018eeceb71143a761922b matches the
-  ESP32's (build/esp32-flash-backup-20261112.bin, not in git); fixed 16 KB reads gave up at 0x8000. Real fix (user's call; touches the loader, dmi.py, sims, CI): a
-  console rate every FT231X driver makes exactly, 600000 (3 MHz / 5; 50 MHz / 83.3) or 1000000
-  (3 MHz / 3; 50 MHz / 50 exactly).
+  ESP32's (build/esp32-flash-backup-20261112.bin, not in git); fixed 16 KB reads gave up at 0x8000. **Fixed in lx46 (user's call, 2026-11-12): the console is
+  1000000 baud** (3 MHz / 3 on the FT231X, 50 MHz / 50 and 25 MHz / 25 in the FPGA: exact on both
+  sides). Board: build/lx46/zero_test.py 0 wrong of 28000 (625000: 526 wrong, all in zero runs); a
+  plain esptool `read_flash 0 0x400000` passes its MD5 in one go (371 s). Its only differences from
+  the earlier backup are in the NVS partition (0x9000-0xDFFF), which the ESP32's firmware rewrites
+  at each normal boot (page sequence numbers 0x3b9 -> 0x3c2); kept as
+  build/esp32-flash-backup-20261112b.bin.
   The ESP32 ROM's own replies come at ~111 kbaud (auto-baud), the stub's at 115208.
   Drivers (board, lx45d): TempleOS `Esp32Download();` 1 (TX driven), `Esp32Sync();` 1 (answered
   on try 2), `Esp32Off();` (hw_board_drv.py 14/14); Linux DT node `esp32_gpio` (wd,mbl-gpio:
@@ -430,3 +434,22 @@ CS is high (the card's DO is then high-impedance). GPIO12 = `sd_d2` must stay lo
   Linux: `kernel/drivers/max1112x.c` (IIO, manual mode, SPI mode 3, vref-mv 3300), DTS adc@0 on
   spi2; init `adc` printed `adc: 3 1 0 0 2 3 3 5` on the board. TempleOS: `AdcRd(ch)`, `AdcShow()`
   (ulx3s_drv.hc); board AdcShow lists ain0-7, AdcRd(9) is refused. hw_board_drv checks AdcRd(0/7).
+## Boot ROM race (found 2026-11-12)
+
+Every build regenerates the shared `Flute/src_Testbench/SoC/fn_read_ROM_RV32.bsvi`, and the gate
+scripts `git checkout` it afterwards. With two builds in one tree, one build's checkout could
+land between the other's regenerate and its bsc compile, so that netlist got the committed Oct
+21 ROM (2144 bytes) instead of the current one (3045 bytes, boot/boot_loader.c since 11-04).
+lx43, lx45 and lx45d have the old ROM; lx40, lx42, lx44, lx45b, lx45c and lx46 have the right
+one. It showed up as an OpenOCD ROM read on lx45d s5 that differed from boot_loader.bin. Fixes:
+Flute 90d4d0b commits the current image, so a checkout now restores the same ROM, and the
+Makefile runs `scripts/check_rom.py` on every verilog_all.v (netlist ROM == this build's memhex).
+
+lx46 gate (2026-11-12): seeds s3 52.87 / s5 54.37 / s7 49.27 MHz, ISA 94/94, strict cache / esp32 /
+io PASS, J1 PASS (hello banner at cycle 289393; 449928 on lx45d: faster UART, and lx45d had the
+old ROM), Bluesim boot / REPL / virtual board PASS, ROM check MATCH. Board s3 and s5: suite 76/0,
+hw_board_drv 14/0, Linux esp32 ok, zero_test 0 wrong, JTAG ROM reads exact, esptool chip_id.
+**Promoted (user): build/ulx3s_top.bit = lx46 s5, md5 13ae8846**; lx45d s5 kept as
+build/ulx3s_top.lx45d.bit (d7f3cd13), lx44 as build/ulx3s_top.lx44.bit. The flash image at
+0xD00000 is still lx44 at 625000 baud: a board that boots from flash talks at the old rate until
+that image is rewritten.

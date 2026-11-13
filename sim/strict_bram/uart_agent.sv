@@ -30,9 +30,9 @@ package uart_agent_pkg;
   class uart_driver;
     virtual board_pins_if vif;
     `ifdef UART_CPB
-    localparam int CYCLES_PER_BIT = `UART_CPB;   // PLL netlist (run.sh UART_CPB=51)
+    localparam int CYCLES_PER_BIT = `UART_CPB;   // PLL netlist (run.sh UART_CPB=50 for SYS_PLL=50)
 `else
-    localparam int CYCLES_PER_BIT = 40;   // 25 MHz / 625000 baud
+    localparam int CYCLES_PER_BIT = 25;   // 25 MHz / 1000000 baud
 `endif
 
     logic bits[$];     // pending wire levels, one per bit cell
@@ -70,7 +70,7 @@ package uart_agent_pkg;
     `ifdef UART_CPB
     localparam int CYCLES_PER_BIT = `UART_CPB;   // must match the driver
 `else
-    localparam int CYCLES_PER_BIT = 40;   // must match the driver
+    localparam int CYCLES_PER_BIT = 25;   // must match the driver
 `endif
 
     // mid-bit sampling state (ports tb_top.cpp's tx_sample())

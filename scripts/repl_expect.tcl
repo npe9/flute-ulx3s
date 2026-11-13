@@ -6,7 +6,7 @@ set timeout 300
 set image [lindex $argv 0]
 set cmds [lrange $argv 1 end]
 set port "/dev/cu.usbserial-120001"
-set baud 625000
+set baud 1000000
 
 spawn sh -c "make program && python3 scripts/repl_interact.py $image -p $port -b $baud"
 

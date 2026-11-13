@@ -14,7 +14,7 @@ from dmi import DMI
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("-p", "--port", default="/dev/cu.usbserial-120001")
-    ap.add_argument("-b", "--baud", type=int, default=625000)
+    ap.add_argument("-b", "--baud", type=int, default=1000000)
     ap.add_argument("-c", "--cmd", default="1+1;")
     ap.add_argument("--prompt", default="> ")
     ap.add_argument("--wait", type=float, default=180.0)

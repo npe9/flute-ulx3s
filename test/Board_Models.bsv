@@ -18,8 +18,8 @@ Integer clk_hz = `SYS_CLK_HZ;
 `else
 Integer clk_hz = 25_000_000;
 `endif
-Integer baud   = 625_000;
-Integer cycles_per_bit = clk_hz / baud;    // 40 at 25 MHz
+Integer baud   = 1_000_000;
+Integer cycles_per_bit = clk_hz / baud;    // 25 at 25 MHz
 
 // SDRAM model address mapping for c_mem_load (test/sim_preload.c): 0 = bank in byte offset
 // [10:9], 1 = this (memlat) controller's line-in-one-bank mapping.

@@ -121,7 +121,7 @@ COMMON_FLAGS=(
 if [[ "${TB_NOCOV:-0}" != "1" ]]; then COMMON_FLAGS+=(--coverage --coverage-user); fi
 if [[ "${VERILATOR_TRACE:-0}" == "1" ]]; then COMMON_FLAGS+=(--trace --trace-depth 12); fi
 # UART_CPB=<n>: UART agent bit period in clocks for a netlist built at another clock
-# (clk_hz / 625000 rounded down: 51 for the SYS_PLL=1 netlist).  Part of the build too.
+# (clk_hz / 1000000: 50 for the SYS_PLL=50 netlist).  Part of the build too.
 if [[ -n "${UART_CPB:-}" ]]; then COMMON_FLAGS+=(-DUART_CPB=$UART_CPB); fi
 # SDRAM_TCK_PS=<ps>: clock period the SDRAM timing checker assumes (default 40000 = 25 MHz;
 # 31111 for the SYS_PLL=1 netlist).  Part of the build.

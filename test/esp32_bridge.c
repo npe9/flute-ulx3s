@@ -1,4 +1,4 @@
-// esp32_bridge: the board's console UART (uart0, 625000 baud) <-> the ESP32's UART0 (uart1,
+// esp32_bridge: the board's console UART (uart0, 1000000 baud) <-> the ESP32's UART0 (uart1,
 // 115200 baud), with the ESP32 started in its ROM's download mode, so that esptool on the host
 // reaches the ESP32 through the FPGA (scripts/esp32_bridge.py runs it and gives esptool a pty).
 //
@@ -48,7 +48,7 @@ int main (void) {
    while (U1 (LSR) & DR) (void) U1 (RBR);   // drop anything the ROM printed
    puts0 ("esp32_bridge: ready\r\n");
    for (;;) {
-      // drain both receivers first: uart0 runs 5x faster than uart1 can send
+      // drain both receivers first: uart0 runs ~9x faster than uart1 can send
       while ((U0 (LSR) & DR) && te_h - te_t < RING) to_esp [te_h++ % RING] = (uint8_t) U0 (RBR);
       while ((U1 (LSR) & DR) && th_h - th_t < RING) to_host [th_h++ % RING] = (uint8_t) U1 (RBR);
       if (te_t != te_h && (U1 (LSR) & THRE)) U1 (THR) = to_esp [te_t++ % RING];

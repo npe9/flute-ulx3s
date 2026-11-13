@@ -48,7 +48,7 @@ MCAUSE = {
 
 def main():
     port = sys.argv[1] if len(sys.argv) > 1 else '/dev/cu.usbserial-120001'
-    d = D.DMI(port, 625000)
+    d = D.DMI(port, 1000000)
     d.arm()
 
     leds = d.mem_read32(GPIO_BASE)

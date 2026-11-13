@@ -2,7 +2,7 @@
 """esptool to the ULX3S's ESP32 through the FPGA (test/esp32_bridge.bin, lx45c and later).
 
 Programs the bitstream, loads esp32_bridge.bin (ESP32 started in its ROM's download mode, uart0
-<-> uart1 bridged), then relays a pty <-> the board's serial port at 625000 baud.  esptool talks
+<-> uart1 bridged), then relays a pty <-> the board's serial port at 1000000 baud.  esptool talks
 to the pty: its baud setting there does nothing, and the ESP32 side is fixed at 115200.  It cannot
 reset the ESP32 itself (no DTR/RTS path): use --before no_reset --after no_reset, and no baud change.
 
@@ -14,13 +14,10 @@ with its status.  The bridge keeps running on the board until the next bitstream
 
   python3 scripts/esp32_bridge.py --bit ... --read-flash 0 0x400000 esp32.bin
 
-Board -> host bytes are not reliable at 625000 baud on macOS: the FT231X actually runs at 600000
-there (measured: the driver uses divisor 5), so it samples the FPGA's bits late and now and then
-reads a 0 last data bit as 1 (00 -> 80), most often in runs of zero bytes.  esptool's read_flash
-checks one MD5 over the whole read, so a long read nearly always fails.  --read-flash instead
-reads up to 16 KB at a time through the esptool library (each read checked by the stub's
-digest; on a mismatch retried, halving the size down to 512 bytes) and finally compares the whole file with the stub's flash MD5.  Host ->
-board is fine, so writes (checked on the ESP32 side) are not affected.
+--read-flash reads in digest-checked pieces (from 16 KB, halved on each failure down to 512 B),
+then compares the whole file with the stub's flash MD5.  It was needed at the old 625000 console
+rate: on macOS the FT231X ran at 600015 for it (3 MHz / 5) and misread some FPGA -> host zero
+bytes.  The console is 1000000 baud since lx46 (3 MHz / 3, 50 MHz / 50: exact on both sides).
 """
 import argparse
 import os

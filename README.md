@@ -14,7 +14,7 @@ Current status (`linux-isa` branch, 2026-10-28):
   match the device tree timebase.
 - Memory path: streaming SDRAM requests, I-cache early restart, and the `ndmreset` fixes
   (epoch-tagged AXI IDs, memory-controller drain, two-pass SoC reset).
-- FTDI UART at 625000 baud; the boot loader in on-chip ROM loads images into SDRAM with a
+- FTDI UART at 1000000 baud; the boot loader in on-chip ROM loads images into SDRAM with a
   chunked, checksummed protocol. The TempleOS HolyC REPL and the bare-metal tests still run.
 - Every change ships only after the verification gates below.
 
@@ -32,9 +32,9 @@ Planned peripherals (after UART/SDRAM bring-up):
    ```bash
    ls /dev/cu.usbserial-*
    ```
-3. Open a terminal at 625000 baud, for example:
+3. Open a terminal at 1000000 baud, for example:
    ```bash
-   picocom -b 625000 /dev/cu.usbserial-XXXX
+   picocom -b 1000000 /dev/cu.usbserial-XXXX
    ```
    The bootloader banner is:
    ```
@@ -162,7 +162,7 @@ make templeos-repl      # build templeos/build/ulx3s_repl.blob.bin
 make templeos-repl-run  # program FPGA and load the REPL over UART
 ```
 
-The REPL image is ~2.9 MB; the chunked UART load (625000 baud, seq+XOR+pad
+The REPL image is ~2.9 MB; the chunked UART load (1000000 baud, seq+XOR+pad
 framing with per-chunk retry) takes ~90 s. When it finishes you get the boot
 banner, a `/proc`-style system report, and a `>` prompt:
 
@@ -539,7 +539,7 @@ A10/A11/B11/C11 are free GPIO.
 ## Boot loader protocol
 
 The first-stage boot loader lives in the on-chip Boot ROM (reset PC = `0x00001000`).
-It speaks a small binary protocol over UART0 (625000 baud on the ULX3S FTDI
+It speaks a small binary protocol over UART0 (1000000 baud on the ULX3S FTDI
 port; `Uart_Pins` derives `clk_per_bit` from the system clock, 40 at 25 MHz):
 
 1. Host sends 4-byte destination address (little-endian).
