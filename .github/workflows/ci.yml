@@ -228,10 +228,10 @@ jobs:
           test -x obj_dir_lx/Vsv_tb_top || { tail -40 ../../build/lx-build.log; exit 1; }
       - name: Boot OpenSBI + Linux to user space (/init "tick 2", FP context check)
         run: |
-          BUILD_DIR=obj_dir_lx sim/linux_bram/linux_run.py "$GITHUB_WORKSPACE/linux-sw/out-fp/fw_payload.bin" 2>&1 | tee build/linux.log || true
+          BUILD_DIR=obj_dir_lx sim/linux_bram/linux_run.py --plusarg sd_native "$GITHUB_WORKSPACE/linux-sw/out-fp/fw_payload.bin" 2>&1 | tee build/linux.log || true
           grep -a -q 'ISA PASS (TX saw "tick 2")' build/linux.log
           grep -a "tick 1" build/linux.log | grep -q "fp ok"
-          grep -a -q "sd: sig 000055aa" build/linux.log   # /init read block 0 of mmcblk0 (sim/common/sd_spi_model.v)
+          grep -a -q "sd: sig 000055aa" build/linux.log   # /init read block 0 of mmcblk0 (flute-sdh, sim/common/sd_native_model.v)
       - name: Boot hello.bin from the configuration flash (sim/common/spi_flash_model.v), and a bad sum falls back
         run: |
           python3 scripts/mkflashimg.py --image hello=sw/hello.bin --wait-ms 0 --sckdiv 1 -o build/flash-hello.bin --hex build/flash-hello.hex
