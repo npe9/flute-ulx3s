@@ -1,0 +1,17 @@
+# src/Video_DVI.v register map, as the formal env builds it (FB_WORDS = 36).  The device sees the
+# whole address; the bridge routes it 0xC001_0xxx (control) and 0xC1xx_xxxx (pixel RAM).
+# <offset> <field> <bits> <access> <reset>, offsets under the decode mask.
+!window 32
+!decode 0x01FFFFFC
+!unmapped zero
+!writes lanes
+0x10000 ID       31:0   ro   0x56494431
+0x10004 MODE     2:0    rw   0
+0x10004 -        31:3   zero
+0x10008 STATUS   0      vol              # in vertical blank (from the pixel clock)
+0x10008 -        31:1   zero
+0x1000C FRAME    31:0   vol              # checked in video_wb
+0x10010 FBSIZE   31:0   ro   0x90        # FB_WORDS * 4 (153600 in the FPGA build)
+0x10400-0x107FC PALETTE 23:0 vol         # one symbolic entry, in video_wb
+0x10400-0x107FC -       31:24 zero
+0x1000000-0x1FFFFFC FB  31:0 vol         # one symbolic word, in video_wb; past the end reads 0

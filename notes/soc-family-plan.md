@@ -21,7 +21,7 @@ PMOD's datasheet before any RTL is written.
 - **Every profile runs TempleOS.** Linux runs on every profile that keeps S-mode.
 - **Each profile has a CI job** (build + strict sim of its own devices) and a board-suite variant.
 - **Every IP follows the recipe** in `ulx3s-peripherals-plan.md`: contract → BSV/Verilog + unit
-  bench → formal harness (register-bus contract + data integrity, as `formal/video/`) → SoC → sim
+  bench → formal harness (register-bus contract + data integrity, as `formal/fv/ips/video/`) → SoC → sim
   model → board.
 
 ## Mechanism (work package P0, before any new profile)

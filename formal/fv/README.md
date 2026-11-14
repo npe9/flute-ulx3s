@@ -76,6 +76,7 @@ ips/<ip>/            <ip>.cfg, <ip>.regs, <ip>_env.sv, <ip>_wb.sv (the bound che
 | spdif | src/Spdif_Tx.v | one event per subframe: channel, frame, sample, C bit | stream (trace vs inputs; OUT vs trace as IEC 60958), en, cover | 12 |
 | audio | src/Audio.v | push/drop, sample time + pop/underrun, play, PCM out, DAC words | prove (registers, STATUS, FIFO order, sample clock, player, DAC, mute, pins), cover | 9 |
 | board_io | src/Board_IO.v | I2C command start (flags, byte), START, STOP, read byte, write ack, done/AL, abandon | prove (registers, GPIO pins through 2 flops, magic words, SR/RXR, command acceptance, I2C wires vs trace via `i2c_host_mon`, time bounds), spec (bmc 24 with `FV_NO_INV`: the spec alone), cover | 26 (ackstuck, rxackrd: need a full read, past spec depth; prove only, ackstuck also bio_ut) |
+| video | src/Video_DVI.v | RAM write lands (word, data, lanes), palette write, frame; pixel-side de/x/y/rgb (not yet specified) | prove (depth 6, RAMs as bits: registers, RAM lanes and range, palette reset and writes, FRAME vs trace, read latency 5), spec (bmc 16 with `FV_NO_INV`), cover | 6 (all also by spec) |
 
 Work trees go in `build/fv/<ip>/<check>/`.
 
@@ -91,6 +92,7 @@ include = vip/crc
 regs    = ips/sdh/sdh.regs sdh_regs     # register spec -> generated shadow module
 binds   = sdh_wb                        # every checker that must be attached
 engine.<check> = smtbmc yices           # per-check engine (default smtbmc boolector)
+script  = memory_map; opt_clean         # extra yosys passes after prep (video: RAMs as bits)
 whitebox = ...                          # internals allowed in properties (lemma checks only)
 
 [checks]                                # name = mode depth DEFINES...
@@ -116,7 +118,13 @@ wrote), `ro` (constant value), `zero` (reads 0), `vol` (hardware-owned: checked 
 not modelled).  Options: `!window <address bits>`, `!decode <mask>` (the address bits the device
 decodes, so offsets alias; board_io: two windows on [15:12] and registers on [4:2]),
 `!unmapped zero`, `!writes full|any|lanes` (a field takes a write with all four strobes / any
-strobe / the strobes of the byte lanes it occupies).
+strobe / the strobes of the byte lanes it occupies).  An offset `A-B` (step 4) is a range of
+identical words, for `ro`, `zero` and `vol` fields only (video: the palette, the pixel RAM); the
+range is excluded from `!unmapped`.
+
+The bus VIP's latencies are parameters, `RD_LAT` and `WR_LAT` (cycles from the take to the ack,
+default 1); its outputs `tk`, `pend`, `we_q`, `w` (cycles since the take) and `a_q` describe the
+transfer in flight, for a checker's invariants.
 
 ## Running
 

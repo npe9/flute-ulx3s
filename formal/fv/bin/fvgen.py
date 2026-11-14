@@ -103,6 +103,7 @@ def regs_sv(spec, module):
     access: rw (read back what was last written in full-word writes, reset value before),
             wo (shadowed like rw, not read back: s_<name> is what software last wrote),
             ro (constant <reset>), zero (reads 0), vol (not modelled: status, FIFO, side effects).
+    An offset 'A-B' names every word offset from A to B (ro, zero or vol only).
     Header options: '!window <bits>' (address bits), '!decode <mask>' (the address bits the
     device decodes: it aliases elsewhere; offsets are compared under the mask), '!unmapped zero'
     (unlisted offsets read 0), '!writes full|any|lanes' (a field takes a write with all four
@@ -118,10 +119,15 @@ def regs_sv(spec, module):
             opts[k] = v.strip()
             continue
         off, name, bits, acc, *rest = line.split()
-        fields.append(dict(off=int(off, 0), name=name, bits=parse_bits(bits), acc=acc,
+        lo, _, hi = off.partition('-')                # 'A-B': every word offset in A..B
+        fields.append(dict(off=int(lo, 0), hi=int(hi, 0) if hi else None, name=name,
+                           bits=parse_bits(bits), acc=acc,
                            reset=int(rest[0], 0) if rest and rest[0] != '-' else 0))
+        if hi and acc in ('rw', 'wo'):
+            sys.exit(f'{spec}: a range ({off}) can only be ro, zero or vol')
     aw = int(opts['window'])
-    offs = sorted({f['off'] for f in fields})
+    offs = sorted({f['off'] for f in fields if f['hi'] is None})
+    ranges = sorted({(f['off'], f['hi']) for f in fields if f['hi'] is not None})
     rw = [f for f in fields if f['acc'] in ('rw', 'wo')]
     mask = int(opts['decode'], 0) if 'decode' in opts else (1 << aw) - 1
     def at(sig):
@@ -163,8 +169,22 @@ def regs_sv(spec, module):
                     terms.append(f"rd_data[{h}:{l}] == {h-l+1}'h0")
         if terms:
             o.append(f"        if ({at('rd_addr')}{aw}'h{off:x})) assert ({' && '.join(terms)});")
+    def inr(sig, lo, hi):
+        m = f"({sig} & {aw}'h{mask:x})" if 'decode' in opts else sig
+        return f"({m} >= {aw}'h{lo:x} && {m} <= {aw}'h{hi:x})"
+    for (lo, hi) in ranges:
+        terms = []
+        for f in (f for f in fields if (f['off'], f['hi']) == (lo, hi)):
+            for (h, l) in f['bits']:
+                if f['acc'] == 'ro':
+                    terms.append(f"rd_data[{h}:{l}] == {h-l+1}'h{(f['reset'] >> l) & ((1 << (h-l+1)) - 1):x}")
+                elif f['acc'] == 'zero':
+                    terms.append(f"rd_data[{h}:{l}] == {h-l+1}'h0")
+        if terms:
+            o.append(f"        if {inr('rd_addr', lo, hi)} assert ({' && '.join(terms)});")
     if opts['unmapped'] == 'zero':
-        cond = ' && '.join(f"!{at('rd_addr')}{aw}'h{off:x})" for off in offs)
+        cond = ' && '.join([f"!{at('rd_addr')}{aw}'h{off:x})" for off in offs] +
+                           [f"!{inr('rd_addr', lo, hi)}" for (lo, hi) in ranges])
         o.append(f"        if ({cond}) assert (rd_data == 32'h0);")
     o.append('    end')
     o.append('endmodule')
@@ -226,8 +246,11 @@ def gen(ip, c, work, rtl_override=None, only=None):
         s.append('read_verilog -sv -formal ' + ' '.join(os.path.basename(r) for r in rtl))   # no defines
         s.append(f'read_verilog -sv -formal {dflags} ' + ' '.join(os.path.basename(f) for f in fv + [env]))
         s.append(f'prep -top {c["top"]}')
+        for cmd in c.get('script', '').split(';'):          # extra passes, e.g. memory_map
+            if cmd.strip():
+                s.append(cmd.strip())
         for b in binds:
-            s.append(f'select -assert-count 1 t:{b}')
+            s.append(f'select -assert-count 1 t:{b} t:$paramod\\{b}\\* %u')   # parameterized too
         s += ['', '[files]'] + files
         open(os.path.join(d, f'{name}.sby'), 'w').write('\n'.join(s) + '\n')
         dirs[name] = d

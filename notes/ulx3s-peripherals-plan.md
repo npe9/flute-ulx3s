@@ -535,6 +535,15 @@ model (fvgen: !decode mask, !writes lanes, wo fields), GPIO pins, magic words, S
 bounds (55 ticks per command, 5 between steps) in place of the old whitebox ranking.  RTL change:
 the I2C engine steps only while EN is set (before, a step on the edge EN cleared could still set the
 done flag, RXR or AL of the abandoned command).  26 mutants (old 20 + 6).
-To port: board_io (an I2C host VIP; the termination ranking stays a declared whitebox lemma),
-video, then the BSV blocks (AXI4_RegBus, AXI4_SPI, Sdram_Controller).  RVFI stays: riscv-formal
+video ported (formal/video retired): trace = RAM write landing (word, data, lanes), palette
+write, FRAME count, and the pixel-side encoder input (de, x, y, rgb; not yet specified).  The
+checker: register model (32-bit window, palette and RAM as offset ranges), one symbolic RAM word
+per lane and one symbolic palette entry from its reset colour, FRAME against the trace, the bus
+VIP at read latency 5.  The prove binds every RAM word and palette entry (sv-yosys rejects a
+hierarchical index from the bind, `pal[wb.sp]`) and maps the memories to bits; induction needs
+depth 6; the base case costs ~7 min, nearly all of it the palette's 256 reset values against a
+symbolic index (4 s without that invariant).  6 mutants (old 3 + 3 on the trace), all caught by
+the spec check too.  regbus_vip gained RD_LAT/WR_LAT and an asserted bound on its own cycle
+counter (without it sdh.rd went UNKNOWN).
+To port: the BSV blocks (AXI4_RegBus, AXI4_SPI, Sdram_Controller).  RVFI stays: riscv-formal
 needs the core to emit its trace port; it is output-only and off unless RISCV_FORMAL is defined.

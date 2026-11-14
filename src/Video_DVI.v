@@ -25,7 +25,7 @@
 // ================================================================
 
 module video_fb #(
-    // Pixel RAM geometry; only the formal harness (formal/video) shrinks these.
+    // Pixel RAM geometry; only the formal environment (formal/fv/ips/video) shrinks these.
     parameter FB_WORDS  = 38400,    // 153600 bytes
     parameter BANK_BITS = 13
 ) (
@@ -49,16 +49,20 @@ module video_fb #(
     output reg         dbg_de,
     output reg         dbg_hs,
     output reg         dbg_vs
-`ifdef FORMAL
     ,
-    // formal/video: the harness's symbolic pixel word and palette index, and the state it
-    // keeps invariants on (an unbounded proof needs the RAM contents, not only read-backs)
-    input  wire [15:0] f_sw,
-    input  wire [7:0]  f_sp,
-    output wire [31:0] f_word,
-    output wire [23:0] f_pal,
-    output wire [2:0]  f_mode
-`endif
+    // trace port (formal/fv/ips/video): spec events, unconnected in the FPGA build
+    output wire        tr_fb_wr,     // sys clock: a pixel RAM write lands (the cycle after its take)
+    output wire [15:0] tr_fb_word,   //   word address
+    output wire [31:0] tr_fb_data,
+    output wire [3:0]  tr_fb_strb,   //   the byte lanes written
+    output wire        tr_pal_wr,    // sys clock: a palette entry is replaced
+    output wire [7:0]  tr_pal_idx,
+    output wire [23:0] tr_pal_data,
+    output wire        tr_frame,     // sys clock: FRAME counts (a vertical blank began)
+    output wire        tr_pix_de,    // pixel clock: the encoder input, with its coordinates
+    output wire [9:0]  tr_pix_x,
+    output wire [9:0]  tr_pix_y,
+    output wire [23:0] tr_pix_rgb
 );
     // ------------------------------------------------------------
     // Memories
@@ -131,11 +135,6 @@ module video_fb #(
     wire [32*NBANK-1:0] fbb;       // system side, per bank, one cycle after the RAM read
     wire [32*NBANK-1:0] pqb;       // pixel side, per bank, the RAM read
     genvar gb, gl;
-`ifdef FORMAL
-    wire [32*NBANK-1:0] fw;
-    assign f_word = fw[32*f_sw[15:BANK_BITS] +: 32];
-    assign f_pal  = pal[f_sp];
-`endif
     generate
         for (gb = 0; gb < NBANK; gb = gb + 1) begin : fbg
             localparam WORDS = (gb == NBANK - 1) ? FB_WORDS - gb * BANK_WORDS : BANK_WORDS;
@@ -151,9 +150,6 @@ module video_fb #(
                 always @(posedge pclk) pq <= mem[pa[BANK_BITS-1:0]];
                 assign fbb[32*gb + 8*gl +: 8] = qq;
                 assign pqb[32*gb + 8*gl +: 8] = pq;
-`ifdef FORMAL
-                assign fw[32*gb + 8*gl +: 8] = mem[f_sw[BANK_BITS-1:0]];
-`endif
             end
         end
     endgenerate
@@ -167,9 +163,6 @@ module video_fb #(
     end
 
     reg  [2:0]  mode;
-`ifdef FORMAL
-    assign f_mode = mode;
-`endif
     reg  [31:0] frame;
     reg         in_vblank;
     reg  [2:0]  vtog_s;
@@ -343,6 +336,22 @@ module video_fb #(
     always @(posedge pclk) begin
         dbg_rgb <= rgb4; dbg_de <= de4; dbg_hs <= hs4; dbg_vs <= vs4;
     end
+
+    // ---------------- trace port ----------------
+    reg [9:0] hx4, vy4;
+    always @(posedge pclk) begin hx4 <= hx3; vy4 <= vy3; end
+    assign tr_fb_wr    = |we_r;
+    assign tr_fb_word  = a_r;
+    assign tr_fb_data  = wd_r;
+    assign tr_fb_strb  = we_r;
+    assign tr_pal_wr   = pal_we;
+    assign tr_pal_idx  = pal_idx;
+    assign tr_pal_data = rb_wdata[23:0];
+    assign tr_frame    = !rst && (vtog_s[2] != vtog_s[1]);
+    assign tr_pix_de   = de4;
+    assign tr_pix_x    = hx4;
+    assign tr_pix_y    = vy4;
+    assign tr_pix_rgb  = rgb4;
 
     tmds_enc enc_b (.clk(pclk), .de(de4), .ctrl({ vs4, hs4 }), .d(rgb4[7:0]),   .q(tmds_b));
     tmds_enc enc_g (.clk(pclk), .de(de4), .ctrl(2'b00),        .d(rgb4[15:8]),  .q(tmds_g));
