@@ -19,8 +19,8 @@ in that directory); leave peer sessions' bsc/yosys/sby processes alone.
 | `reg` / `pc_fwd` (deep) | `formal/run.sh deep` | pc_fwd PASS on E8d; reg stalls at step 75 (use `REG_DEPTH=74`) |
 | AXI4 protocol | vendored FVIP `formal/axi4_fvip` | Mem_Controller slave, AXI4_Deburster only |
 | Fabrics, MMIO slaves, SoC reset | none | **no formal** |
-| AXI4_SPI | `formal/spi/` | **proved** (pdr + k-induction, SCKDIV <= 1) |
-| AXI4_RegBus bridge | `formal/regbus/` | **proved** (pdr, with and without reset); found a lost-ack bug |
+| AXI4_SPI | `formal/spi/` (now `formal/fv/ips/spi`) | **proved** (pdr + k-induction, SCKDIV <= 1) |
+| AXI4_RegBus bridge | `formal/regbus/` (now `formal/fv/ips/regbus`) | **proved** (pdr, with and without reset); found a lost-ack bug |
 | Video_DVI (system side) | `formal/video/` | **proved** (k-induction, single clock) |
 | Equivalence | yosys `equiv` script (`build/timing-exp/equiv_modules.sh`) | EQY not installed |
 | Lockstep | TestRIG (sail-riscv-rvfi) | D1-D3 and F/D 200+200 clean in October; not routine |

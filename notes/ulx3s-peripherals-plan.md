@@ -554,5 +554,11 @@ stays the full-protocol reference), vip/common/fv_queue (scoreboards); regbus_vi
 source role's environment (ANY_LAT, abandon).  bsc's FIFO2 second entry is inside a library
 module a bind cannot name: fvgen 'taps' drive the checker port after flatten.  prove (5 s) and
 prove255, spec bmc 10, cover; 13 mutants (old 3 + 10), 11 by spec.
-To port: AXI4_SPI, Sdram_Controller.  RVFI stays: riscv-formal
+AXI4_SPI ported (formal/spi retired): the f_ taps became a trace port (register write / read, TX
+enqueue, frame start with the raw byte, frame end, RX push / pop).  New VIPs: vip/spi/spi_host_mon
+(SCK at CPOL at start, 16 edges, CS on every edge, MOSI stable at sampling edges and equal to the
+traced byte in wire order, idle level between frames) and vip/axi4/axi4_sb_order (in-order
+scoreboard on fv_queue).  prove (depth 6, 16 s; SCKDIV <= 1 while busy as before), spec bmc 8,
+cover (5 covers, ~49 min, not in the gate); 19 mutants, all caught (7 by spec).
+To port: Sdram_Controller.  RVFI stays: riscv-formal
 needs the core to emit its trace port; it is output-only and off unless RISCV_FORMAL is defined.

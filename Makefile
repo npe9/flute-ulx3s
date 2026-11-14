@@ -440,15 +440,6 @@ clean:
 	$(MAKE) -C sw clean 2>/dev/null || true
 	$(MAKE) -C templeos clean 2>/dev/null || true
 
-# formal-spi-verilog: mkAXI4_SPI alone, for formal/spi (SPI_SRC lets formal/spi/mutate.sh build mutants).
-SPI_SRC ?= src/AXI4_SPI.bsv
-.PHONY: formal-spi-verilog
-formal-spi-verilog:
-	mkdir -p $(BUILD)/formal-spi/bsc $(BUILD)/formal-spi/v
-	$(BSC) -u -verilog -g mkAXI4_SPI $(BSC_FLAGS) $(DEFINES) -D FORMAL \
-	    -p $(BSC_PATH) -bdir $(BUILD)/formal-spi/bsc -vdir $(BUILD)/formal-spi/v \
-	    $(SPI_SRC) > $(BUILD)/formal-spi/bsc.log 2>&1 || { tail -20 $(BUILD)/formal-spi/bsc.log; exit 1; }
-
 # formal-sdram-verilog: mkSdram_Controller at 50 MHz behind a synthesized wrapper, short power-up pause.
 SDRAM_SRC ?= src/Sdram_Controller.bsv
 .PHONY: formal-sdram-verilog

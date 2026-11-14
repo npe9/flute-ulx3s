@@ -67,6 +67,9 @@ vip/regbus/          register-bus protocol (role parameter), outputs decoded rea
 vip/crc/             CRC7/CRC16 by polynomial long division
 vip/sd/              sd_cmd_mon (host CMD frames), sd_rd_card (card side of a read block)
 vip/i2c/             i2c_host_mon (an I2C host's wires against its command trace; the bus model)
+vip/spi/             spi_host_mon (an SPI host's SCK/MOSI/CS against its frame trace)
+vip/axi4/            axi4_sb_vip (single-beat AXI4 rules, role parameter), axi4_sb_order (in-order scoreboard)
+vip/common/          fv_queue
 ips/<ip>/            <ip>.cfg, <ip>.regs, <ip>_env.sv, <ip>_wb.sv (the bound checker)
 ```
 
@@ -78,6 +81,7 @@ ips/<ip>/            <ip>.cfg, <ip>.regs, <ip>_env.sv, <ip>_wb.sv (the bound che
 | board_io | src/Board_IO.v | I2C command start (flags, byte), START, STOP, read byte, write ack, done/AL, abandon | prove (registers, GPIO pins through 2 flops, magic words, SR/RXR, command acceptance, I2C wires vs trace via `i2c_host_mon`, time bounds), spec (bmc 24 with `FV_NO_INV`: the spec alone), cover | 26 (ackstuck, rxackrd: need a full read, past spec depth; prove only, ackstuck also bio_ut) |
 | video | src/Video_DVI.v | RAM write lands (word, data, lanes), palette write, frame; pixel-side de/x/y/rgb (not yet specified) | prove (depth 6, RAMs as bits: registers, RAM lanes and range, palette reset and writes, FRAME vs trace, read latency 5), spec (bmc 16 with `FV_NO_INV`), cover | 6 (all also by spec) |
 | regbus | src/AXI4_RegBus.bsv (bsc) | request start / zero-strobe skip (with we), done, timeout, watchdog count | prove (watchdog 7) and prove255 (the SoC's 255): AXI side via `axi4_sb_vip`, bus side via `regbus_vip` as source, requests in AXI order with lane and strobes, completion at ack or watchdog, responses in order with id, lane and SLVERR; spec (bmc 10 `FV_NO_INV`), cover | 13 (slverr, rdzero: past spec depth; prove only) |
+| spi | src/AXI4_SPI.bsv (bsc) | register write / read, TX enqueue, frame start (byte as queued) / end, RX push / pop | prove (depth 6, SCKDIV <= 1 while busy: AXI side via `axi4_sb_vip` + in-order `axi4_sb_order`, decode and DECERR, registers and reset values, TX/RX FIFO order, CS (auto / hold / default), IRQ; SCK / MOSI / CS against the traced frame via `spi_host_mon`, MISO loopback into RX), spec (bmc 8 `FV_NO_INV`), cover | 19 (7 also by spec) |
 
 Work trees go in `build/fv/<ip>/<check>/`.
 

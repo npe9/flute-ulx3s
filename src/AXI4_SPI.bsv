@@ -22,6 +22,8 @@
 // through an input flop at the end of the half period after the sampling edge (PHA=0: the
 // leading edge, PHA=1: the trailing edge), so it tolerates a card output delay up to a half
 // period minus one clock.  Mode 0 is what SD uses.
+// Trace port (formal/fv/ips/spi): register write / read handled, TX byte queued, frame start
+// (its byte) and end, RX byte pushed / popped.
 // ================================================================
 
 package AXI4_SPI;
@@ -54,37 +56,14 @@ interface AXI4_SPI_IFC;
    (* always_ready *)   method Bit #(2) cs_n;
    (* always_enabled *) method Action   miso0 (Bit #(1) v);
    (* always_enabled *) method Action   miso1 (Bit #(1) v);
-`ifdef FORMAL
-   // formal/spi: state the harness aligns frames with (the checked ends are the pins and the bus)
-   (* always_ready *) method Bit #(4)  f_tx_level;
-   (* always_ready *) method Bit #(4)  f_rx_level;
-   (* always_ready *) method Bool      f_busy;
-   (* always_ready *) method Bit #(32) f_csid;
-   (* always_ready *) method Bit #(2)  f_csmode;
-   (* always_ready *) method Bit #(2)  f_csdef;
-   (* always_ready *) method Bit #(2)  f_sckmode;
-   (* always_ready *) method Bit #(1)  f_endian;
-   (* always_ready *) method Bit #(1)  f_dir;
-   (* always_ready *) method Bit #(12) f_sckdiv;
-   (* always_ready *) method Maybe #(Bit #(8)) f_tx_enq;     // TXDATA byte entering the FIFO
-   (* always_ready *) method Bool      f_frame_end;
-   (* always_ready *) method Maybe #(Bit #(8)) f_rx_push;    // received byte entering the RX FIFO
-   (* always_ready *) method Maybe #(Bit #(8)) f_rx_pop;     // RXDATA read returning a byte
-   // for the data invariants (k-induction)
-   (* always_ready *) method Bit #(4)  f_tx_rp;
-   (* always_ready *) method Bit #(4)  f_rx_rp;
-   (* always_ready *) method Bit #(64) f_v_tx;
-   (* always_ready *) method Bit #(64) f_v_rx;
-   (* always_ready *) method Bit #(5)  f_edge;
-   (* always_ready *) method Bit #(12) f_cnt;
-   (* always_ready *) method Bit #(12) f_f_div;
-   (* always_ready *) method Bit #(8)  f_sh_tx;
-   (* always_ready *) method Bit #(8)  f_sh_rx;
-   (* always_ready *) method Bit #(1)  f_f_pha;
-   (* always_ready *) method Bit #(1)  f_f_endian;
-   (* always_ready *) method Bit #(1)  f_f_dir;
-   (* always_ready *) method Bit #(1)  f_miso_q;
-`endif
+   // trace port (formal/fv/ips/spi; unconnected in the SoC, so synthesis prunes it)
+   (* always_ready *) method Bool              tr_wr;          // an AXI write is handled (B made)
+   (* always_ready *) method Bool              tr_rd;          // an AXI read is handled (R made)
+   (* always_ready *) method Maybe #(Bit #(8)) tr_tx_enq;      // TXDATA byte entering the TX FIFO
+   (* always_ready *) method Maybe #(Bit #(8)) tr_frame_start; // a frame starts with this TX byte
+   (* always_ready *) method Bool              tr_frame_end;   // its tail ends
+   (* always_ready *) method Maybe #(Bit #(8)) tr_rx_push;     // received byte entering the RX FIFO
+   (* always_ready *) method Maybe #(Bit #(8)) tr_rx_pop;      // RXDATA read returning a byte
 endinterface
 
 // ================================================================
@@ -154,12 +133,14 @@ module mkAXI4_SPI (AXI4_SPI_IFC);
    Bool cs_sel1 = (rg_csid == 1);
    Bit #(1) miso_q = cs_sel1 ? rg_miso1_q : rg_miso0_q;
 
-`ifdef FORMAL
+   // trace
+   PulseWire         pw_wr        <- mkPulseWire;
+   PulseWire         pw_rd        <- mkPulseWire;
    RWire #(Bit #(8)) rw_tx_enq    <- mkRWire;
+   RWire #(Bit #(8)) rw_start     <- mkRWire;
    PulseWire         pw_frame_end <- mkPulseWire;
    RWire #(Bit #(8)) rw_rx_push   <- mkRWire;
    RWire #(Bit #(8)) rw_rx_pop    <- mkRWire;
-`endif
 
    // ================================================================
    // Engine: one rule, fires every cycle
@@ -178,6 +159,7 @@ module mkAXI4_SPI (AXI4_SPI_IFC);
          sck = pol;
          if (tx_level != 0) begin
             Bit #(8) b = v_tx [tx_rp [2:0]];
+            rw_start.wset (b);
             if (rg_fmt_endian == 1) b = fv_rev8 (b);
             tx_rp = tx_rp + 1;
             rg_sh_tx    <= b;
@@ -226,15 +208,11 @@ module mkAXI4_SPI (AXI4_SPI_IFC);
          else begin
             // tail: frame done
             busy = False;
-`ifdef FORMAL
             pw_frame_end.send;
-`endif
             if ((rg_f_dir == 0) && (rx_level != 8)) begin
                v_rx [rx_wp [2:0]] <= ((rg_f_endian == 1) ? fv_rev8 (sh_rx) : sh_rx);
                rx_wp = rx_wp + 1;
-`ifdef FORMAL
                rw_rx_push.wset ((rg_f_endian == 1) ? fv_rev8 (sh_rx) : sh_rx);
-`endif
             end
          end
       end
@@ -320,9 +298,7 @@ module mkAXI4_SPI (AXI4_SPI_IFC);
             'h48: if (tx_level != 8) begin
                      v_tx [rg_tx_wp [2:0]] <= w [7:0];
                      rg_tx_wp <= rg_tx_wp + 1;
-`ifdef FORMAL
                      rw_tx_enq.wset (w [7:0]);
-`endif
                   end
             'h50: rg_txmark  <= w [2:0];
             'h54: rg_rxmark  <= w [2:0];
@@ -334,6 +310,7 @@ module mkAXI4_SPI (AXI4_SPI_IFC);
       end
 
       slave_xactor.i_wr_resp.enq (AXI4_Wr_Resp {bid: wra.awid, bresp: bresp, buser: wra.awuser});
+      pw_wr.send;
    endrule
 
    // ================================================================
@@ -341,6 +318,7 @@ module mkAXI4_SPI (AXI4_SPI_IFC);
 
    rule rl_rd;
       let rda <- pop_o (slave_xactor.o_rd_addr);
+      pw_rd.send;
 
       Bit #(Wd_Addr) byte_addr = rda.araddr - rg_addr_base;
       Bool hi = ((valueOf (Wd_Data) == 64) && (byte_addr [2] == 1));
@@ -356,9 +334,7 @@ module mkAXI4_SPI (AXI4_SPI_IFC);
          else begin
             v = zeroExtend (v_rx [rg_rx_rp [2:0]]);
             rg_rx_rp <= rg_rx_rp + 1;
-`ifdef FORMAL
             rw_rx_pop.wset (v_rx [rg_rx_rp [2:0]]);
-`endif
          end
       end
       else
@@ -397,35 +373,13 @@ module mkAXI4_SPI (AXI4_SPI_IFC);
    method Action miso1 (Bit #(1) v);
       rg_miso1_q <= v;
    endmethod
-`ifdef FORMAL
-   method Bit #(4)  f_tx_level  = tx_level;
-   method Bit #(4)  f_rx_level  = rx_level;
-   method Bool      f_busy      = rg_busy;
-   method Bit #(32) f_csid      = rg_csid;
-   method Bit #(2)  f_csmode    = rg_csmode;
-   method Bit #(2)  f_csdef     = rg_csdef;
-   method Bit #(2)  f_sckmode   = rg_sckmode;
-   method Bit #(1)  f_endian    = rg_fmt_endian;
-   method Bit #(1)  f_dir       = rg_fmt_dir;
-   method Bit #(12) f_sckdiv    = rg_sckdiv;
-   method Maybe #(Bit #(8)) f_tx_enq  = rw_tx_enq.wget;
-   method Bool      f_frame_end = pw_frame_end;
-   method Maybe #(Bit #(8)) f_rx_push = rw_rx_push.wget;
-   method Maybe #(Bit #(8)) f_rx_pop  = rw_rx_pop.wget;
-   method Bit #(4)  f_tx_rp     = rg_tx_rp;
-   method Bit #(4)  f_rx_rp     = rg_rx_rp;
-   method Bit #(64) f_v_tx      = pack (readVReg (v_tx));
-   method Bit #(64) f_v_rx      = pack (readVReg (v_rx));
-   method Bit #(5)  f_edge      = rg_edge;
-   method Bit #(12) f_cnt       = rg_cnt;
-   method Bit #(12) f_f_div     = rg_f_div;
-   method Bit #(8)  f_sh_tx     = rg_sh_tx;
-   method Bit #(8)  f_sh_rx     = rg_sh_rx;
-   method Bit #(1)  f_f_pha     = rg_f_pha;
-   method Bit #(1)  f_f_endian  = rg_f_endian;
-   method Bit #(1)  f_f_dir     = rg_f_dir;
-   method Bit #(1)  f_miso_q    = miso_q;
-`endif
+   method Bool              tr_wr          = pw_wr;
+   method Bool              tr_rd          = pw_rd;
+   method Maybe #(Bit #(8)) tr_tx_enq      = rw_tx_enq.wget;
+   method Maybe #(Bit #(8)) tr_frame_start = rw_start.wget;
+   method Bool              tr_frame_end   = pw_frame_end;
+   method Maybe #(Bit #(8)) tr_rx_push     = rw_rx_push.wget;
+   method Maybe #(Bit #(8)) tr_rx_pop      = rw_rx_pop.wget;
 endmodule
 
 endpackage
