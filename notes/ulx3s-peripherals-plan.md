@@ -528,6 +528,13 @@ trace (iec60958_mon, sd_rd_card).  Induction-only state still reaches the checke
 the INVARIANTS marker.  Proofs: sdh safety/frame/rd + rdcover (4-bit block read with good CRC
 reached at step 120), spdif stream/en/cover, audio prove/cover; mutants 12/12, 12/12, 9/9.
 lx48 gate on the trace-port RTL: s3 53.42, s5 53.70, s7 52.60; all sims and formal/fv PASS.
+board_io ported (formal/board_io retired): trace = I2C command start/START/STOP/read byte/write
+ack/done+AL/abandon; vip/i2c/i2c_host_mon checks the wires against it (MSB-first drive, pulse
+counts, sampling with SCL high, conditions only as traced, data hold); the checker has the register
+model (fvgen: !decode mask, !writes lanes, wo fields), GPIO pins, magic words, SR/RXR and two time
+bounds (55 ticks per command, 5 between steps) in place of the old whitebox ranking.  RTL change:
+the I2C engine steps only while EN is set (before, a step on the edge EN cleared could still set the
+done flag, RXR or AL of the abandoned command).  26 mutants (old 20 + 6).
 To port: board_io (an I2C host VIP; the termination ranking stays a declared whitebox lemma),
 video, then the BSV blocks (AXI4_RegBus, AXI4_SPI, Sdram_Controller).  RVFI stays: riscv-formal
 needs the core to emit its trace port; it is output-only and off unless RISCV_FORMAL is defined.

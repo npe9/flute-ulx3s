@@ -66,6 +66,7 @@ bin/vcdrows.py       prints chosen signals of a counterexample VCD, one row per 
 vip/regbus/          register-bus protocol (role parameter), outputs decoded reads and writes
 vip/crc/             CRC7/CRC16 by polynomial long division
 vip/sd/              sd_cmd_mon (host CMD frames), sd_rd_card (card side of a read block)
+vip/i2c/             i2c_host_mon (an I2C host's wires against its command trace; the bus model)
 ips/<ip>/            <ip>.cfg, <ip>.regs, <ip>_env.sv, <ip>_wb.sv (the bound checker)
 ```
 
@@ -74,6 +75,7 @@ ips/<ip>/            <ip>.cfg, <ip>.regs, <ip>_env.sv, <ip>_wb.sv (the bound che
 | sdh | src/Sd_Host.v | commands accepted/refused/done, buffer words, data done + verdict | safety, frame (CMD frames = the traced command), rd (read block, 1/4-bit, any CRC), cover, rdcover | 12 (nohold, startbit: sdh_ut only) |
 | spdif | src/Spdif_Tx.v | one event per subframe: channel, frame, sample, C bit | stream (trace vs inputs; OUT vs trace as IEC 60958), en, cover | 12 |
 | audio | src/Audio.v | push/drop, sample time + pop/underrun, play, PCM out, DAC words | prove (registers, STATUS, FIFO order, sample clock, player, DAC, mute, pins), cover | 9 |
+| board_io | src/Board_IO.v | I2C command start (flags, byte), START, STOP, read byte, write ack, done/AL, abandon | prove (registers, GPIO pins through 2 flops, magic words, SR/RXR, command acceptance, I2C wires vs trace via `i2c_host_mon`, time bounds), spec (bmc 24 with `FV_NO_INV`: the spec alone), cover | 26 (ackstuck, rxackrd: need a full read, past spec depth; prove only, ackstuck also bio_ut) |
 
 Work trees go in `build/fv/<ip>/<check>/`.
 
@@ -102,14 +104,19 @@ frame   = prove 6 CHK_FRAME
 `fvgen.py mutate <ip>` first requires every check and catcher to pass on the unmutated RTL, then
 applies each mutant and requires at least one check to FAIL or end UNKNOWN, or a catcher to
 fail.  A TIMEOUT or ERROR never counts as a catch.  An IP
-port is complete when it catches every mutant the old harness caught.
+port is complete when it catches every mutant the old harness caught.  A `bmc` check built
+with `FV_NO_INV` (the checker's INVARIANTS section compiled out) shows each mutant is caught by
+the specification itself and not only by a failed induction strengthening.
 
 ## Register spec
 
 One line per field: `offset NAME bits access [reset]` (`-` for an unnamed field), access `rw`
-(shadowed; reads must return it), `ro` (constant value), `zero` (reads 0), `vol` (hardware-owned:
-not modelled).  Options: `!window <address bits>`,
-`!unmapped zero`, `!writes full` (only full-strobe writes take effect).
+(shadowed; reads must return it), `wo` (shadowed, write-only: `s_NAME` is what software last
+wrote), `ro` (constant value), `zero` (reads 0), `vol` (hardware-owned: checked in the checker,
+not modelled).  Options: `!window <address bits>`, `!decode <mask>` (the address bits the device
+decodes, so offsets alias; board_io: two windows on [15:12] and registers on [4:2]),
+`!unmapped zero`, `!writes full|any|lanes` (a field takes a write with all four strobes / any
+strobe / the strobes of the byte lanes it occupies).
 
 ## Running
 

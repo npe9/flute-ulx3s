@@ -1,0 +1,38 @@
+# src/Board_IO.v register map: i2c0 at 0xC000_6000, gpio1 at 0xC000_8000 (the device sees addr[15:0]
+# and decodes [15:12] and [4:2]: each window aliases every 32 bytes).
+# <offset> <field> <bits> <access> <reset>.  Each field takes a write with the strobes of its lanes.
+!window 16
+!decode 0xF01C
+!unmapped zero
+!writes lanes
+0x6000 PRERLO   7:0     rw   0xFF          # SCL = clk / (5 * (PRER + 1))
+0x6000 -        31:8    zero
+0x6004 PRERHI   7:0     rw   0xFF
+0x6004 -        31:8    zero
+0x6008 CTR      7:0     rw   0             # [7] EN, [6] IEN (stored only)
+0x6008 -        31:8    zero
+0x600C TXR      7:0     wo   0             # write: the next byte to send
+0x600C RXR      7:0     vol                # read: the last byte received (checked in board_io_wb)
+0x600C -        31:8    zero
+0x6010 SR       7:0     vol                # read SR / write CR (checked in board_io_wb)
+0x6010 -        4:2     zero
+0x6010 -        31:8    zero
+0x601C ID       31:0    ro   0x49324331
+0x8000 GID      31:0    ro   0x47504931
+0x8004 BTN      6:0     vol                # the pins through two flops (checked in board_io_wb)
+0x8004 -        31:7    zero
+0x8008 SW       3:0     vol
+0x8008 -        31:4    zero
+0x800C ESP32_EN 0       rw   0
+0x800C ESP32_TX 1       vol
+0x800C STRAP    2       rw   0
+0x800C -        31:3    zero
+0x8010 POWER    0       vol                # set by the magic word only (checked in board_io_wb)
+0x8010 -        31:1    zero
+0x8014 RECONF   0       vol
+0x8014 -        31:1    zero
+0x8018 CEC_LOW  0       rw   0
+0x8018 -        7:1     zero
+0x8018 LINES    10:8    vol                # {Utility, HPD, CEC} through two flops
+0x8018 -        31:11   zero
+0x801C -        31:0    zero

@@ -68,24 +68,22 @@ module board_io (
     output reg         esp32_strap, // 1 = hold GPIO2 (sd_d0) low while the SD card is deselected
     output reg         shutdown,    // 1 = turn the board off
     output reg         reconf,      // 1 = pull PROGRAMN low (reconfigure from flash)
-    output reg         cec_low      // 1 = drive the CEC line low, 0 = release it
-`ifdef FORMAL
-    ,
-    output wire [2:0]  f_state,
-    output wire [2:0]  f_ph,
-    output wire [3:0]  f_bits,
-    output wire        f_en,
-    output wire        f_wr,
-    output wire        f_rd,
-    output wire        f_sto,
-    output wire [7:0]  f_shift,
-    output wire        f_is_tick,
-    output wire        f_tip,
-    output wire        f_scl_s,
-    output wire        f_sda_s,
-    output wire [7:0]  f_rxr,
-    output wire [7:0]  f_txr
-`endif
+    output reg         cec_low,     // 1 = drive the CEC line low, 0 = release it
+
+    // trace port (formal/fv/ips/board_io): what the I2C engine does, as events; unconnected in
+    // the FPGA build.  Each fires on the clock edge that makes the change.
+    output wire        tr_cmd_valid,  // a CR write starts a command
+    output wire [4:0]  tr_cmd,        //   {STA, STO, RD, WR, ACK}
+    output wire [7:0]  tr_cmd_tx,     //   and the byte it will send (TXR)
+    output wire        tr_start,      // SDA pulled low with SCL high (the START)
+    output wire        tr_stop,       // SDA released with SCL high (the STOP)
+    output wire        tr_rx_valid,   // a read's 8th bit is sampled: RXR becomes tr_rx
+    output wire [7:0]  tr_rx,
+    output wire        tr_ack_valid,  // a write's ack bit is sampled: RxACK becomes tr_ack
+    output wire        tr_ack,
+    output wire        tr_done,       // the command ends (TIP clears, the done flag sets)
+    output wire        tr_al,         //   by losing arbitration
+    output wire        tr_abort       // EN clear during a command or with a line held: abandon, release
 );
     localparam S_IDLE = 3'd0, S_START = 3'd1, S_BITS = 3'd2, S_ACK = 3'd3, S_STOP = 3'd4;
 
@@ -215,7 +213,7 @@ module board_io (
             ph    <= 3'd0;
             state <= cr_w[7] ? S_START : ((cr_w[5] || cr_w[4]) ? S_BITS : S_STOP);
         end
-        else if (is_tick && (state != S_IDLE) && !(ph == 3'd3 && !scl_s)) begin
+        else if (en && is_tick && (state != S_IDLE) && !(ph == 3'd3 && !scl_s)) begin
             ph <= (ph == 3'd4) ? 3'd0 : ph + 3'd1;
             case (state)
                 S_START:
@@ -311,20 +309,21 @@ module board_io (
         end
     end
 
-`ifdef FORMAL
-    assign f_state = state;
-    assign f_ph = ph;
-    assign f_bits = bits;
-    assign f_en = en;
-    assign f_wr = c_wr;
-    assign f_rd = c_rd;
-    assign f_sto = c_sto;
-    assign f_shift = shift;
-    assign f_is_tick = is_tick;
-    assign f_tip = tip;
-    assign f_scl_s = scl_s;
-    assign f_sda_s = sda_s;
-    assign f_rxr = rxr;
-    assign f_txr = txr;
-`endif
+    // ---------------- trace port ----------------
+    wire run  = !rst && en;
+    wire step = run && !start_cmd && is_tick && (state != S_IDLE) && !(ph == 3'd3 && !scl_s);
+    wire smp  = step && (state == S_BITS || state == S_ACK) && ph == 3'd4;
+    assign tr_al        = smp && tx_bit && !sda_s && state == S_BITS && c_wr;
+    assign tr_cmd_valid = !rst && start_cmd && (cr_w[7:4] != 0);
+    assign tr_cmd       = cr_w[7:3];
+    assign tr_cmd_tx    = txr;
+    assign tr_start     = step && state == S_START && ph == 3'd3;
+    assign tr_stop      = step && state == S_STOP && ph == 3'd4;
+    assign tr_rx_valid  = smp && !tr_al && state == S_BITS && bits == 4'd1 && c_rd;
+    assign tr_rx        = {shift[6:0], sda_s};
+    assign tr_ack_valid = smp && state == S_ACK && c_wr;
+    assign tr_ack       = sda_s;
+    assign tr_done      = tr_al || tr_stop || (smp && state == S_ACK && !c_sto)
+                       || (step && state == S_START && ph == 3'd4 && !c_rd && !c_wr && !c_sto);
+    assign tr_abort     = !rst && !en && (tip || scl_low || sda_low);
 endmodule
