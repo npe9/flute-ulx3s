@@ -440,16 +440,6 @@ clean:
 	$(MAKE) -C sw clean 2>/dev/null || true
 	$(MAKE) -C templeos clean 2>/dev/null || true
 
-# formal-sdram-verilog: mkSdram_Controller at 50 MHz behind a synthesized wrapper, short power-up pause.
-SDRAM_SRC ?= src/Sdram_Controller.bsv
-.PHONY: formal-sdram-verilog
-formal-sdram-verilog:
-	mkdir -p $(BUILD)/formal-sdram/bsc $(BUILD)/formal-sdram/v $(BUILD)/formal-sdram/src
-	cp $(SDRAM_SRC) $(BUILD)/formal-sdram/src/Sdram_Controller.bsv
-	$(BSC) -u -verilog -g mkSdramFormal $(BSC_FLAGS) $(DEFINES) -D FORMAL -D FORMAL_SHORT_PWR \
-	    -p $(abspath $(BUILD))/formal-sdram/src:$(CURDIR)/formal/sdram:$(BSC_PATH) -bdir $(BUILD)/formal-sdram/bsc -vdir $(BUILD)/formal-sdram/v \
-	    formal/sdram/SdramFormal.bsv > $(BUILD)/formal-sdram/bsc.log 2>&1 || { tail -20 $(BUILD)/formal-sdram/bsc.log; exit 1; }
-
 # fv-bsv: one BSV module to Verilog for formal/fv (bin/fvgen.py), with the SoC's flags and no
 # formal defines: FV_BSV_SRC (the .bsv, its directory searched first, so a mutant can stand in for
 # a src/ package), FV_BSV_TOP (the module), FV_BSV_OUT (the output directory; Verilog in v/).

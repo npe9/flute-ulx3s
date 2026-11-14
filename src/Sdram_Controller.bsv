@@ -22,7 +22,7 @@
 
 package Sdram_Controller;
 
-export Sdram_Controller_IFC (..), mkSdram_Controller;
+export Sdram_Controller_IFC (..), mkSdram_Controller, mkSdram_Controller_50;
 
 import Vector      :: *;
 import FIFOF       :: *;
@@ -81,22 +81,10 @@ interface Sdram_Controller_IFC;
    (* always_ready *) method Bit #(16) sdram_dq_out;
    (* always_ready *) method Bit #(1)  sdram_dq_oe;
    (* always_enabled *) method Action sdram_dq_in (Bit #(16) v);
-`ifdef FORMAL
-   // formal/sdram: the latched request and the credit state (the checked ends are the pins)
-   (* always_ready *) method Raw_Mem_Req f_req;
-   (* always_ready *) method Bit #(4)    f_chunks_in_flight;
-   (* always_ready *) method Bool        f_rsps_notFull;
-   (* always_ready *) method Maybe #(Bit #(64)) f_rsp_enq;
-   (* always_ready *) method Bool        f_cap_chunk;     // this cycle's capture completes a chunk
-   (* always_ready *) method Bit #(5)    f_state;
-   (* always_ready *) method Bit #(16)   f_ref_cnt;
-   (* always_ready *) method Bit #(3)    f_beat;
-   (* always_ready *) method Bit #(2)    f_burst;
-   (* always_ready *) method Bit #(16)   f_wait;
-   (* always_ready *) method Bit #(2)    f_burst_last;
-   (* always_ready *) method Bit #(4)    f_bmask;
-   (* always_ready *) method Bit #(48)   f_hw;
-`endif
+   // Trace port (formal/fv/ips/sdram): a request taken from the request FIFO (latched; an
+   // empty-mask write too), and a read chunk entering the response FIFO.
+   (* always_ready *) method Maybe #(Raw_Mem_Req) tr_take;
+   (* always_ready *) method Maybe #(Bit #(64))   tr_chunk;
 endinterface
 
 // ================================================================
@@ -136,13 +124,21 @@ endfunction
 
 // ================================================================
 
+// The SoC's controller: the power-up pause is 200 us.
 module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
+   let m <- mkSdram_Controller_P (clk_hz, fromInteger (clk_hz / 5000));
+   return m;
+endmodule
 
-`ifdef FORMAL_SHORT_PWR
-   Integer t_powerup = 8;                // formal build: the pause is a plain countdown
-`else
-   Integer t_powerup = clk_hz / 5000;    // 200 us
-`endif
+// At the shipping 50 MHz with the pause (>= 1 clock) a parameter: formal/fv/ips/sdram proves this
+// body with a short pause (so a bounded check reaches requests) and with the real 10000.
+(* synthesize *)
+module mkSdram_Controller_50 #(parameter Bit #(16) t_powerup) (Sdram_Controller_IFC);
+   let m <- mkSdram_Controller_P (50_000_000, t_powerup);
+   return m;
+endmodule
+
+module mkSdram_Controller_P #(Integer clk_hz, Bit #(16) t_powerup) (Sdram_Controller_IFC);
    // tRFC >= 66 ns (and the init gaps tRP/tRFC/tMRD, which it covers), in
    // clocks, at least 2: 2 at 25 MHz (80 ns), 3 at the 32.14 MHz PLL clock
    // (2 would be 62 ns).  Refresh interval refresh_div (98 clocks) stays
@@ -154,7 +150,7 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
 
    Reg #(State)     rg_state     <- mkReg (ST_PWR_WAIT);
    Reg #(Bit #(16)) rg_wait      <- mkReg (0);
-   Reg #(Bit #(16)) rg_pwrcnt    <- mkReg (fromInteger (t_powerup));
+   Reg #(Bit #(16)) rg_pwrcnt    <- mkReg (t_powerup);
    Reg #(Bit #(16)) rg_ref_cnt   <- mkReg (fromInteger (refresh_div));
    Reg #(Bit #(2))  rg_init_pairs <- mkReg (0);   // init REF1/REF2 pairs done
 
@@ -181,9 +177,8 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
    Reg #(Bool) rg_inited     <- mkReg (False);
    Reg #(Bool) rg_cmd_valid  <- mkReg (False);
    PulseWire   pw_cmd        <- mkPulseWire;     // a command is issued this cycle
-`ifdef FORMAL
-   RWire #(Bit #(64)) rw_rsp_enq <- mkRWire;
-`endif
+   RWire #(Raw_Mem_Req) rw_take    <- mkRWire;   // trace port
+   RWire #(Bit #(64))   rw_rsp_enq <- mkRWire;
 
    FIFOF #(Raw_Mem_Req)  f_reqs <- mkSizedFIFOF (4);
    // Read chunks.  Credits: rg_chunks_issued - rg_chunks_taken chunks are
@@ -343,6 +338,7 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
          if (req.write) begin
             // Only bursts with enabled bytes (no ACTIVE at all for an empty mask)
             f_reqs.deq;
+            rw_take.wset (req);
             rg_req        <= req;
             rg_bmask      <= bm;
             rg_burst      <= fn_first_set (bm);
@@ -354,6 +350,7 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
          end
          else if (zeroExtend (chunks_in_flight) + zeroExtend (n_chunks) <= 5'd8) begin   // 5 bits: 8 + 8 must not wrap
             f_reqs.deq;
+            rw_take.wset (req);
             rg_req           <= req;
             rg_burst         <= req.b_first;
             rg_burst_last    <= req.b_last;
@@ -407,9 +404,7 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
          if (rg_beat [1:0] == 3) begin
             Bit #(64) chunk = { rg_dq_in, rg_hw [2], rg_hw [1], rg_hw [0] };
             f_rsps.enq (chunk);
-`ifdef FORMAL
             rw_rsp_enq.wset (chunk);
-`endif
 `ifdef SDCAP_PROBES
             if (rg_req.line == 0)
                $display ("%0d SDCAP burst=%0d beat=%0d chunk=%0h", 0, rg_burst, rg_beat, chunk);
@@ -518,21 +513,8 @@ module mkSdram_Controller #(Integer clk_hz) (Sdram_Controller_IFC);
    method Action sdram_dq_in (Bit #(16) v);
       rg_dq_in <= v;
    endmethod
-`ifdef FORMAL
-   method Raw_Mem_Req f_req              = rg_req;
-   method Bit #(4)    f_chunks_in_flight = chunks_in_flight;
-   method Bool        f_rsps_notFull     = f_rsps.notFull;
-   method Maybe #(Bit #(64)) f_rsp_enq   = rw_rsp_enq.wget;
-   method Bool        f_cap_chunk        = (rg_state == ST_RD_CAP) && (rg_wait == 0) && (rg_beat [1:0] == 3);
-   method Bit #(5)    f_state            = zeroExtend (pack (rg_state));
-   method Bit #(16)   f_ref_cnt          = rg_ref_cnt;
-   method Bit #(3)    f_beat             = rg_beat;
-   method Bit #(2)    f_burst            = rg_burst;
-   method Bit #(16)   f_wait             = rg_wait;
-   method Bit #(2)    f_burst_last       = rg_burst_last;
-   method Bit #(4)    f_bmask            = rg_bmask;
-   method Bit #(48)   f_hw               = { rg_hw [2], rg_hw [1], rg_hw [0] };
-`endif
+   method Maybe #(Raw_Mem_Req) tr_take  = rw_take.wget;
+   method Maybe #(Bit #(64))   tr_chunk = rw_rsp_enq.wget;
 endmodule
 
 endpackage

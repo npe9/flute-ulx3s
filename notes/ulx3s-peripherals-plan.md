@@ -560,5 +560,15 @@ enqueue, frame start with the raw byte, frame end, RX push / pop).  New VIPs: vi
 traced byte in wire order, idle level between frames) and vip/axi4/axi4_sb_order (in-order
 scoreboard on fv_queue).  prove (depth 6, 16 s; SCKDIV <= 1 while busy as before), spec bmc 8,
 cover (5 covers, ~49 min, not in the gate); 19 mutants, all caught (7 by spec).
-To port: Sdram_Controller.  RVFI stays: riscv-formal
+Sdram_Controller ported (formal/sdram retired): the FORMAL f_ taps became a trace port (request
+taken, read chunk enqueued), and the body is mkSdram_Controller_P with the power-up pause a
+parameter (mkSdram_Controller_50 for formal; the SoC's mkSdram_Controller passes 200 us).  New
+VIPs: vip/sdram/sdram_host_mon (JEDEC init, per-bank ACT/RW/REF/MRS timing, tREFI, DQ drive) and
+vip/bsclib/sizedfifo_inv (bsc's SizedFIFO against an fv_queue, by taps).  One monolithic
+k-induction proof (depth 2, ~4 min; also at the real 10000-clock pause) replaces the old harness's
+eight hand-off groups and its FIFO contract: the controller's state at each clock of init and of
+each request, the monitor's bank model and both FIFOs as invariants.  abc pdr ran an hour without
+converging.  spec bmc 76 (no request before init: requests queued during init make deep bmc
+intractable), cover (5, by step 100); 18 mutants, all caught (16 by spec).
+All the BSV blocks are ported.  RVFI stays: riscv-formal
 needs the core to emit its trace port; it is output-only and off unless RISCV_FORMAL is defined.

@@ -69,6 +69,8 @@ vip/sd/              sd_cmd_mon (host CMD frames), sd_rd_card (card side of a re
 vip/i2c/             i2c_host_mon (an I2C host's wires against its command trace; the bus model)
 vip/spi/             spi_host_mon (an SPI host's SCK/MOSI/CS against its frame trace)
 vip/axi4/            axi4_sb_vip (single-beat AXI4 rules, role parameter), axi4_sb_order (in-order scoreboard)
+vip/sdram/           sdram_host_mon (an SDR SDRAM host's pins: JEDEC init, bank timing, refresh, DQ drive)
+vip/bsclib/          sizedfifo_inv (bsc's SizedFIFO against an fv_queue model: for INVARIANTS, by taps)
 vip/common/          fv_queue
 ips/<ip>/            <ip>.cfg, <ip>.regs, <ip>_env.sv, <ip>_wb.sv (the bound checker)
 ```
@@ -82,6 +84,7 @@ ips/<ip>/            <ip>.cfg, <ip>.regs, <ip>_env.sv, <ip>_wb.sv (the bound che
 | video | src/Video_DVI.v | RAM write lands (word, data, lanes), palette write, frame; pixel-side de/x/y/rgb (not yet specified) | prove (depth 6, RAMs as bits: registers, RAM lanes and range, palette reset and writes, FRAME vs trace, read latency 5), spec (bmc 16 with `FV_NO_INV`), cover | 6 (all also by spec) |
 | regbus | src/AXI4_RegBus.bsv (bsc) | request start / zero-strobe skip (with we), done, timeout, watchdog count | prove (watchdog 7) and prove255 (the SoC's 255): AXI side via `axi4_sb_vip`, bus side via `regbus_vip` as source, requests in AXI order with lane and strobes, completion at ack or watchdog, responses in order with id, lane and SLVERR; spec (bmc 10 `FV_NO_INV`), cover | 13 (slverr, rdzero: past spec depth; prove only) |
 | spi | src/AXI4_SPI.bsv (bsc) | register write / read, TX enqueue, frame start (byte as queued) / end, RX push / pop | prove (depth 6, SCKDIV <= 1 while busy: AXI side via `axi4_sb_vip` + in-order `axi4_sb_order`, decode and DECERR, registers and reset values, TX/RX FIFO order, CS (auto / hold / default), IRQ; SCK / MOSI / CS against the traced frame via `spi_host_mon`, MISO loopback into RX), spec (bmc 8 `FV_NO_INV`), cover | 19 (7 also by spec) |
+| sdram | src/Sdram_Controller.bsv (bsc, mkSdram_Controller_50) | request taken (the request), read chunk enqueued (the chunk) | prove (k-induction depth 2; power-up pause 2) and prove_real (the SoC's 10000): pins via `sdram_host_mon` (init sequence, ACT/RW/REF/MRS timing per bank, tREFI, DQ drive), first command after the pause, init bound, REF at least every 150 clocks; requests accepted below 4, taken in order after init; the fixed command schedule from each take (ACT, READ/WRITE per burst, auto-precharge on the last, write data and masks per beat); read chunks at their times with the CAS-offset samples, responses in order, never more than 8; spec (bmc 76 `FV_NO_INV`, no request before init: init and the first one or two requests), cover (5 covers by step 100, `FV_SPEC_LATE` as spec) | 18, the old 14 + 4 (16 also by spec; refresh, credit: past spec depth) |
 
 Work trees go in `build/fv/<ip>/<check>/`.
 
@@ -97,11 +100,16 @@ include = vip/crc
 regs    = ips/sdh/sdh.regs sdh_regs     # register spec -> generated shadow module
 bsv     = src/AXI4_RegBus.bsv mkAXI4_RegBus_W   # a BSV module: bsc (make fv-bsv, SoC flags, no
 bsvlib  = FIFO1.v FIFO2.v               #   formal defines) per run, mutants too; + bsc's library
-taps    = dut.wb.p=dut.fifo.data1_reg   # checker port driven after flatten (inside a library
-                                        #   submodule, which a bind cannot name): induction only
+taps    = dut.wb.p=dut.fifo.data1_reg   # checker port driven after flatten and `script`
+                                        #   (inside a library submodule, which a bind cannot
+                                        #   name; a ring word: dut.f.arr[0]): induction only;
+                                        #   fvgen marks each tap port keep and runs opt_clean
+                                        #   first (flatten's alias wires merged)
 binds   = sdh_wb                        # every checker that must be attached
-engine.<check> = smtbmc yices           # per-check engine (default smtbmc boolector)
-script  = memory_map; opt_clean         # extra yosys passes after prep (video: RAMs as bits)
+engine.<check> = abc bmc3              # per-check engine (default smtbmc boolector; abc pdr /
+                                        #   bmc3 for deep bmc, not for cover)
+script  = memory_map; opt_clean         # extra yosys passes after prep (and flatten, with taps;
+                                        #   video: RAMs as bits; sdram: FIFO rings as words)
 whitebox = ...                          # internals allowed in properties (lemma checks only)
 
 [checks]                                # name = mode depth DEFINES...
@@ -144,4 +152,6 @@ python3 formal/fv/bin/fvgen.py mutate sdh            # mutation coverage
 FV_RTL_ROOT=build/fv/stage python3 ...               # against a staged RTL tree
 ```
 
-Tools: the sv-yosys build (Yosys with `bind`), `FV_YOSYS_DIR`; sby and boolector on PATH.
+Tools: the sv-yosys build (Yosys with `bind`), `FV_YOSYS_DIR`; sby and boolector on PATH.  sby
+runs yosys through `bin/yosys_sby.sh`, which drops the `-fast` that sby's AIGER step (abc
+engines) passes to an abc pass that no longer has it.

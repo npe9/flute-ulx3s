@@ -74,7 +74,7 @@ reset, and the reset sequence completes whenever the slaves are fair (liveness).
   pixel word / palette entry / MODE read back what was written, unbacked reads 0, control
   registers. 36-word geometry (same banks and muxes); `mutate.sh` checks 3 injected bugs fail.
   Open: multiclock, and the scan-out side.
-- `Sdram_Controller`: **Done 2026-11-08: `formal/sdram/`, unbounded except as noted** (`run.sh`
+- `Sdram_Controller`: **Done 2026-11-08: `formal/sdram/` (now `formal/fv/ips/sdram`), unbounded except as noted** (`run.sh`
   runs all of it, seconds to a minute a group; pdr gave up after an hour on refresh and decode,
   and k-induction with a ranking function and FSM-to-pin invariants does them in seconds).
   Init order, one MRS, state at the MRS (pdr). JEDEC timings in 50 MHz clocks: tRP/tRAS/tRC/tRRD/tDAL (tRCD is

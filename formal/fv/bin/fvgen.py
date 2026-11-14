@@ -20,7 +20,8 @@ Usage:
   fvgen.py lint <file.v ...>         the RTL formal-construct check alone
 
 Tools: the SVA yosys fork (sv-yosys, `bind` support): FV_YOSYS_DIR, default
-~/src/sv-yosys/third_party/yosys/build.  Work trees: build/fv/<ip>/.
+~/src/sv-yosys/third_party/yosys/build, run through bin/yosys_sby.sh (sby's AIGER step for the abc
+engines asks for an abc option the newer yosys dropped).  Work trees: build/fv/<ip>/.
 """
 import configparser
 import os
@@ -34,7 +35,7 @@ import tempfile
 FV = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REPO = os.path.dirname(os.path.dirname(FV))
 YDIR = os.environ.get('FV_YOSYS_DIR', os.path.expanduser('~/src/sv-yosys/third_party/yosys/build'))
-TOOLS = ['--yosys', f'{YDIR}/yosys', '--abc', f'{YDIR}/yosys-abc', '--smtbmc', f'{YDIR}/yosys-smtbmc']
+TOOLS = ['--yosys', os.path.join(FV, 'bin', 'yosys_sby.sh'), '--abc', f'{YDIR}/yosys-abc', '--smtbmc', f'{YDIR}/yosys-smtbmc']
 
 # ---------------------------------------------------------------- RTL lint
 FORBIDDEN = [
@@ -273,12 +274,19 @@ def gen(ip, c, work, rtl_override=None, only=None):
         taps = c.get('taps', '').split()
         if taps:                # internals inside library submodules (bsc FIFOs): a bind cannot
             s.append('flatten')  # name them, so the checker port is left open and driven here
-            for t in taps:
-                port, _, wire = t.partition('=')
-                s.append(f'connect -set {port} {wire}')
-        for cmd in c.get('script', '').split(';'):          # extra passes, e.g. memory_map
-            if cmd.strip():
-                s.append(cmd.strip())
+        for cmd in c.get('script', '').split(';'):          # extra passes, e.g. memory_map (before
+            if cmd.strip():                                 # the taps: a FIFO ring's words are
+                s.append(cmd.strip())                       # wires <inst>.arr[i] only after it)
+        # Merge flatten's alias wires before connecting: connect -set cuts its target's driver,
+        # which can be the alias joining a tapped port to the checker submodule that uses it.
+        # keep: a tap port an FV_NO_INV build leaves unused must survive opt_clean.
+        for t in taps:
+            s.append(f"setattr -set keep 1 w:{t.partition('=')[0]}")
+        if taps:
+            s.append('opt_clean')
+        for t in taps:
+            port, _, wire = t.partition('=')
+            s.append(f'connect -set {port} {wire}')
         s += ['', '[files]'] + files
         open(os.path.join(d, f'{name}.sby'), 'w').write('\n'.join(s) + '\n')
         dirs[name] = d
@@ -288,7 +296,7 @@ def gen(ip, c, work, rtl_override=None, only=None):
 def run_check(d, name, timeout=None):
     try:
         subprocess.run(['sby', '-f'] + TOOLS + [f'{name}.sby'], cwd=d, capture_output=True,
-                       timeout=timeout)
+                       timeout=timeout, env=dict(os.environ, YOSYS=f'{YDIR}/yosys'))
     except subprocess.TimeoutExpired:
         return 'TIMEOUT', ''
     log = os.path.join(d, name, 'logfile.txt')
