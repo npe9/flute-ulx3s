@@ -166,7 +166,7 @@ jobs:
     needs: [setup, verilog]
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
-    timeout-minutes: 340   # nextpnr: 2h18m on the GitHub runner (main, 2026-10-28)
+    timeout-minutes: 340   # two router attempts of <=150 min each (below), plus synth/checkout
     container:
       image: ${{ needs.setup.outputs.image }}
       credentials: { username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}" }
@@ -175,7 +175,18 @@ jobs:
         with: { submodules: recursive }
       - uses: actions/download-artifact@v4
         with: { name: verilog, path: build }
-      - run: touch build/verilog_all.v && make -o build/verilog_all.v bitstream 2>&1 | tee build/pnr.log
+      # router1 on the runner's nextpnr sometimes stalls on a placement (spi, 2026-11-14: 74k arcs
+      # left at the 340-min limit; the same netlist routes in 15 min locally, and router2 aborts
+      # on it).  A healthy build is 35-75 min, so seed 3 gets 150 min, then seed 5 once.  This is
+      # a smoke build; nothing ships from it.
+      - shell: bash
+        run: |
+          set -o pipefail; touch build/verilog_all.v
+          for s in 3 5; do
+            echo "nextpnr seed $s" | tee -a build/pnr.log
+            make -o build/verilog_all.v SEED=$s NEXTPNR="timeout 150m nextpnr-ecp5" bitstream 2>&1 | tee -a build/pnr.log && exit 0
+            rc=$?; rm -f build/ulx3s_top.config; echo "seed $s: rc=$rc" | tee -a build/pnr.log
+          done; exit 1
       - run: grep -E "Max frequency for clock" build/pnr.log | tail -3
       - uses: actions/upload-artifact@v4
         with:
