@@ -46,7 +46,7 @@ module sdh_wb (
 
     // ---------------- the bus and the register model ----------------
     wire bw, br; wire [11:0] bw_a, br_a; wire [31:0] bw_d, br_d; wire [3:0] bw_s;
-    regbus_vip #(.DUT_IS_DEST(1), .AW(12)) bus (.clk(clk), .rst(rst), .valid(rb_valid), .we(rb_we),
+    regbus_vip #(.DUT_IS_DEST(1), .AW(12)) bus (.clk(clk), .rst(rst), .abandon(1'b0), .valid(rb_valid), .we(rb_we),
         .addr(rb_addr), .wdata(rb_wdata), .wstrb(rb_wstrb), .ack(rb_ack), .rdata(rb_rdata),
         .wr(bw), .wr_addr(bw_a), .wr_data(bw_d), .wr_strb(bw_s), .rd(br), .rd_addr(br_a), .rd_data(br_d));
     wire [0:0] s_MODE, s_WIDE, s_WPROT, s_CLKEN; wire [11:0] s_DIV; wire [31:0] s_ARG; wire [23:0] s_DTMO;

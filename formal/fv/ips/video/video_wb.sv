@@ -27,7 +27,7 @@ module video_wb #(parameter integer FB_WORDS = 36) (
 );
     // ---------------- the bus and the register model ----------------
     wire bw, br; wire [31:0] bw_a, br_a, bw_d, br_d; wire [3:0] bw_s;
-    regbus_vip #(.DUT_IS_DEST(1), .AW(32), .RD_LAT(5), .WR_LAT(1)) bus (.clk(clk), .rst(rst),
+    regbus_vip #(.DUT_IS_DEST(1), .AW(32), .RD_LAT(5), .WR_LAT(1)) bus (.clk(clk), .rst(rst), .abandon(1'b0),
         .valid(rb_valid), .we(rb_we), .addr(rb_addr), .wdata(rb_wdata), .wstrb(rb_wstrb), .ack(rb_ack),
         .rdata(rb_rdata), .wr(bw), .wr_addr(bw_a), .wr_data(bw_d), .wr_strb(bw_s), .rd(br),
         .rd_addr(br_a), .rd_data(br_d), .tk(b_tk), .pend(b_pend), .we_q(b_we), .w(b_w), .a_q(b_a));

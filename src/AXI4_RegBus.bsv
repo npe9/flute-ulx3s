@@ -15,11 +15,16 @@
 // A request with no ack within 256 cycles completes with SLVERR (no device at the address).
 // Writes with no byte strobes in the addressed lane complete at once without a bus access.
 // Single-beat transfers only, like every other slave on the peripheral bridge.
+// Trace port (formal/fv/ips/regbus; unconnected in the SoC, so synthesis prunes it): tr_start /
+// tr_skip (a request goes onto the register bus / a write with no strobes in its lane is answered
+// at once) with tr_we, tr_done (a request completes: the device's ack or the watchdog, tr_timeout),
+// and tr_wdog, the watchdog count.  mkAXI4_RegBus_W takes the watchdog limit as a parameter (the
+// formal environment shortens it); mkAXI4_RegBus is the SoC's, at 255.
 // ================================================================
 
 package AXI4_RegBus;
 
-export AXI4_RegBus_IFC (..), mkAXI4_RegBus;
+export AXI4_RegBus_IFC (..), mkAXI4_RegBus, mkAXI4_RegBus_W;
 
 import ConfigReg    :: *;
 import FIFOF        :: *;
@@ -41,16 +46,25 @@ interface AXI4_RegBus_IFC;
    (* always_ready *)   method Bit #(32) rb_wdata;
    (* always_ready *)   method Bit #(4)  rb_wstrb;
    (* always_enabled *) method Action    rb_ack (Bit #(1) ack, Bit #(32) rdata);
-`ifdef FORMAL
-   // formal/regbus: the watchdog, so the harness can tell a timeout from a dropped request
-   (* always_ready *)   method Bit #(8)  f_wdog;
-`endif
+   // trace port
+   (* always_ready *)   method Bool      tr_start;
+   (* always_ready *)   method Bool      tr_skip;
+   (* always_ready *)   method Bool      tr_we;
+   (* always_ready *)   method Bool      tr_done;
+   (* always_ready *)   method Bool      tr_timeout;
+   (* always_ready *)   method Bit #(8)  tr_wdog;
 endinterface
 
 typedef enum { RB_IDLE, RB_WR, RB_RD } RB_State deriving (Bits, Eq, FShow);
 
 (* synthesize *)
 module mkAXI4_RegBus (AXI4_RegBus_IFC);
+   let m <- mkAXI4_RegBus_W (8'hFF);
+   return m;
+endmodule
+
+(* synthesize *)
+module mkAXI4_RegBus_W #(parameter Bit #(8) wdog_max) (AXI4_RegBus_IFC);
 
    AXI4_Slave_Xactor_IFC #(Wd_Id, Wd_Addr, Wd_Data, Wd_User) slave_xactor <- mkAXI4_Slave_Xactor;
 
@@ -66,6 +80,13 @@ module mkAXI4_RegBus (AXI4_RegBus_IFC);
    // the device's ack and read data, sampled every cycle (always_enabled)
    Wire #(Bit #(1))  w_ack   <- mkBypassWire;
    Wire #(Bit #(32)) w_rdata <- mkBypassWire;
+
+   // trace
+   PulseWire pw_start   <- mkPulseWire;
+   PulseWire pw_skip    <- mkPulseWire;
+   PulseWire pw_we      <- mkPulseWire;
+   PulseWire pw_done    <- mkPulseWire;
+   PulseWire pw_timeout <- mkPulseWire;
 
    function Bool fn_hi (Bit #(Wd_Addr) a) = ((valueOf (Wd_Data) == 64) && (a [2] == 1));
    function Bit #(32) fn_word_addr (Bit #(Wd_Addr) a);
@@ -89,9 +110,13 @@ module mkAXI4_RegBus (AXI4_RegBus_IFC);
       Bool      hi      = fn_hi (wra.awaddr);
       Bit #(4)  stb     = hi ? wstrb8 [7:4] : wstrb8 [3:0];
 
-      if (stb == 0)
+      pw_we.send;
+      if (stb == 0) begin
          slave_xactor.i_wr_resp.enq (AXI4_Wr_Resp {bid: wra.awid, bresp: axi4_resp_okay, buser: wra.awuser});
+         pw_skip.send;
+      end
       else begin
+         pw_start.send;
          rg_addr  <= fn_word_addr (wra.awaddr);
          rg_wdata <= hi ? wdata64 [63:32] : wdata64 [31:0];
          rg_wstrb <= stb;
@@ -104,6 +129,7 @@ module mkAXI4_RegBus (AXI4_RegBus_IFC);
 
    rule rl_rd_start ((rg_state == RB_IDLE) && slave_xactor.i_rd_data.notFull);
       let rda <- pop_o (slave_xactor.o_rd_addr);
+      pw_start.send;
       rg_addr  <= fn_word_addr (rda.araddr);
       rg_hi    <= fn_hi (rda.araddr);
       rg_id    <= rda.arid;
@@ -116,12 +142,10 @@ module mkAXI4_RegBus (AXI4_RegBus_IFC);
    // Completion: the device's ack, or the watchdog
 
    rule rl_finish (rg_state != RB_IDLE);
-`ifdef FORMAL_SHORT_WDOG
-      Bool timeout = (rg_wdog == 7);     // formal cover build only: reach SLVERR in a few steps
-`else
-      Bool timeout = (rg_wdog == '1);
-`endif
+      Bool timeout = (rg_wdog == wdog_max);
       if ((w_ack == 1) || timeout) begin
+         pw_done.send;
+         if (w_ack != 1) pw_timeout.send;
          AXI4_Resp resp = (w_ack == 1) ? axi4_resp_okay : axi4_resp_slverr;
          if (rg_state == RB_WR)
             slave_xactor.i_wr_resp.enq (AXI4_Wr_Resp {bid: rg_id, bresp: resp, buser: rg_user});
@@ -159,9 +183,12 @@ module mkAXI4_RegBus (AXI4_RegBus_IFC);
       w_ack   <= ack;
       w_rdata <= rdata;
    endmethod
-`ifdef FORMAL
-   method Bit #(8) f_wdog = rg_wdog;
-`endif
+   method Bool     tr_start   = pw_start;
+   method Bool     tr_skip    = pw_skip;
+   method Bool     tr_we      = pw_we;
+   method Bool     tr_done    = pw_done;
+   method Bool     tr_timeout = pw_timeout;
+   method Bit #(8) tr_wdog    = rg_wdog;
 endmodule
 
 endpackage

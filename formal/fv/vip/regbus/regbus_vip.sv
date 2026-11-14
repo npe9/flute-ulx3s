@@ -5,13 +5,18 @@
 //   destination (a device): ack exactly RD_LAT / WR_LAT cycles after a take (valid with nothing
 //     pending), never otherwise (default 1: a one-cycle device).
 // DUT_IS_DEST=1: a device harness (source rules assumed, destination rules asserted); 0: the bridge.
+// ANY_LAT=1 (the bridge's environment): a device acks in any cycle a request is presented, or never;
+// the source may then abandon a request (input abandon, the cycle it gives up: its watchdog), after
+// which it need not hold it.  Tie abandon low otherwise.
 // The source rules a device check assumes are asserted of src/AXI4_RegBus.bsv by formal/regbus.
 // Outputs the decoded transfer for register models: a write at its take, a read at its ack.
 `default_nettype none
 module regbus_vip #(parameter integer DUT_IS_DEST = 1, parameter integer AW = 12,
-                    parameter integer RD_LAT = 1, parameter integer WR_LAT = 1) (
+                    parameter integer RD_LAT = 1, parameter integer WR_LAT = 1,
+                    parameter integer ANY_LAT = 0) (
     input  wire          clk,
     input  wire          rst,
+    input  wire          abandon,
     input  wire          valid,
     input  wire          we,
     input  wire [AW-1:0] addr,
@@ -33,33 +38,33 @@ module regbus_vip #(parameter integer DUT_IS_DEST = 1, parameter integer AW = 12
     output reg  [3:0]    w,           //   cycles since its take
     output reg  [AW-1:0] a_q          //   its address
 );
-    reg ack_q = 1'b0;
+    reg ack_q = 1'b0, ab_q = 1'b0;
     initial begin pend = 1'b0; we_q = 1'b0; w = 4'd0; end
     wire take = valid && !ack && !pend;
     assign tk = take;
     reg [31:0] wd_q; reg [3:0] st_q;
     always @(posedge clk) begin
-        ack_q <= ack;
-        if (pend && !ack) w <= w + 4'd1;
+        ack_q <= ack;  ab_q <= abandon;
+        if (pend && !ack && w != 4'hF) w <= w + 4'd1;
         if (take) begin pend <= 1'b1; w <= 4'd1; we_q <= we; a_q <= addr; wd_q <= wdata; st_q <= wstrb; rd_addr <= addr; end
-        if (ack) pend <= 1'b0;
-        if (rst) begin pend <= 1'b0; ack_q <= 1'b0; end
+        if (ack || abandon) pend <= 1'b0;
+        if (rst) begin pend <= 1'b0; ack_q <= 1'b0; ab_q <= 1'b0; end
     end
     assign wr = take && we;  assign wr_addr = addr;  assign wr_data = wdata;  assign wr_strb = wstrb;
     assign rd = ack && !we_q; assign rd_data = rdata;
 
     // source rules
-    wire s_hold   = !(pend && !ack) || (valid && addr == a_q && we == we_q && wdata == wd_q && wstrb == st_q);
+    wire s_hold   = !(pend && !ack) || ab_q || (valid && addr == a_q && we == we_q && wdata == wd_q && wstrb == st_q);
     wire s_drop   = !ack_q || !valid;
     wire s_align  = !valid || addr[1:0] == 2'b00;
     wire s_strobe = !(valid && we) || wstrb != 4'h0;
     // destination rules (a one-cycle device)
     wire [3:0] lat = we_q ? WR_LAT[3:0] : RD_LAT[3:0];
-    wire d_only   = !ack || (pend && w == lat);
-    wire d_answer = !(pend && w == lat) || ack;
+    wire d_only   = ANY_LAT ? (!ack || valid) : (!ack || (pend && w == lat));
+    wire d_answer = ANY_LAT || !(pend && w == lat) || ack;
     // the monitor's own state: a pending transfer is between its take and its answer (with the
     // rules above this holds by construction; asserted so that induction knows it)
-    wire m_w      = !pend || (w >= 4'd1 && w <= lat);
+    wire m_w      = ANY_LAT || !pend || (w >= 4'd1 && w <= lat);
     generate if (DUT_IS_DEST) begin : dest
         always @(*) if (!rst) begin
             assume (s_hold); assume (s_drop); assume (s_align); assume (s_strobe);

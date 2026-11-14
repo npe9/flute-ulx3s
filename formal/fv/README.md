@@ -37,7 +37,7 @@ The RTL in `src/` is what the FPGA build reads, and nothing else:
 6. Observation inside an IP goes through its trace port (below), never through internal names.
 7. Assumptions on a port are discharged by the check of whatever drives that port: the register
    bus rules a device check assumes (`regbus_vip`, DUT_IS_DEST=1) are asserted of the bridge,
-   src/AXI4_RegBus.bsv, by formal/regbus.
+   src/AXI4_RegBus.bsv, by ips/regbus.
 
 ## Trace ports
 
@@ -77,6 +77,7 @@ ips/<ip>/            <ip>.cfg, <ip>.regs, <ip>_env.sv, <ip>_wb.sv (the bound che
 | audio | src/Audio.v | push/drop, sample time + pop/underrun, play, PCM out, DAC words | prove (registers, STATUS, FIFO order, sample clock, player, DAC, mute, pins), cover | 9 |
 | board_io | src/Board_IO.v | I2C command start (flags, byte), START, STOP, read byte, write ack, done/AL, abandon | prove (registers, GPIO pins through 2 flops, magic words, SR/RXR, command acceptance, I2C wires vs trace via `i2c_host_mon`, time bounds), spec (bmc 24 with `FV_NO_INV`: the spec alone), cover | 26 (ackstuck, rxackrd: need a full read, past spec depth; prove only, ackstuck also bio_ut) |
 | video | src/Video_DVI.v | RAM write lands (word, data, lanes), palette write, frame; pixel-side de/x/y/rgb (not yet specified) | prove (depth 6, RAMs as bits: registers, RAM lanes and range, palette reset and writes, FRAME vs trace, read latency 5), spec (bmc 16 with `FV_NO_INV`), cover | 6 (all also by spec) |
+| regbus | src/AXI4_RegBus.bsv (bsc) | request start / zero-strobe skip (with we), done, timeout, watchdog count | prove (watchdog 7) and prove255 (the SoC's 255): AXI side via `axi4_sb_vip`, bus side via `regbus_vip` as source, requests in AXI order with lane and strobes, completion at ack or watchdog, responses in order with id, lane and SLVERR; spec (bmc 10 `FV_NO_INV`), cover | 13 (slverr, rdzero: past spec depth; prove only) |
 
 Work trees go in `build/fv/<ip>/<check>/`.
 
@@ -90,6 +91,10 @@ env     = ips/sdh/sdh_env.sv
 fv      = vip/... ips/sdh/sdh_wb.sv     # read with the check's defines
 include = vip/crc
 regs    = ips/sdh/sdh.regs sdh_regs     # register spec -> generated shadow module
+bsv     = src/AXI4_RegBus.bsv mkAXI4_RegBus_W   # a BSV module: bsc (make fv-bsv, SoC flags, no
+bsvlib  = FIFO1.v FIFO2.v               #   formal defines) per run, mutants too; + bsc's library
+taps    = dut.wb.p=dut.fifo.data1_reg   # checker port driven after flatten (inside a library
+                                        #   submodule, which a bind cannot name): induction only
 binds   = sdh_wb                        # every checker that must be attached
 engine.<check> = smtbmc yices           # per-check engine (default smtbmc boolector)
 script  = memory_map; opt_clean         # extra yosys passes after prep (video: RAMs as bits)

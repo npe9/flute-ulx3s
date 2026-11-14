@@ -24,6 +24,7 @@ Tools: the SVA yosys fork (sv-yosys, `bind` support): FV_YOSYS_DIR, default
 """
 import configparser
 import os
+import glob
 import re
 import shutil
 import subprocess
@@ -213,8 +214,26 @@ def gen(ip, c, work, rtl_override=None, only=None):
     Only those checks' directories are replaced: another run's may be in use."""
     os.makedirs(work, exist_ok=True)
     root = os.path.abspath(os.environ.get('FV_RTL_ROOT') or REPO)   # a staged RTL tree (default: the repo)
-    rtl = [rtl_override.get(r, os.path.join(root, r)) if rtl_override else os.path.join(root, r)
-           for r in c['rtl'].split()]
+    def src(r):
+        return rtl_override.get(r, os.path.join(root, r)) if rtl_override else os.path.join(root, r)
+    rtl = [src(r) for r in c.get('rtl', '').split()]
+    bsv_v = []
+    if 'bsv' in c:                       # a BSV module: compiled with the SoC's flags, no defines
+        bsrc, btop = c['bsv'].split()
+        out = os.path.abspath(os.path.join(work, 'bsv'))
+        if os.path.isdir(out):
+            shutil.rmtree(out)
+        r = subprocess.run(['make', '-s', '-C', REPO, 'fv-bsv', f'FV_BSV_SRC={src(bsrc)}',
+                            f'FV_BSV_TOP={btop}', f'FV_BSV_OUT={out}'], capture_output=True, text=True)
+        if r.returncode:
+            sys.exit(f'fvgen: bsc failed for {src(bsrc)}:\n{r.stdout}{r.stderr}')
+        lib = subprocess.run([os.path.join(REPO, 'scripts', 'bsc_lib.sh')], capture_output=True,
+                             text=True, check=True).stdout.strip()
+        bsv_v = sorted(glob.glob(os.path.join(out, 'v', '*.v'))) + \
+                [os.path.join(lib, f) for f in c.get('bsvlib', '').split()]
+        bad = lint([src(bsrc)] + bsv_v)
+        if bad:
+            sys.exit('fvgen: formal constructs in the RTL (keep them in formal/fv):\n  ' + '\n  '.join(bad))
     bad = lint(rtl)
     if bad:
         sys.exit('fvgen: formal constructs in the RTL (keep them in formal/fv):\n  ' + '\n  '.join(bad))
@@ -239,18 +258,27 @@ def gen(ip, c, work, rtl_override=None, only=None):
         if os.path.isdir(d):
             shutil.rmtree(d)
         os.makedirs(d)
-        files = rtl + fv + [env] + [os.path.join(i, f) for i in incs for f in sorted(os.listdir(i))]
+        files = rtl + bsv_v + fv + [env] + [os.path.join(i, f) for i in incs for f in sorted(os.listdir(i))]
         dflags = ' '.join(f'-D{x}' for x in defs)
         eng = c.get(f'engine.{name}', c.get('engine', 'smtbmc boolector'))
         s = ['[options]', f'mode {mode}', f'depth {depth}', '', '[engines]', eng, '', '[script]']
-        s.append('read_verilog -sv -formal ' + ' '.join(os.path.basename(r) for r in rtl))   # no defines
+        if rtl:
+            s.append('read_verilog -sv -formal ' + ' '.join(os.path.basename(r) for r in rtl))   # no defines
+        if bsv_v:   # bsc's output and library: registers start free, not at bsc's 'haaaa pattern
+            s.append('read_verilog -sv -formal -DBSV_NO_INITIAL_BLOCKS ' + ' '.join(os.path.basename(r) for r in bsv_v))
         s.append(f'read_verilog -sv -formal {dflags} ' + ' '.join(os.path.basename(f) for f in fv + [env]))
         s.append(f'prep -top {c["top"]}')
+        for b in binds:
+            s.append(f'select -assert-count 1 t:{b} t:$paramod\\{b}\\* %u')   # parameterized too
+        taps = c.get('taps', '').split()
+        if taps:                # internals inside library submodules (bsc FIFOs): a bind cannot
+            s.append('flatten')  # name them, so the checker port is left open and driven here
+            for t in taps:
+                port, _, wire = t.partition('=')
+                s.append(f'connect -set {port} {wire}')
         for cmd in c.get('script', '').split(';'):          # extra passes, e.g. memory_map
             if cmd.strip():
                 s.append(cmd.strip())
-        for b in binds:
-            s.append(f'select -assert-count 1 t:{b} t:$paramod\\{b}\\* %u')   # parameterized too
         s += ['', '[files]'] + files
         open(os.path.join(d, f'{name}.sby'), 'w').write('\n'.join(s) + '\n')
         dirs[name] = d
@@ -311,7 +339,7 @@ def apply_mutant(text, exprs):
 
 def cmd_mutate(ip, only):
     c = load(ip)
-    rtl = c['rtl'].split()
+    rtl = c.get('rtl', '').split() + c.get('bsv', '').split()[:1]
     root = os.path.abspath(os.environ.get('FV_RTL_ROOT') or REPO)
     tmp = tempfile.mkdtemp(prefix=f'fvmut_{ip}_')
     bad = 0

@@ -545,5 +545,14 @@ depth 6; the base case costs ~7 min, nearly all of it the palette's 256 reset va
 symbolic index (4 s without that invariant).  6 mutants (old 3 + 3 on the trace), all caught by
 the spec check too.  regbus_vip gained RD_LAT/WR_LAT and an asserted bound on its own cycle
 counter (without it sdh.rd went UNKNOWN).
-To port: the BSV blocks (AXI4_RegBus, AXI4_SPI, Sdram_Controller).  RVFI stays: riscv-formal
+regbus ported (formal/regbus retired), the first BSV block: fvgen compiles the .bsv itself (make
+fv-bsv: the SoC's flags, no formal defines; mutants are .bsv edits).  src/AXI4_RegBus.bsv lost its
+`ifdef FORMAL / FORMAL_SHORT_WDOG; the trace port (start, skip, we, done, timeout, watchdog count)
+is always present and the watchdog limit is a parameter of mkAXI4_RegBus_W (mkAXI4_RegBus = 255).
+New VIPs: vip/axi4/axi4_sb_vip (single-beat AXI4, role parameter, FVIP style; the vendored FVIP
+stays the full-protocol reference), vip/common/fv_queue (scoreboards); regbus_vip gained the
+source role's environment (ANY_LAT, abandon).  bsc's FIFO2 second entry is inside a library
+module a bind cannot name: fvgen 'taps' drive the checker port after flatten.  prove (5 s) and
+prove255, spec bmc 10, cover; 13 mutants (old 3 + 10), 11 by spec.
+To port: AXI4_SPI, Sdram_Controller.  RVFI stays: riscv-formal
 needs the core to emit its trace port; it is output-only and off unless RISCV_FORMAL is defined.

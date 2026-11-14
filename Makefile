@@ -440,9 +440,6 @@ clean:
 	$(MAKE) -C sw clean 2>/dev/null || true
 	$(MAKE) -C templeos clean 2>/dev/null || true
 
-# formal-regbus-verilog: mkAXI4_RegBus alone, for formal/regbus (same flags as the SoC build;
-# REGBUS_SRC lets formal/regbus/mutate.sh build mutants).
-REGBUS_SRC ?= src/AXI4_RegBus.bsv
 # formal-spi-verilog: mkAXI4_SPI alone, for formal/spi (SPI_SRC lets formal/spi/mutate.sh build mutants).
 SPI_SRC ?= src/AXI4_SPI.bsv
 .PHONY: formal-spi-verilog
@@ -462,13 +459,13 @@ formal-sdram-verilog:
 	    -p $(abspath $(BUILD))/formal-sdram/src:$(CURDIR)/formal/sdram:$(BSC_PATH) -bdir $(BUILD)/formal-sdram/bsc -vdir $(BUILD)/formal-sdram/v \
 	    formal/sdram/SdramFormal.bsv > $(BUILD)/formal-sdram/bsc.log 2>&1 || { tail -20 $(BUILD)/formal-sdram/bsc.log; exit 1; }
 
-.PHONY: formal-regbus-verilog
-formal-regbus-verilog:
-	mkdir -p $(BUILD)/formal-regbus/bsc $(BUILD)/formal-regbus/v
-	$(BSC) -u -verilog -g mkAXI4_RegBus $(BSC_FLAGS) $(DEFINES) -D FORMAL \
-	    -p $(BSC_PATH) -bdir $(BUILD)/formal-regbus/bsc -vdir $(BUILD)/formal-regbus/v \
-	    $(REGBUS_SRC) > $(BUILD)/formal-regbus/bsc.log 2>&1 || { tail -20 $(BUILD)/formal-regbus/bsc.log; exit 1; }
-	mkdir -p $(BUILD)/formal-regbus-short/bsc $(BUILD)/formal-regbus-short/v
-	$(BSC) -u -verilog -g mkAXI4_RegBus $(BSC_FLAGS) $(DEFINES) -D FORMAL -D FORMAL_SHORT_WDOG \
-	    -p $(BSC_PATH) -bdir $(BUILD)/formal-regbus-short/bsc -vdir $(BUILD)/formal-regbus-short/v \
-	    $(REGBUS_SRC) > $(BUILD)/formal-regbus-short/bsc.log 2>&1 || { tail -20 $(BUILD)/formal-regbus-short/bsc.log; exit 1; }
+# fv-bsv: one BSV module to Verilog for formal/fv (bin/fvgen.py), with the SoC's flags and no
+# formal defines: FV_BSV_SRC (the .bsv, its directory searched first, so a mutant can stand in for
+# a src/ package), FV_BSV_TOP (the module), FV_BSV_OUT (the output directory; Verilog in v/).
+.PHONY: fv-bsv
+fv-bsv:
+	mkdir -p $(FV_BSV_OUT)/bsc $(FV_BSV_OUT)/v
+	$(BSC) -u -verilog -g $(FV_BSV_TOP) $(BSC_FLAGS) $(DEFINES) \
+	    -p $(abspath $(dir $(FV_BSV_SRC))):$(BSC_PATH) -bdir $(FV_BSV_OUT)/bsc -vdir $(FV_BSV_OUT)/v \
+	    $(FV_BSV_SRC) > $(FV_BSV_OUT)/bsc.log 2>&1 || { tail -20 $(FV_BSV_OUT)/bsc.log; exit 1; }
+
