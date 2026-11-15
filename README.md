@@ -57,7 +57,7 @@ Without Docker, put `bsc`, `verilator`, `yosys`, `nextpnr-ecp5`, `ecppack` and
 `riscv64-unknown-elf-gcc` on PATH (or set `BSC`, `NEXTPNR`, `ECPPACK`, `RISCV_PREFIX`).
 GitHub Actions (`.github/workflows/ci.yml`) runs the same image on every push: Verilog build,
 Bluesim boot (hello + TempleOS REPL), the strict Verilator J1 + cache/AMO gates, and the
-bitstream at the 25 MHz constraint. On the `linux-isa` branch it also builds OpenSBI + Linux from
+shipped 50 MHz bitstream (video floorplan; Fmax reported, the local gate enforces timing). On the `linux-isa` branch it also builds OpenSBI + Linux from
 source and boots them to user space in Verilator and in Bluesim.
 
 ### No board? Simulate it

@@ -22,7 +22,7 @@ same flows on every push so local changes cannot silently break the system or th
   x-initial/seed behaviour is version-sensitive), oss-cad-suite 2026-10-01, RISC-V bare-metal and
   Linux GCC, dtc. Published as `ghcr.io/npe9/flute-ci:<Dockerfile hash>`.
 - `.github/workflows/ci.yml` jobs: verilog; bluesim (hello + TempleOS REPL, `ci/bluesim_gate.sh`);
-  strict (Verilator J1 + cache/AMO); bitstream (25 MHz constraint, not on PRs); on branches whose
+  strict (Verilator J1 + cache/AMO); bitstream (the shipped SYS_PLL=50 floorplanned build, Fmax reported, not on PRs); on branches whose
   SoC has S-mode: linux-sw (`linux-sw/build-native.sh fp`, cached), linux (Verilator harness to
   `/init` "tick 2 ... fp ok"), bluesim-linux (Bluesim, same pass string).
 - Bluesim testbench fixes found on the way: both TBs assumed a 12.5 MHz clock (the SoC runs 25 MHz

@@ -243,9 +243,12 @@ $(JSON): $(SYNTH_VERILOG) src/Top.v src/Video_DVI.v src/Board_IO.v src/Audio.v s
 
 synth: $(JSON)
 
-# --ignore-loops: the Zkr ring oscillators (src/RO_TRNG.v) are intentional combinational loops
+# --ignore-loops: the Zkr ring oscillators (src/RO_TRNG.v) are intentional combinational loops.
+# PNR_FLAGS: extra nextpnr flags; the shipped 50 MHz build adds
+#   --pre-place constraints/video_floorplan.py --timing-allow-fail
+PNR_FLAGS ?=
 $(CONFIG): $(JSON) $(LPF)
-	$(NEXTPNR) --$(DEVICE) --package CABGA381 --json $(JSON) --lpf $(LPF) --textcfg $@ --seed $(SEED) --ignore-loops
+	$(NEXTPNR) --$(DEVICE) --package CABGA381 --json $(JSON) --lpf $(LPF) $(PNR_FLAGS) --textcfg $@ --seed $(SEED) --ignore-loops
 
 $(BITSTREAM): $(CONFIG)
 	$(ECPPACK) --compress $< $@

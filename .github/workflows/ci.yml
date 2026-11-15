@@ -1,11 +1,11 @@
 # CI for the ULX3S Flute SoC: build from a clean public checkout, then boot the SoC in simulation.
-#   verilog    bsc -> build/verilog_all.v (the netlist every sim and the bitstream use)
+#   verilog    bsc -> build/verilog_all.v (the 25 MHz netlist every sim uses)
 #   bluesim    Bluesim boot of hello.bin and of the TempleOS HolyC REPL; virtual-board DMI smoke (ci/bluesim_gate.sh)
 #   strict     Verilator strict-BRAM J1 boot gate + cache/AMO tests (the trusted functional gates)
 #   linux-sw   OpenSBI + Linux + /init (only on branches whose SoC has S-mode)
 #   linux      Linux boot to user space in the Verilator harness (same condition)
 #   bluesim-linux  the same Linux boot on the Bluesim virtual board (make sim-board, SIM_PTY=0)
-#   bitstream  yosys + nextpnr at the 25 MHz constraint (fails if timing fails)
+#   bitstream  the shipped build (SYS_PLL=50, video floorplan): bsc + yosys + nextpnr; reports Fmax
 # Toolchain: ci/Dockerfile, published as ghcr.io/<owner>/flute-ci:<hash of the Dockerfile>.
 name: ci
 
@@ -163,31 +163,33 @@ jobs:
           path: build/*.log
 
   bitstream:
-    needs: [setup, verilog]
+    # The shipped configuration (50 MHz PLL, constraints/video_floorplan.py), not the 25 MHz
+    # netlist the sims use: unfloorplanned, that one fills 84% of the LUTs and needs ~1.04M router1
+    # iterations, and some runner placements never converged (4b3c3b1: both seeds stalled at
+    # 150 min).  Floorplanned it routes in ~0.88M (11 min locally with this yosys).  Timing is
+    # reported, not enforced (--timing-allow-fail): the lx48 gate, on the local toolchain, is the
+    # timing authority; this yosys (0.69) closes a few MHz lower.
+    needs: [setup, image]
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
-    timeout-minutes: 340   # two router attempts of <=150 min each (below), plus synth/checkout
+    timeout-minutes: 340   # bsc, synth, and two router attempts of <=150 min each
     container:
       image: ${{ needs.setup.outputs.image }}
       credentials: { username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}" }
     steps:
       - uses: actions/checkout@v4
         with: { submodules: recursive }
-      - uses: actions/download-artifact@v4
-        with: { name: verilog, path: build }
-      # router1 on the runner's nextpnr sometimes stalls on a placement (spi, 2026-11-14: 74k arcs
-      # left at the 340-min limit; the same netlist routes in 15 min locally, and router2 aborts
-      # on it).  A healthy build is 35-75 min, so seed 3 gets 150 min, then seed 5 once.  This is
-      # a smoke build; nothing ships from it.
+      - run: make -j4 SYS_PLL=50 ${{ needs.setup.outputs.makeflags }} build/verilog_all.v
       - shell: bash
         run: |
-          set -o pipefail; touch build/verilog_all.v
+          set -o pipefail
           for s in 3 5; do
             echo "nextpnr seed $s" | tee -a build/pnr.log
-            make -o build/verilog_all.v SEED=$s NEXTPNR="timeout 150m nextpnr-ecp5" bitstream 2>&1 | tee -a build/pnr.log && exit 0
+            make SYS_PLL=50 ${{ needs.setup.outputs.makeflags }} SEED=$s NEXTPNR="timeout 150m nextpnr-ecp5" \
+                PNR_FLAGS="--pre-place constraints/video_floorplan.py --timing-allow-fail" bitstream 2>&1 | tee -a build/pnr.log && exit 0
             rc=$?; rm -f build/ulx3s_top.config; echo "seed $s: rc=$rc" | tee -a build/pnr.log
           done; exit 1
-      - run: grep -E "Max frequency for clock" build/pnr.log | tail -3
+      - run: grep -E "video_floorplan:|Max frequency for clock" build/pnr.log | tail -6
       - uses: actions/upload-artifact@v4
         with:
           name: bitstream
