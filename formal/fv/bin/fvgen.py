@@ -315,6 +315,10 @@ def run_check(d, name, timeout=None):
     if st == 'ERROR':
         err = re.findall(r'ERROR: (.*)', txt)
         return st, err[0] if err else ''
+    # a cover check that reached nothing compiled no cover statements: vacuous, not a PASS
+    sby = open(os.path.join(d, f'{name}.sby')).read()
+    if st == 'PASS' and re.search(r'^mode cover', sby, re.M) and 'Reached cover statement' not in txt:
+        return 'ERROR', 'no cover statements (vacuous)'
     return st, where[0] if where else ''
 
 

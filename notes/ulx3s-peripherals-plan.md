@@ -601,6 +601,22 @@ all four SizedFIFOs as invariants.  prove depth 4 at 24/10-clock timeouts (7.5 m
 real 50 M / 500 k (uart_dmi_real, 9 min); cover; 26 mutants, all by prove (MUT_LIMIT=3600).
 test/Uart_DMI_Tb now checks the trailing-0xDB release (fails on the old bridge) and is in the
 gate; dmi.py re-arms after an idle of 0.8 s or more by waiting out the frame timeout first.
-Remaining blocks without formal: the JTAG blocks, RO_TRNG.
+JtaggDtm ported (the live DTM on the ECP5 JTAG port), and porting it found a debug-spec
+violation (in the promoted bit): a dmi scan captured while a request was in flight read op 3
+(busy) but left dmistat 0, so if the debug module answered before that scan's Update-DR the
+scan's op ran anyway.  Debug spec 0.13.2: on busy "the data scanned into dmi in this access will
+be ignored"; OpenOCD retries a busy scan, so the op could run twice (a write twice, a read whose
+answer is attributed to the wrong scan).  Unlikely at the board's ~0.5 MHz TCK (a request takes a
+few clocks; Update to the next Capture is ~300), but real.  Fix: a busy capture sets dmistat 3.
+sim/jtagg_dtm/tb.v (the real TAP model, a debug module answering mid-scan) fails on the old DTM
+and is in the gate.  The checker states the DTM over the JTAGG pins, free but for timing (JTCK
+high >= 5 clocks, low >= 1; JTDI held a clock past the edge; 4 high clocks fail: tdo lags the
+shift); vip/jtag/ecp5_jtagg_vip drives an IR scan for the tap cover.  prove depth 4, spec bmc
+40, covers; 27 mutants, all caught.  dmihardreset clears dmistat but does not drop an
+outstanding request (Flute's debug module answers every request).  JtagTap and ClockHacks are
+not in the SoC; Jtag_Control_Adapter is covered inside the uart_dmi proof.
+Porting found an sv-yosys mis-synthesis (formal/fv/README pitfalls) and that a cover check
+compiling no cover statements passed; fvgen now reports that ERROR (all existing covers reach).
+Remaining block without formal: RO_TRNG (ring oscillators: combinational loops, analog).
 The original BSV blocks are ported.  RVFI stays: riscv-formal
 needs the core to emit its trace port; it is output-only and off unless RISCV_FORMAL is defined.

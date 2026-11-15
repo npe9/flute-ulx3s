@@ -28,8 +28,9 @@
 //   JUPDATE                 Update-DR: act on the remembered register, then forget it (an
 //                           Update-DR of the TAP's own instructions finds nothing remembered)
 //   JRSTN 0                 Test-Logic-Reset: forget it
-// A dmi update starts a read or write unless one is in flight (then dmistat sticks at 3, busy,
-// until dmireset) or an earlier op failed (sticks at 2).  The debug module answers every request
+// A dmi capture while a request is in flight reads op 3 and makes dmistat 3 (busy, sticky until
+// dmireset), so that scan's update is ignored, as the debug spec requires.  A dmi update starts a
+// read or write unless dmistat is set (3 busy, or 2: an earlier op failed).  The debug module answers every request
 // once and in order (Flute SoC_Top), so one request in flight is enough.
 // ================================================================
 
@@ -45,6 +46,15 @@ interface JtaggDtm_IFC;
    (* always_ready, always_enabled *) method Action pins (Bit #(7) v);
    (* always_ready *)                 method Bit #(1) tdo;
    interface Client #(Control_Req, Control_Rsp) client;
+
+   // Trace port (formal/fv/ips/jtagg_dtm; unconnected in the SoC).  Each fires in the clock the
+   // DTM acts: capture (1 dmi, 2 dtmcs), shift (the bit taken in), update ({register, dr}), a dmi
+   // update ignored (busy or sticky), the debug module's response taken.
+   (* always_ready *) method Maybe #(Bit #(2))  tr_capture;
+   (* always_ready *) method Maybe #(Bit #(1))  tr_shift;
+   (* always_ready *) method Maybe #(Bit #(43)) tr_update;
+   (* always_ready *) method Bool tr_ignored;
+   (* always_ready *) method Bool tr_rsp;
 endinterface
 
 (* synthesize *)
@@ -64,6 +74,12 @@ module mkJtaggDtm (JtaggDtm_IFC);
 
    FIFOF #(Control_Req) f_req <- mkFIFOF;
    FIFOF #(Control_Rsp) f_rsp <- mkFIFOF;
+
+   RWire #(Bit #(2))  rw_capture <- mkRWire;
+   RWire #(Bit #(1))  rw_shift   <- mkRWire;
+   RWire #(Bit #(43)) rw_update  <- mkRWire;
+   PulseWire          pw_ignored <- mkPulseWire;
+   PulseWire          pw_rsp     <- mkPulseWire;
 
    Bit #(41) dtmcs_v = zeroExtend ({14'b0, 1'b0, 1'b0, 1'b0, 3'd1, rg_stat, 6'd7, 4'd1});
 
@@ -85,6 +101,7 @@ module mkJtaggDtm (JtaggDtm_IFC);
       rg_data   <= truncate (r.result);
       if (r.status != external_control_rsp_status_ok && rg_stat == 0) rg_stat <= 2;
       rg_flight <= False;
+      pw_rsp.send;
    endrule
 
    (* fire_when_enabled *)
@@ -99,25 +116,35 @@ module mkJtaggDtm (JtaggDtm_IFC);
          rg_sel <= 0;
       else if ((ce1 | ce2) == 1 && shift == 0) begin
          rg_sel <= (ce1 == 1) ? 1 : 2;
-         if (ce1 == 1)
+         rw_capture.wset ((ce1 == 1) ? 1 : 2);
+         if (ce1 == 1) begin
             rg_dr <= {rg_addr, rg_data, (rg_flight ? 2'd3 : rg_stat)};
+            // a capture that reports busy makes it sticky, so this scan's own update is ignored
+            // (debug spec 0.13.2: "the data scanned into dmi in this access will be ignored")
+            if (rg_flight && rg_stat == 0) rg_stat <= 3;
+         end
          else
             rg_dr <= dtmcs_v;
       end
       else if (shift == 1 && rg_sel != 0) begin
+         rw_shift.wset (tdi);
          if (rg_sel == 1) rg_dr <= {tdi, rg_dr [40:1]};
          else             rg_dr <= {9'b0, tdi, rg_dr [31:1]};
       end
       else if (update == 1 && rg_sel != 0) begin
          Bit #(41) dr = rg_dr;
          rg_sel <= 0;
+         rw_update.wset ({rg_sel, dr});
          if (rg_sel == 2) begin
             if (dr [16] == 1 || dr [17] == 1) rg_stat <= 0;   // dmireset, dmihardreset
          end
          else if (rg_flight) begin
             if (rg_stat == 0) rg_stat <= 3;
+            pw_ignored.send;
          end
-         else if (rg_stat == 0 && (dr [1:0] == 1 || dr [1:0] == 2)) begin
+         else if (rg_stat != 0)
+            pw_ignored.send;
+         else if (dr [1:0] == 1 || dr [1:0] == 2) begin
             Bit #(7)  a = dr [40:34];
             Bit #(32) d = dr [33:2];
             rg_addr   <= a;
@@ -135,6 +162,11 @@ module mkJtaggDtm (JtaggDtm_IFC);
       w_pins <= v;
    endmethod
    method Bit #(1) tdo = rg_dr [0];
+   method tr_capture = rw_capture.wget;
+   method tr_shift   = rw_shift.wget;
+   method tr_update  = rw_update.wget;
+   method tr_ignored = pw_ignored;
+   method tr_rsp     = pw_rsp;
    interface Client client;
       interface Get request  = toGet (f_req);
       interface Put response = toPut (f_rsp);
