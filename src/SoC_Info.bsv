@@ -43,6 +43,10 @@
 //   (8..15 reserved: counter frozen)
 // Reads only; writes to SELECT/clear are handled, others return OKAY and
 // are ignored.
+// Trace port (formal/fv/ips/soc_info; unconnected in the SoC, so synthesis
+// prunes it): tr_wr (a write is handled and answered), tr_rd_addr (a read
+// address is checked and its offset queued), tr_rd (a queued read is
+// answered).
 // ================================================================
 
 package SoC_Info;
@@ -84,6 +88,10 @@ interface SoC_Info_IFC;
    method Action note_ext_irq;
    method Action note_uart_irq;
    method Action note_redirect;
+
+   (* always_ready *) method Bool tr_wr;
+   (* always_ready *) method Bool tr_rd_addr;
+   (* always_ready *) method Bool tr_rd;
 endinterface
 
 // ================================================================
@@ -154,6 +162,9 @@ module mkSoC_Info #(int clk_hz) (SoC_Info_IFC);
    PulseWire pw_uart_irq  <- mkPulseWire;
    PulseWire pw_redirect  <- mkPulseWire;
    PulseWire pw_buserr    <- mkPulseWire;
+   PulseWire pw_tr_wr     <- mkPulseWire;
+   PulseWire pw_tr_rd_addr <- mkPulseWire;
+   PulseWire pw_tr_rd     <- mkPulseWire;
 
    // Cross-rule channel for register writes issued by rl_wr (below).
    // rg_perf_select / rg_perf_count are written ONLY by rl_perf_count;
@@ -261,8 +272,8 @@ module mkSoC_Info #(int clk_hz) (SoC_Info_IFC);
                 | (rg_err_iswr ? 2 : 0)
                 | ({24'h0, rg_err_master} << 8)
                 | ({30'h0, rg_err_resp} << 16)));
-      else if (w == 6)
-         v = truncate (rg_err_addr);                       // 0x030 BUSERR_ADDR_LO, 0x034 BUSERR_ADDR_HI
+      else if (w == 6)                                     // 0x030 BUSERR_ADDR_LO, 0x034 BUSERR_ADDR_HI
+         v = (high ? rg_err_addr [63:32] : rg_err_addr [31:0]);   // (HI read LO until formal/fv)
       else if (w == 7)
          v = 0;                                            // 0x038 rsvd (id dropped), 0x03C BUSERR_CLEAR
       else if ((w == 8) || (w == 9))
@@ -312,6 +323,7 @@ module mkSoC_Info #(int clk_hz) (SoC_Info_IFC);
       end
       slave_xactor.i_wr_resp.enq (AXI4_Wr_Resp {bid: wra.awid, bresp: bresp,
                                                  buser: wra.awuser});
+      pw_tr_wr.send;
    endrule
 
    // ---- read handler ----------------------------------------------------
@@ -326,6 +338,7 @@ module mkSoC_Info #(int clk_hz) (SoC_Info_IFC);
       let rda <- pop_o (slave_xactor.o_rd_addr);
       Bool in_range = (rda.araddr >= rg_addr_base) && (rda.araddr < rg_addr_lim);
       f_rd_pending.enq (tuple4 (rda.arid, rda.aruser, in_range, rda.araddr - rg_addr_base));
+      pw_tr_rd_addr.send;
    endrule
 
    rule rl_rd_data;
@@ -336,6 +349,7 @@ module mkSoC_Info #(int clk_hz) (SoC_Info_IFC);
                                                 rresp: (in_range ? axi4_resp_okay : axi4_resp_decerr),
                                                 rlast: True,
                                                 ruser: aruser});
+      pw_tr_rd.send;
    endrule
 
    // ---- INTERFACE
@@ -371,6 +385,10 @@ module mkSoC_Info #(int clk_hz) (SoC_Info_IFC);
    endmethod
 
    interface slave = slave_xactor.axi_side;
+
+   method Bool tr_wr      = pw_tr_wr;
+   method Bool tr_rd_addr = pw_tr_rd_addr;
+   method Bool tr_rd      = pw_tr_rd;
 
 endmodule
 

@@ -3,6 +3,8 @@
 // the Flute SoC.  Address map (offset from base):
 //   0x00  LED output (8 bits, read/write)
 //   0x04  Button input (bit 0 = BTN1, read-only)
+// Trace port (formal/fv/ips/gpio; unconnected in the SoC, so synthesis prunes it): tr_wr / tr_rd,
+// a write (its AW and W) / a read is handled and its response enqueued in that cycle.
 // ================================================================
 
 package AXI4_GPIO;
@@ -38,6 +40,9 @@ interface AXI4_GPIO_IFC;
 
    (* always_ready *) method Bit #(8) leds;
    (* always_enabled *) method Action btn1 (Bit #(1) v);
+
+   (* always_ready *) method Bool tr_wr;
+   (* always_ready *) method Bool tr_rd;
 endinterface
 
 // ================================================================
@@ -53,6 +58,9 @@ module mkAXI4_GPIO (AXI4_GPIO_IFC);
 
    Reg #(Bit #(8)) rg_leds <- mkReg (0);
    Reg #(Bit #(1)) rg_btn1 <- mkReg (0);
+
+   PulseWire pw_wr <- mkPulseWire;
+   PulseWire pw_rd <- mkPulseWire;
 
    // ----------------------------------------------------------------
    // Write handler
@@ -79,6 +87,7 @@ module mkAXI4_GPIO (AXI4_GPIO_IFC);
 
       let wrr = AXI4_Wr_Resp {bid: wra.awid, bresp: bresp, buser: wra.awuser};
       slave_xactor.i_wr_resp.enq (wrr);
+      pw_wr.send;
    endrule
 
    // ----------------------------------------------------------------
@@ -108,6 +117,7 @@ module mkAXI4_GPIO (AXI4_GPIO_IFC);
 			      rlast: True,
 			      ruser: rda.aruser};
       slave_xactor.i_rd_data.enq (rdr);
+      pw_rd.send;
    endrule
 
    // ----------------------------------------------------------------
@@ -132,6 +142,9 @@ module mkAXI4_GPIO (AXI4_GPIO_IFC);
    method Action btn1 (Bit #(1) v);
       rg_btn1 <= v;
    endmethod
+
+   method Bool tr_wr = pw_wr;
+   method Bool tr_rd = pw_rd;
 endmodule
 
 endpackage

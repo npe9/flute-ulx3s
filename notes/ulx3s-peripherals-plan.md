@@ -570,5 +570,12 @@ eight hand-off groups and its FIFO contract: the controller's state at each cloc
 each request, the monitor's bank model and both FIFOs as invariants.  abc pdr ran an hour without
 converging.  spec bmc 76 (no request before init: requests queued during init make deep bmc
 intractable), cover (5, by step 100); 18 mutants, all caught (16 by spec).
-All the BSV blocks are ported.  RVFI stays: riscv-formal
+AXI4_GPIO and SoC_Info ported (no formal before): each gains an always-present trace port
+(GPIO: register write / read; SoC_Info: write, read address taken, read data), unconnected in the
+SoC.  GPIO: prove depth 4, spec bmc 10, cover; 19 mutants, all by spec.  SoC_Info: the whole
+register map, device table, bus-error capture and perf counters specified; prove depth 4 (13 s),
+spec bmc 10, cover; 30 mutants, all caught (errsat and perfsat by induction only).  Porting
+SoC_Info found BUSERR_ADDR_HI (0x034) returning the low word; fixed (no software read it).
+Remaining blocks without formal: Uart_Pins, Uart_DMI_Bridge, the JTAG blocks, RO_TRNG.
+The original BSV blocks are ported.  RVFI stays: riscv-formal
 needs the core to emit its trace port; it is output-only and off unless RISCV_FORMAL is defined.

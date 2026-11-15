@@ -85,6 +85,8 @@ ips/<ip>/            <ip>.cfg, <ip>.regs, <ip>_env.sv, <ip>_wb.sv (the bound che
 | regbus | src/AXI4_RegBus.bsv (bsc) | request start / zero-strobe skip (with we), done, timeout, watchdog count | prove (watchdog 7) and prove255 (the SoC's 255): AXI side via `axi4_sb_vip`, bus side via `regbus_vip` as source, requests in AXI order with lane and strobes, completion at ack or watchdog, responses in order with id, lane and SLVERR; spec (bmc 10 `FV_NO_INV`), cover | 13 (slverr, rdzero: past spec depth; prove only) |
 | spi | src/AXI4_SPI.bsv (bsc) | register write / read, TX enqueue, frame start (byte as queued) / end, RX push / pop | prove (depth 6, SCKDIV <= 1 while busy: AXI side via `axi4_sb_vip` + in-order `axi4_sb_order`, decode and DECERR, registers and reset values, TX/RX FIFO order, CS (auto / hold / default), IRQ; SCK / MOSI / CS against the traced frame via `spi_host_mon`, MISO loopback into RX), spec (bmc 8 `FV_NO_INV`), cover | 19 (7 also by spec) |
 | sdram | src/Sdram_Controller.bsv (bsc, mkSdram_Controller_50) | request taken (the request), read chunk enqueued (the chunk) | prove (k-induction depth 2; power-up pause 2) and prove_real (the SoC's 10000): pins via `sdram_host_mon` (init sequence, ACT/RW/REF/MRS timing per bank, tREFI, DQ drive), first command after the pause, init bound, REF at least every 150 clocks; requests accepted below 4, taken in order after init; the fixed command schedule from each take (ACT, READ/WRITE per burst, auto-precharge on the last, write data and masks per beat); read chunks at their times with the CAS-offset samples, responses in order, never more than 8; spec (bmc 76 `FV_NO_INV`, no request before init: init and the first one or two requests), cover (5 covers by step 100, `FV_SPEC_LATE` as spec) | 18, the old 14 + 4 (16 also by spec; refresh, credit: past spec depth) |
+| gpio | src/AXI4_GPIO.bsv (bsc) | register write, register read | prove (depth 4: AXI side via `axi4_sb_vip`, window from init, DECERR outside it or at offset >= 8, LED write (strobe 0, lane 0), LED and BTN1 read (BTN in the upper lane, sampled one clock earlier), ids, rlast, reset values; the master port never issues, irq 0), spec (bmc 10 `FV_NO_INV`), cover | 19 (all also by spec) |
+| soc_info | src/SoC_Info.bsv (bsc) | register write, read address taken, read data | prove (depth 4: the register map (magic, version, features, clk_hz, memory size, the 16-entry device table), bus-error capture (first error, count saturating, BUSERR_CLEAR wins over a same-clock error), perf counters (select, clear wins, increment from the previous clock, saturation), window and DECERR, ids and lanes; BUILD_DATE as a range), spec (bmc 10 `FV_NO_INV`), cover | 30 (28 also by spec; errsat, perfsat: saturation, by induction only) |
 
 Work trees go in `build/fv/<ip>/<check>/`.
 
@@ -155,3 +157,11 @@ FV_RTL_ROOT=build/fv/stage python3 ...               # against a staged RTL tree
 Tools: the sv-yosys build (Yosys with `bind`), `FV_YOSYS_DIR`; sby and boolector on PATH.  sby
 runs yosys through `bin/yosys_sby.sh`, which drops the `-fast` that sby's AIGER step (abc
 engines) passes to an abc pass that no longer has it.
+
+sv-yosys pitfalls seen in checkers: a constant table written as a function with a `case` becomes a
+`$mem_v2` ROM (proc_rom) that evaluates wrongly, and nested function calls (a table lookup inside
+another function, called twice in one expression) gave wrong values; write tables as a localparam
+vector with a part-select, and repeated lookups as submodule instances (soc_info_r32).  `eval` is
+unreliable on these netlists; use `sat -set ... -show`.  Guard invariants with `rst_n` only:
+bsc's reset method leaves FIFO contents junk for a clock, so `!rst`-style guards let induction
+start there.
