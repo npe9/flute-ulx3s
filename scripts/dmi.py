@@ -146,6 +146,7 @@ class DMI:
             SCALE = SIM_SCALE
         self.fd = open_serial(port, baud)
         self.armed = False
+        self.last = 0.0          # monotonic time of the bridge's last byte from us / response
         self.buf = b""
 
     def close(self):
@@ -161,6 +162,7 @@ class DMI:
     def arm(self):
         os.write(self.fd, MAGIC)
         self.armed = True
+        self.last = time.monotonic()
         # Validate: dmstatus low nibble is the version (2 = spec 0.13).
         for _ in range(3):
             try:
@@ -176,9 +178,20 @@ class DMI:
         )
 
     def req(self, op, addr, data, _reattempts=2):
+        # The armed bridge disarms after ~1 s without a byte (50M cycles: 1 s at 50 MHz, 2 s at
+        # 25 MHz).  After a pause that may have crossed it, wait until it surely has, and arm
+        # again: a request sent to a disarmed bridge goes to the console, and MAGIC sent to a
+        # still-armed one is parsed as a request.
+        if self.armed and time.monotonic() - self.last >= 0.8 * SCALE:
+            time.sleep(max(0.0, self.last + 2.2 * SCALE - time.monotonic()))
+            os.write(self.fd, MAGIC)
+            time.sleep(0.05)
         os.write(self.fd, bytes([op, addr & 0x7F]) + struct.pack(">I", data & 0xFFFFFFFF))
+        self.last = time.monotonic()
         try:
-            return self._response(op, 2.0 * SCALE)
+            r = self._response(op, 2.0 * SCALE)
+            self.last = time.monotonic()
+            return r
         except TimeoutError:
             if _reattempts <= 0:
                 raise
@@ -200,6 +213,7 @@ class DMI:
                     break
             os.write(self.fd, MAGIC)
             time.sleep(0.05)
+            self.last = time.monotonic()
             return self.req(op, addr, data, _reattempts - 1)
 
     def _response(self, op, timeout_s):

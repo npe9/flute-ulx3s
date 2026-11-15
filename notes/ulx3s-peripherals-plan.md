@@ -585,6 +585,22 @@ mutants, all caught (25 also by spec; the overflow and FIFO-depth mutants need 1
 bmc).  A TX-pin-to-RX-pin line check (vip/uart/uart_line_src) is in uart_pins_real `line`
 (bmc 96, ~2 h, not gated).  fvgen gains `bsvwrap` (a formal-only wrapper package elaborating
 several parameterisations of one src package) and multiple tops per [ip].
-Remaining blocks without formal: Uart_DMI_Bridge, the JTAG blocks, RO_TRNG.
+Uart_DMI_Bridge ported, and porting it found three bugs (all in the promoted lx46 bit):
+- Dead timeouts.  bsc's urgency (G0010) put rl_feed ahead of rl_timeout, and rl_feed's guard
+  is nearly always true, so neither the 10 ms magic timeout nor the 1 s frame timeout ever
+  fired.  A host that died while armed left the bridge in FRAME forever, eating console input
+  until reset; a partial magic ending in 0xDB was never released.  dmi.py's retry assumed the
+  timeout and so sent frames out of alignment.
+- Reorder.  With the console FIFO full, replayed magic prefixes and later pass-through bytes
+  could swap order.  Replays and pass-through bytes are now one token queue (f_replay of
+  {count, has-byte, byte}); rl_feed expands each token in order.
+- The idle timer paused while the console was full; it now always counts, and arming resets it.
+Trace port: feed, drop, response lost, timeout, DMI done.  The white box models the host
+protocol, both timeouts to the clock, the request and response streams and dbg_tx_pending, with
+all four SizedFIFOs as invariants.  prove depth 4 at 24/10-clock timeouts (7.5 min) and at the
+real 50 M / 500 k (uart_dmi_real, 9 min); cover; 26 mutants, all by prove (MUT_LIMIT=3600).
+test/Uart_DMI_Tb now checks the trailing-0xDB release (fails on the old bridge) and is in the
+gate; dmi.py re-arms after an idle of 0.8 s or more by waiting out the frame timeout first.
+Remaining blocks without formal: the JTAG blocks, RO_TRNG.
 The original BSV blocks are ported.  RVFI stays: riscv-formal
 needs the core to emit its trace port; it is output-only and off unless RISCV_FORMAL is defined.

@@ -9,10 +9,11 @@
 //
 //    DB 53 44 4D 01 02 03 04    ("\xDBSDM\x01\x02\x03\x04")
 //
-// appears, bytes pass straight through to the console.  Pass-through
-// is LOSSLESS: on a partial magic match followed by a mismatch, the
-// buffered candidate bytes (including the 0xDB itself) are replayed
-// ahead of the stream (they are constants, see fn_magic).  This
+// appears, bytes pass straight through to the console, in order.
+// Pass-through is LOSSLESS (unless 16 tokens already wait for a full
+// console): on a partial magic match followed by a mismatch, the
+// buffered candidate bytes (including the 0xDB itself) are given back
+// in place (they are constants, see fn_magic).  This
 // matters because the binary UART bootloader image contains ~11k
 // 0xDB bytes; an earlier drop-on-mismatch design ate one byte per
 // occurrence and corrupted every kernel load.
@@ -55,15 +56,15 @@
 // A ~1 s RX-idle timeout while armed disarms the bridge so a
 // disconnected or crashed host cannot wedge the console path.
 //
-// Scheduling note: the rx_from_uart put-method is the sole writer of
-// f_replay (pass-through queue) and never touches f_console; a single
-// feeder rule owns f_console.  All FIFO/FIFOF writes from rules have
-// exactly one writer per FIFO.  This keeps the BSV scheduler happy.
+// Scheduling note: f_replay (the pass-through token queue) is written
+// by the rx_from_uart put-method and by rl_timeout (which the method
+// pre-empts: a byte resets the idle timer anyway); a single feeder
+// rule owns f_console.  formal/fv/ips/uart_dmi specifies the bridge.
 // ================================================================
 
 package Uart_DMI_Bridge;
 
-export Uart_DMI_Bridge_IFC (..), mkUart_DMI_Bridge;
+export Uart_DMI_Bridge_IFC (..), mkUart_DMI_Bridge, mkUart_DMI_Bridge_P;
 
 import FIFOF        :: *;
 import GetPut       :: *;
@@ -88,6 +89,16 @@ interface Uart_DMI_Bridge_IFC;
 
    // Toward SoC_Top.server_external_control.
    interface Client #(Control_Req, Control_Rsp) client;
+
+   // Trace port (always present, unconnected in the SoC; formal/fv/ips/uart_dmi specifies it):
+   // tr_feed (a byte enters the console FIFO), tr_drop (a pass-through token dropped: f_replay
+   // full), tr_rsp_lost (a 'q' / unknown-op response overwritten before issue), tr_timeout (an idle
+   // timeout: partial match or armed), tr_dmi_done (a DMI response taken: armed again).
+   (* always_ready *) method Maybe #(Bit #(8)) tr_feed;
+   (* always_ready *) method Bool tr_drop;
+   (* always_ready *) method Bool tr_rsp_lost;
+   (* always_ready *) method Bool tr_timeout;
+   (* always_ready *) method Bool tr_dmi_done;
 endinterface
 
 // ----------------------------------------------------------------
@@ -96,8 +107,6 @@ typedef enum {ST_HUNT, ST_MAGIC, ST_FRAME,
               ST_DMI_SETUP, ST_DMI_PULSE, ST_DMI_WAIT}
    State deriving (Bits, Eq);
 
-Integer timeout_cycles       = 50_000_000;    // >=1 s at any sys_clk up to 50 MHz (armed)
-Integer magic_timeout_cycles = 500_000;       // ~10-40 ms (partial magic match)
 
 function Bit #(8) fn_magic (Bit #(4) i);
    case (i)
@@ -117,15 +126,27 @@ Bit #(2) dmi_op_write = 2;
 
 // ----------------------------------------------------------------
 
+// The SoC's bridge: timeouts >=1 s armed at any sys_clk up to 50 MHz, ~10-40 ms on a partial
+// magic match.  (formal/fv instantiates mkUart_DMI_Bridge_P with short timeouts as well.)
 (* synthesize *)
 module mkUart_DMI_Bridge (Uart_DMI_Bridge_IFC);
+   let m <- mkUart_DMI_Bridge_P (50_000_000, 500_000);
+   return m;
+endmodule
+
+module mkUart_DMI_Bridge_P #(Integer timeout_cycles, Integer magic_timeout_cycles)
+                           (Uart_DMI_Bridge_IFC);
 
    // DMI <-> Control_Req conversion, reused from the JTAG path.
    Jtag_Control_Adapter_IFC adapter <- mkJtag_Control_Adapter;
 
-   // Pass-through queue: sole writer is the rx_from_uart method; sole
-   // reader is rl_feed.  Decouples the tap from console FIFO fullness.
-   FIFOF #(Bit #(8)) f_replay <- mkSizedFIFOF (16);
+   // Pass-through queue of tokens {k, has, b}: the magic prefix fn_magic(0..k-1), then b if has.
+   // Writers: the rx_from_uart method (a byte; a mismatch's prefix and byte) and rl_timeout (a
+   // timed-out prefix); reader: rl_feed.  One queue keeps the console stream in arrival order:
+   // a prefix given back after a mismatch follows the bytes queued before it, even when the
+   // console FIFO is full (a separate replay counter, fed first, once let it jump ahead).
+   FIFOF #(Bit #(13)) f_replay <- mkSizedFIFOF (16);
+   Reg #(Bit #(4))    rg_feed_pos <- mkReg (0);    // bytes of f_replay.first already fed
 
    // Console byte FIFO: sole writer is rl_feed.
    FIFOF #(Bit #(8)) f_console <- mkSizedFIFOF (32);
@@ -143,29 +164,35 @@ module mkUart_DMI_Bridge (Uart_DMI_Bridge_IFC);
    Reg #(Bit #(2))  rg_dmi_op    <- mkReg (0);
    Reg #(Bit #(26)) rg_idle_cnt  <- mkReg (0);
 
-   // Partial-magic replay: rg_replay_n bytes fn_magic(rg_replay_pos),
-   // fn_magic(rg_replay_pos+1), ... still owed to the console.
-   Reg #(Bit #(4))  rg_replay_n    <- mkReg (0);
-   Reg #(Bit #(4))  rg_replay_pos <- mkReg (1);
-
    // Response sources, drained by a single rule into f_rsp.
    Reg #(Bool)        rg_dmi_rsp_v <- mkReg (False);
    Reg #(Bit #(40))   rg_dmi_rsp   <- mkRegU;
    Reg #(Maybe #(Bit #(40))) rg_rsp_req <- mkReg (Invalid);
 
+   // trace port
+   RWire #(Bit #(8)) rw_feed        <- mkRWire;
+   PulseWire         pw_drop        <- mkPulseWire;
+   PulseWire         pw_rsp_lost    <- mkPulseWire;
+   PulseWire         pw_timeout     <- mkPulseWire;
+   PulseWire         pw_dmi_done    <- mkPulseWire;
+
    // ----------------------------------------------------------------
-   // Console feeder: replayed partial-magic prefix bytes first, then
-   // the pass-through queue.
-   rule rl_feed (f_console.notFull);
-      if (rg_replay_n != 0) begin
-         f_console.enq (fn_magic (rg_replay_pos));
-         rg_replay_pos <= rg_replay_pos + 1;
-         rg_replay_n   <= rg_replay_n - 1;
-      end
-      else if (f_replay.notEmpty) begin
-         f_console.enq (f_replay.first);
+   // Console feeder: one byte per clock from the head token, prefix first.  (It once fired on
+   // every clock the console had room and, sharing registers with rl_timeout and more urgent,
+   // kept both idle timeouts from ever firing; formal/fv/uart_dmi found it.  It now shares
+   // nothing with rl_timeout but f_replay, whose enq and deq do not conflict.)
+   rule rl_feed (f_console.notFull && f_replay.notEmpty);
+      Bit #(4) k   = f_replay.first [12:9];
+      Bool     has = f_replay.first [8] == 1;
+      Bit #(8) v   = (rg_feed_pos < k) ? fn_magic (rg_feed_pos) : f_replay.first [7:0];
+      f_console.enq (v);
+      rw_feed.wset (v);
+      if (rg_feed_pos + 1 == k + (has ? 1 : 0)) begin
          f_replay.deq;
+         rg_feed_pos <= 0;
       end
+      else
+         rg_feed_pos <= rg_feed_pos + 1;
    endrule
 
    // ----------------------------------------------------------------
@@ -183,14 +210,14 @@ module mkUart_DMI_Bridge (Uart_DMI_Bridge_IFC);
                 ? fromInteger (timeout_cycles - 1)
                 : fromInteger (magic_timeout_cycles - 1);
       if (rg_idle_cnt >= lim) begin
-         if ((rg_state == ST_MAGIC) && (rg_replay_n == 0)) begin
-            rg_replay_n   <= rg_sync_idx;
-            rg_replay_pos <= 0;
-         end
+         // a partial match gives its prefix back (waiting, if the queue is full, for room)
+         if (rg_state == ST_MAGIC) f_replay.enq ({rg_sync_idx, 1'b0, 8'h00});
          rg_sync_idx <= 0;
          rg_state    <= ST_HUNT;
+         rg_idle_cnt <= 0;    // or the next partial match would time out at once
+         pw_timeout.send;
       end
-      else if (rg_replay_n == 0)
+      else
          rg_idle_cnt <= rg_idle_cnt + 1;
    endrule
 
@@ -219,6 +246,7 @@ module mkUart_DMI_Bridge (Uart_DMI_Bridge_IFC);
          rg_dmi_rsp   <= {8'h00, adapter.dmi.rsp_data};
          rg_dmi_rsp_v <= True;
          adapter.dmi.rsp_ready (1);
+         pw_dmi_done.send;
          rg_state    <= ST_FRAME;
          rg_cnt      <= 0;
          rg_idle_cnt <= 0;
@@ -268,9 +296,12 @@ module mkUart_DMI_Bridge (Uart_DMI_Bridge_IFC);
               if (b == fn_magic (0)) begin
                  rg_sync_idx <= 1;
                  rg_state    <= ST_MAGIC;
+                 rg_idle_cnt <= 0;    // the idle timer runs from this byte
               end
               else if (f_replay.notFull)
-                 f_replay.enq (b);
+                 f_replay.enq ({4'd0, 1'b1, b});
+              else
+                 pw_drop.send;
               // pass-through queue full: drop the byte (would need the
               // CPU to have stopped reading the console for a long
               // while; the 16-deep queue drains in microseconds).
@@ -287,26 +318,24 @@ module mkUart_DMI_Bridge (Uart_DMI_Bridge_IFC);
                     rg_sync_idx <= rg_sync_idx + 1;
               end
               else begin
-                 // Mismatch: replay the buffered prefix bytes
-                 // fn_magic(0..rg_sync_idx-1) through rl_feed -- they
-                 // are constants, and the replay MUST include the 0xDB
-                 // itself or every bare 0xDB in a binary load is
-                 // silently dropped (one-byte stream shift).  Guard
-                 // against clobbering an in-flight replay (unreachable
-                 // at UART byte spacing, but cheap to be safe).
-                 if (rg_replay_n == 0) begin
-                    rg_replay_n   <= rg_sync_idx;
-                    rg_replay_pos <= 0;
-                 end
-                 if (b == fn_magic (0)) begin
+                 // Mismatch: give back the buffered prefix bytes
+                 // fn_magic(0..rg_sync_idx-1) -- they are constants, and
+                 // the replay MUST include the 0xDB itself or every bare
+                 // 0xDB in a binary load is silently dropped (one-byte
+                 // stream shift) -- then the byte, unless it is a 0xDB
+                 // (which starts a new match).  One token, in order.
+                 Bool again = (b == fn_magic (0));
+                 if (f_replay.notFull)
+                    f_replay.enq ({rg_sync_idx, again ? 1'b0 : 1'b1, b});
+                 else
+                    pw_drop.send;
+                 if (again) begin
                     rg_sync_idx <= 1;
                     rg_state    <= ST_MAGIC;
                  end
                  else begin
                     rg_sync_idx <= 0;
                     rg_state    <= ST_HUNT;
-                    if (f_replay.notFull)
-                       f_replay.enq (b);
                  end
               end
            end
@@ -332,9 +361,12 @@ module mkUart_DMI_Bridge (Uart_DMI_Bridge_IFC);
                     8'h71: begin    // 'q': disarm
                        rg_state  <= ST_HUNT;
                        rg_rsp_req <= tagged Valid ({8'h00, 32'h0});
+                       if (isValid (rg_rsp_req)) pw_rsp_lost.send;
                     end
-                    default:
+                    default: begin
                        rg_rsp_req <= tagged Valid ({8'h02, 32'h0});    // unknown op
+                       if (isValid (rg_rsp_req)) pw_rsp_lost.send;
+                    end
                  endcase
               end
               else
@@ -356,6 +388,12 @@ module mkUart_DMI_Bridge (Uart_DMI_Bridge_IFC);
    method Bool dbg_tx_pending = f_dbg_tx.notEmpty || (rg_tx_cnt != 0);
 
    interface Client client = adapter.client;
+
+   method tr_feed        = rw_feed.wget;
+   method tr_drop        = pw_drop;
+   method tr_rsp_lost    = pw_rsp_lost;
+   method tr_timeout     = pw_timeout;
+   method tr_dmi_done    = pw_dmi_done;
 
 endmodule
 

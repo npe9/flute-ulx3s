@@ -17,7 +17,9 @@
 //   0: data containing bare and consecutive 0xDBs   -> console, lossless
 //   1: partial magic (DB 53 44) then mismatch       -> console, lossless
 //   2: trailing 0xDB then >10 ms idle               -> 0xDB released to
-//      the console by the ST_MAGIC idle timeout
+//      the console by the ST_MAGIC idle timeout, before phase 3 (an
+//      earlier version idled less than the timeout and passed because
+//      phase 3's 0xDB released it as a mismatch; the timeout never fired)
 //   3: full magic + 'q' disarm request              -> consumed; 6-byte
 //      response on dbg_tx; nothing on console
 //   4: ordinary byte after disarm                   -> console
@@ -91,7 +93,7 @@ endfunction
 
 function Bit #(32) fn_phase_idle (Bit #(32) ph);
    // idle cycles AFTER the phase's last byte
-   if (ph == 2) return 200_000;    // > 10 ms ST_MAGIC timeout (cycles)
+   if (ph == 2) return 600_000;    // > the 500k-cycle ST_MAGIC timeout
    else if (ph == 5) return 20_000;
    else return 10;
 endfunction
@@ -123,6 +125,7 @@ module mkUart_DMI_Tb (Empty);
    Reg #(Bit #(32)) rg_errs   <- mkReg (0);
    Reg #(Bool)      rg_checked <- mkReg (False);
    Reg #(Bit #(32)) rg_settle <- mkReg (0);
+   Reg #(Bool)      rg_late   <- mkReg (False);    // phase 2's 0xDB not out by phase 3
 
    let nbytes = fn_phase_nbytes (rg_phase);
    let idle   = fn_phase_idle  (rg_phase);
@@ -144,6 +147,10 @@ module mkUart_DMI_Tb (Empty);
       else if (rg_idle < idle)
          rg_idle <= rg_idle + 1;
       else if (rg_phase < 5) begin
+         if (rg_phase == 2 && rg_chk != 12) begin
+            rg_late <= True;
+            $display ("FAIL: phase 2's trailing 0xDB not released by the idle timeout (console %0d/12)", rg_chk);
+         end
          rg_phase <= rg_phase + 1;
          rg_idx   <= 0;
          rg_idle  <= 0;
@@ -186,7 +193,7 @@ module mkUart_DMI_Tb (Empty);
          rg_settle <= rg_settle + 1;
       else begin
          rg_checked <= True;
-         if ((rg_errs == 0) && (rg_chk == 13) && (rg_dchk == 6))
+         if ((rg_errs == 0) && (rg_chk == 13) && (rg_dchk == 6) && ! rg_late)
             $display ("UART_DMI_TB PASS (console 13 bytes, dbg 6 bytes)");
          else
             $display ("UART_DMI_TB FAIL: errs=%0d console=%0d/13 dbg=%0d/6",
