@@ -220,12 +220,17 @@ def gen(ip, c, work, rtl_override=None, only=None):
     rtl = [src(r) for r in c.get('rtl', '').split()]
     bsv_v = []
     if 'bsv' in c:                       # a BSV module: compiled with the SoC's flags, no defines
-        bsrc, btop = c['bsv'].split()
+        bsrc, *btops = c['bsv'].split()   # the package, then its module(s) (several: one per check)
         out = os.path.abspath(os.path.join(work, 'bsv'))
         if os.path.isdir(out):
             shutil.rmtree(out)
-        r = subprocess.run(['make', '-s', '-C', REPO, 'fv-bsv', f'FV_BSV_SRC={src(bsrc)}',
-                            f'FV_BSV_TOP={btop}', f'FV_BSV_OUT={out}'], capture_output=True, text=True)
+        # bsvwrap: a formal/fv package of (* synthesize *) wrappers instantiating the package's
+        # parameterized module; the (possibly mutated) package is found through FV_BSV_PATH.
+        wrap = c.get('bsvwrap')
+        mk = ['make', '-s', '-C', REPO, 'fv-bsv', f'FV_BSV_TOP={" ".join(btops)}', f'FV_BSV_OUT={out}']
+        mk += [f'FV_BSV_SRC={fvpath(wrap)}', f'FV_BSV_PATH={os.path.dirname(src(bsrc))}'] if wrap else \
+              [f'FV_BSV_SRC={src(bsrc)}']
+        r = subprocess.run(mk, capture_output=True, text=True)
         if r.returncode:
             sys.exit(f'fvgen: bsc failed for {src(bsrc)}:\n{r.stdout}{r.stderr}')
         lib = subprocess.run([os.path.join(REPO, 'scripts', 'bsc_lib.sh')], capture_output=True,
@@ -270,7 +275,8 @@ def gen(ip, c, work, rtl_override=None, only=None):
         s.append(f'read_verilog -sv -formal {dflags} ' + ' '.join(os.path.basename(f) for f in fv + [env]))
         s.append(f'prep -top {c["top"]}')
         for b in binds:
-            s.append(f'select -assert-count 1 t:{b} t:$paramod\\{b}\\* %u')   # parameterized too
+            # parameterized too ($paramod$<hash>\\<name> when the parameter list is long)
+            s.append(f'select -assert-count 1 t:{b} t:$paramod\\{b}\\* %u t:$paramod$*\\{b} %u')
         taps = c.get('taps', '').split()
         if taps:                # internals inside library submodules (bsc FIFOs): a bind cannot
             s.append('flatten')  # name them, so the checker port is left open and driven here

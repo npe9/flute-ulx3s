@@ -440,13 +440,15 @@ clean:
 	$(MAKE) -C sw clean 2>/dev/null || true
 	$(MAKE) -C templeos clean 2>/dev/null || true
 
-# fv-bsv: one BSV module to Verilog for formal/fv (bin/fvgen.py), with the SoC's flags and no
+# fv-bsv: BSV modules to Verilog for formal/fv (bin/fvgen.py), with the SoC's flags and no
 # formal defines: FV_BSV_SRC (the .bsv, its directory searched first, so a mutant can stand in for
-# a src/ package), FV_BSV_TOP (the module), FV_BSV_OUT (the output directory; Verilog in v/).
+# a src/ package), FV_BSV_TOP (the modules), FV_BSV_PATH (optional directories searched next: a
+# formal/fv wrapper package's mutated src/ package), FV_BSV_OUT (the output directory; Verilog in v/).
 .PHONY: fv-bsv
 fv-bsv:
 	mkdir -p $(FV_BSV_OUT)/bsc $(FV_BSV_OUT)/v
-	$(BSC) -u -verilog -g $(FV_BSV_TOP) $(BSC_FLAGS) $(DEFINES) \
-	    -p $(abspath $(dir $(FV_BSV_SRC))):$(BSC_PATH) -bdir $(FV_BSV_OUT)/bsc -vdir $(FV_BSV_OUT)/v \
+	$(BSC) -u -verilog $(addprefix -g ,$(FV_BSV_TOP)) $(BSC_FLAGS) $(DEFINES) \
+	    -p $(abspath $(dir $(FV_BSV_SRC))):$(if $(FV_BSV_PATH),$(FV_BSV_PATH):)$(BSC_PATH) \
+	    -bdir $(FV_BSV_OUT)/bsc -vdir $(FV_BSV_OUT)/v \
 	    $(FV_BSV_SRC) > $(FV_BSV_OUT)/bsc.log 2>&1 || { tail -20 $(FV_BSV_OUT)/bsc.log; exit 1; }
 

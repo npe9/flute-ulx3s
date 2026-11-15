@@ -4,16 +4,16 @@
 // through taps (flatten + connect), since a bind cannot name a library submodule's registers.
 //   hasodata == (n != 0), D_OUT == the model head; the ring holds the model's entries 1..n-1 from
 //   head, in order; ring_empty, not_ring_full and the pointers are consistent with that count.
-// en: the user's assertion enable (out of reset).
+// en: the user's assertion enable (out of reset).  NW: the width of n (fv_queue's NW).
 `default_nettype none
 module sizedfifo_inv #(parameter integer W = 8, parameter integer DEPTH = 4, parameter integer CW = 2,
-                       parameter integer D = 4) (
+                       parameter integer D = 4, parameter integer NW = 4) (
     input wire                   en,
     input wire                   hasodata, ring_empty, not_ring_full,
     input wire [CW-1:0]          head, tail,
     input wire [W*(DEPTH-1)-1:0] arr,              // word i at [W*i +: W]
     input wire [W-1:0]           dout,
-    input wire [3:0]             n, input wire [W*D-1:0] ents
+    input wire [NW-1:0]          n, input wire [W*D-1:0] ents
 );
     localparam integer R = DEPTH - 1;
     wire [CW:0] h = {1'b0, head}, tl = {1'b0, tail};

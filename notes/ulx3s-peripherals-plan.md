@@ -576,6 +576,15 @@ SoC.  GPIO: prove depth 4, spec bmc 10, cover; 19 mutants, all by spec.  SoC_Inf
 register map, device table, bus-error capture and perf counters specified; prove depth 4 (13 s),
 spec bmc 10, cover; 30 mutants, all caught (errsat and perfsat by induction only).  Porting
 SoC_Info found BUSERR_ADDR_HI (0x034) returning the low word; fixed (no software read it).
-Remaining blocks without formal: Uart_Pins, Uart_DMI_Bridge, the JTAG blocks, RO_TRNG.
+Uart_Pins ported (no formal before): an always-present trace port (TX byte loaded / stop bit
+done; RX start, glitch, each sampled bit, byte, framing error, overflow).  The white box models
+the line from the pins (TX frames decoded by vip/uart/uart_tx_mon; RX sampled through the
+3-flop sync at the DUT's own phase) and both 16-deep SizedFIFOs as invariants.  prove depth 4 at
+4 and 5 clocks/bit, and at the real 50 and 434 (uart_pins_real); spec bmc 48/56, cover; 30
+mutants, all caught (25 also by spec; the overflow and FIFO-depth mutants need 17 frames, past
+bmc).  A TX-pin-to-RX-pin line check (vip/uart/uart_line_src) is in uart_pins_real `line`
+(bmc 96, ~2 h, not gated).  fvgen gains `bsvwrap` (a formal-only wrapper package elaborating
+several parameterisations of one src package) and multiple tops per [ip].
+Remaining blocks without formal: Uart_DMI_Bridge, the JTAG blocks, RO_TRNG.
 The original BSV blocks are ported.  RVFI stays: riscv-formal
 needs the core to emit its trace port; it is output-only and off unless RISCV_FORMAL is defined.

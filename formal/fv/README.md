@@ -70,8 +70,10 @@ vip/i2c/             i2c_host_mon (an I2C host's wires against its command trace
 vip/spi/             spi_host_mon (an SPI host's SCK/MOSI/CS against its frame trace)
 vip/axi4/            axi4_sb_vip (single-beat AXI4 rules, role parameter), axi4_sb_order (in-order scoreboard)
 vip/sdram/           sdram_host_mon (an SDR SDRAM host's pins: JEDEC init, bank timing, refresh, DQ drive)
+vip/uart/            uart_tx_mon (an 8N1 TXD pin against its frame trace, C clocks per bit),
+                     uart_line_src (a well-formed 8N1 peer driving an RXD)
 vip/bsclib/          sizedfifo_inv (bsc's SizedFIFO against an fv_queue model: for INVARIANTS, by taps)
-vip/common/          fv_queue
+vip/common/          fv_queue (in-order model queue; NW: the count's width, for D > 15)
 ips/<ip>/            <ip>.cfg, <ip>.regs, <ip>_env.sv, <ip>_wb.sv (the bound checker)
 ```
 
@@ -85,6 +87,7 @@ ips/<ip>/            <ip>.cfg, <ip>.regs, <ip>_env.sv, <ip>_wb.sv (the bound che
 | regbus | src/AXI4_RegBus.bsv (bsc) | request start / zero-strobe skip (with we), done, timeout, watchdog count | prove (watchdog 7) and prove255 (the SoC's 255): AXI side via `axi4_sb_vip`, bus side via `regbus_vip` as source, requests in AXI order with lane and strobes, completion at ack or watchdog, responses in order with id, lane and SLVERR; spec (bmc 10 `FV_NO_INV`), cover | 13 (slverr, rdzero: past spec depth; prove only) |
 | spi | src/AXI4_SPI.bsv (bsc) | register write / read, TX enqueue, frame start (byte as queued) / end, RX push / pop | prove (depth 6, SCKDIV <= 1 while busy: AXI side via `axi4_sb_vip` + in-order `axi4_sb_order`, decode and DECERR, registers and reset values, TX/RX FIFO order, CS (auto / hold / default), IRQ; SCK / MOSI / CS against the traced frame via `spi_host_mon`, MISO loopback into RX), spec (bmc 8 `FV_NO_INV`), cover | 19 (7 also by spec) |
 | sdram | src/Sdram_Controller.bsv (bsc, mkSdram_Controller_50) | request taken (the request), read chunk enqueued (the chunk) | prove (k-induction depth 2; power-up pause 2) and prove_real (the SoC's 10000): pins via `sdram_host_mon` (init sequence, ACT/RW/REF/MRS timing per bank, tREFI, DQ drive), first command after the pause, init bound, REF at least every 150 clocks; requests accepted below 4, taken in order after init; the fixed command schedule from each take (ACT, READ/WRITE per burst, auto-precharge on the last, write data and masks per beat); read chunks at their times with the CAS-offset samples, responses in order, never more than 8; spec (bmc 76 `FV_NO_INV`, no request before init: init and the first one or two requests), cover (5 covers by step 100, `FV_SPEC_LATE` as spec) | 18, the old 14 + 4 (16 also by spec; refresh, credit: past spec depth) |
+| uart_pins | src/Uart_Pins.bsv (bsc, mkUART_Pins at 4 / 5 clocks per bit; uart_pins_real: 50, 434) | TX load (byte) / done; RX start, glitch, data sample, byte (stop high), framing error, overflow | prove and prove5 (depth 4: TX queue (16) order and put ready, a frame on TXD via `uart_tx_mon` from the clock after the load, back-to-back stop C+1, tx_busy / done; RX from the pin: the 3-clock synchronizer, start H+1 clocks after the edge (H = C/2) or a glitch, 8 data samples and the stop sample C apart, the byte LSB first, queued (16) or dropped with overflow, framing error; sticky flags; both FIFOs by `sizedfifo_inv`), spec / spec5 (bmc 48 / 56 `FV_NO_INV`), cover (6, by step 84); uart_pins_real: prove50 and prove434 (the shipped rates), line (bmc 96, RXD from `uart_line_src`: every byte arrives in order; ~2 h, not in the gate) | 30 (25 also by spec; rxovf, ovfsticky, trovf, rxdepth: 17 frames; ferrsticky: two framing errors; past spec depth) |
 | gpio | src/AXI4_GPIO.bsv (bsc) | register write, register read | prove (depth 4: AXI side via `axi4_sb_vip`, window from init, DECERR outside it or at offset >= 8, LED write (strobe 0, lane 0), LED and BTN1 read (BTN in the upper lane, sampled one clock earlier), ids, rlast, reset values; the master port never issues, irq 0), spec (bmc 10 `FV_NO_INV`), cover | 19 (all also by spec) |
 | soc_info | src/SoC_Info.bsv (bsc) | register write, read address taken, read data | prove (depth 4: the register map (magic, version, features, clk_hz, memory size, the 16-entry device table), bus-error capture (first error, count saturating, BUSERR_CLEAR wins over a same-clock error), perf counters (select, clear wins, increment from the previous clock, saturation), window and DECERR, ids and lanes; BUILD_DATE as a range), spec (bmc 10 `FV_NO_INV`), cover | 30 (28 also by spec; errsat, perfsat: saturation, by induction only) |
 
@@ -102,6 +105,11 @@ include = vip/crc
 regs    = ips/sdh/sdh.regs sdh_regs     # register spec -> generated shadow module
 bsv     = src/AXI4_RegBus.bsv mkAXI4_RegBus_W   # a BSV module: bsc (make fv-bsv, SoC flags, no
 bsvlib  = FIFO1.v FIFO2.v               #   formal defines) per run, mutants too; + bsc's library
+                                        #   (several modules: one -g each, the env picks by define)
+bsvwrap = ips/uart_pins/Uart_Pins_Fv.bsv   # optional: a formal/fv package of (* synthesize *)
+                                        #   instances of a parameterized src/ module (Integer
+                                        #   parameters: one module per value); bsc finds the
+                                        #   (possibly mutated) src/ package through FV_BSV_PATH
 taps    = dut.wb.p=dut.fifo.data1_reg   # checker port driven after flatten and `script`
                                         #   (inside a library submodule, which a bind cannot
                                         #   name; a ring word: dut.f.arr[0]): induction only;

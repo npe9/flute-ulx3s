@@ -3,6 +3,12 @@
 // (Get/Put of Bit#(8)) and physical TXD/RXD pins, 8N1, one stop
 // bit, mid-bit sampling on RX.  Timing constants come from the
 // proven bluespec-ulx3s design (217 clocks/bit at 25 MHz/115200).
+//
+// Trace port (always present, unconnected in the SoC; formal/fv/ips/uart_pins specifies it):
+// tr_tx_load (a byte leaves the TX FIFO: its start bit goes out), tr_tx_done (its stop bit ends);
+// tr_rx_start (a low line taken in idle), tr_rx_glitch (the start sample is high: back to idle),
+// tr_rx_bit (a data sample), tr_rx_byte (a stop sample high: the byte, queued or dropped),
+// tr_rx_ferr (a stop sample low), tr_rx_ovf (a byte dropped on a full RX FIFO).
 // ================================================================
 
 package Uart_Pins;
@@ -25,6 +31,16 @@ interface UART_Pins_IFC;
    (* always_ready *) method Bool rx_overflow;
    (* always_ready *) method Bool rx_frame_err;
    (* always_ready *) method Bool tx_busy;
+
+   // trace port
+   (* always_ready *) method Maybe #(Bit #(8)) tr_tx_load;
+   (* always_ready *) method Bool              tr_tx_done;
+   (* always_ready *) method Bool              tr_rx_start;
+   (* always_ready *) method Bool              tr_rx_glitch;
+   (* always_ready *) method Maybe #(Bit #(1)) tr_rx_bit;
+   (* always_ready *) method Maybe #(Bit #(8)) tr_rx_byte;
+   (* always_ready *) method Bool              tr_rx_ferr;
+   (* always_ready *) method Bool              tr_rx_ovf;
 endinterface
 
 // ================================================================
@@ -55,6 +71,16 @@ module mkUART_Pins #(Integer clk_hz, Integer baud) (UART_Pins_IFC);
    Reg #(Bool)      rg_overflow  <- mkReg (False);
    Reg #(Bool)      rg_frame_err <- mkReg (False);
 
+   // trace port
+   RWire #(Bit #(8)) rw_tx_load   <- mkRWire;
+   PulseWire         pw_tx_done   <- mkPulseWire;
+   PulseWire         pw_rx_start  <- mkPulseWire;
+   PulseWire         pw_rx_glitch <- mkPulseWire;
+   RWire #(Bit #(1)) rw_rx_bit    <- mkRWire;
+   RWire #(Bit #(8)) rw_rx_byte   <- mkRWire;
+   PulseWire         pw_rx_ferr   <- mkPulseWire;
+   PulseWire         pw_rx_ovf    <- mkPulseWire;
+
    // ----------------------------------------------------------------
    // TX: rg_tx_sh = {stop, data[7:0], start}; rg_tx_bit is the index
    // of the bit currently on the wire (0 = start, driven on load).
@@ -66,6 +92,7 @@ module mkUART_Pins #(Integer clk_hz, Integer baud) (UART_Pins_IFC);
       rg_tx_bit  <= 0;
       rg_tx_cnt  <= 0;
       rg_txd     <= 0;                       // start bit
+      rw_tx_load.wset (f_tx.first);
 `ifdef UART_PROBES
       $display ("[uart] txload %02x", f_tx.first);
 `endif
@@ -78,6 +105,7 @@ module mkUART_Pins #(Integer clk_hz, Integer baud) (UART_Pins_IFC);
          if (rg_tx_bit == 9) begin           // stop bit finished
             rg_tx_busy <= False;
             rg_txd     <= 1;
+            pw_tx_done.send;
 `ifdef UART_PROBES
             $display ("[uart] txdone");
 `endif
@@ -105,6 +133,7 @@ module mkUART_Pins #(Integer clk_hz, Integer baud) (UART_Pins_IFC);
             if (rg_rx_sync == 0) begin
                rg_rx_state <= RX_START;
                rg_rx_cnt   <= 0;
+               pw_rx_start.send;
             end
          end
 
@@ -115,8 +144,10 @@ module mkUART_Pins #(Integer clk_hz, Integer baud) (UART_Pins_IFC);
                   rg_rx_state <= RX_DATA;
                   rg_rx_bit   <= 0;
                end
-               else
+               else begin
                   rg_rx_state <= RX_IDLE;    // glitch
+                  pw_rx_glitch.send;
+               end
             end
             else
                rg_rx_cnt <= rg_rx_cnt + 1;
@@ -126,6 +157,7 @@ module mkUART_Pins #(Integer clk_hz, Integer baud) (UART_Pins_IFC);
             if (rg_rx_cnt == fromInteger (clk_per_bit - 1)) begin
                rg_rx_cnt <= 0;
                rg_rx_sh  <= {rg_rx_sync, rg_rx_sh [7:1]};
+               rw_rx_bit.wset (rg_rx_sync);
                if (rg_rx_bit == 7)
                   rg_rx_state <= RX_STOP;
                else
@@ -140,13 +172,18 @@ module mkUART_Pins #(Integer clk_hz, Integer baud) (UART_Pins_IFC);
                rg_rx_cnt   <= 0;
                rg_rx_state <= RX_IDLE;
                if (rg_rx_sync == 1) begin
+                  rw_rx_byte.wset (rg_rx_sh);
                   if (f_rx.notFull)
                      f_rx.enq (rg_rx_sh);
-                  else
+                  else begin
                      rg_overflow <= True;
+                     pw_rx_ovf.send;
+                  end
                end
-               else
+               else begin
                   rg_frame_err <= True;
+                  pw_rx_ferr.send;
+               end
             end
             else
                rg_rx_cnt <= rg_rx_cnt + 1;
@@ -170,6 +207,15 @@ module mkUART_Pins #(Integer clk_hz, Integer baud) (UART_Pins_IFC);
    method Bool rx_overflow  = rg_overflow;
    method Bool rx_frame_err = rg_frame_err;
    method Bool tx_busy      = rg_tx_busy;
+
+   method tr_tx_load   = rw_tx_load.wget;
+   method tr_tx_done   = pw_tx_done;
+   method tr_rx_start  = pw_rx_start;
+   method tr_rx_glitch = pw_rx_glitch;
+   method tr_rx_bit    = rw_rx_bit.wget;
+   method tr_rx_byte   = rw_rx_byte.wget;
+   method tr_rx_ferr   = pw_rx_ferr;
+   method tr_rx_ovf    = pw_rx_ovf;
 endmodule
 
 endpackage
