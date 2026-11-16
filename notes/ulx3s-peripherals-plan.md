@@ -617,6 +617,19 @@ outstanding request (Flute's debug module answers every request).  JtagTap and C
 not in the SoC; Jtag_Control_Adapter is covered inside the uart_dmi proof.
 Porting found an sv-yosys mis-synthesis (formal/fv/README pitfalls) and that a cover check
 compiling no cover statements passed; fvgen now reports that ERROR (all existing covers reach).
-Remaining block without formal: RO_TRNG (ring oscillators: combinational loops, analog).
+The TRNG (2026-11-15).  Three layers.  (1) formal/fv/ips/entropy_ro proves Flute's
+mkEntropy_Source_RO (decimation, SP 800-90B RCT / APT health tests, OPST, the seed word) with
+the raw bit free, at the SoC's parameters (8 / 41 / 793 / 1024) and a small instance (2 / 5 / 13
+/ 16) the covers reach; the cutoffs come from H = 0.5 and alpha = 2^-20 by cutoffs.py.  A source
+periodic in 8 raw bits (stuck, alternating) is proved never to leave BIST.  A period-16 sample
+stream passes both tests (cover): the 90B tests catch stuck and badly biased sources only.
+mkEntropy_Source_RO is now mkEntropy_Source_RO_P (8, 41, 793, 1024) with a trace port (raw,
+sample, fail); mkEntropy_Source_Wait returns constant traces.  27 mutants, all caught.  (2)
+formal/fv/bin/ro_trng_netlist.py checks src/RO_TRNG.v's rings in the synthesized netlist (no
+simulator or formal run sees them): 8 disjoint LUT4 inverter cycles of 3..17, the s1 -> s2 ->
+XOR -> bit_q sampler (function evaluated), bit_q into the decimator, one clock; in the gate.
+(3) The entropy itself is not provable: it needs raw samples from the board through the SP
+800-90B estimators (ea_non_iid), a board session.
+Every block in the SoC now has formal.
 The original BSV blocks are ported.  RVFI stays: riscv-formal
 needs the core to emit its trace port; it is output-only and off unless RISCV_FORMAL is defined.
