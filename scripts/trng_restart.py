@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """trng_restart: the SP 800-90B 3.1.4 restart test for the Zkr ring-oscillator source, unattended.
 
-Each restart is a real power cut: the ULX3S is powered only through US1 (US2 unplugged), and US1 sits
-on a hub port with per-port power switching (uhubctl; 2026-11-16: hub 33-3.2 port 2, an RTS5411,
-cuts VBUS: the factory image's loop counter restarts).  Per restart:
-  power off (--off seconds), on; openFPGALoader -m <bit> (SRAM); loader.py --no-banner
-  test/trng_restart.bin (63 words); trng_capture: the first 1000 samples -> <out>/NNNN.bits.
-The first word is the source's first after its startup window (it waits unread); the rest follow
-within a few ms of the program starting, ~2 s after power-up (the boot loader's load window).
+A restart is a full FPGA reconfiguration: every flop and ring starts from configuration, but the
+board's supply stays up.  (No real power cut here: on 2026-11-16 the hub port the board's US1 is on,
+hub 33-3.2 port 2, an RTS5411, turned off its USB data only -- the SoC's uptime kept counting --
+so --hub only matters with a hub that switches VBUS; uhubctl's compatibility list names some.)
+  --restart refresh  (default) JTAG REFRESH: reload from flash offset 0, which holds the SoC
+                     (2026-11-16; backup of the old flash in build/flash_backup); ~3.3 s each.
+  --restart sram     openFPGALoader -m <bit>, ~40 s each.
+Then loader.py --no-banner test/trng_restart.bin (63 words) and trng_capture: the first 1000
+samples -> <out>/NNNN.bits.  The first word is the source's first after its startup window (it
+waits unread); the rest follow within a few ms of the program starting, ~3 s after the restart.
 Resumable: existing NNNN.bits files are kept.  At the end: <out>/rows.bits (row dataset, 1000 x
 1000) for `ea_restart rows.bits 1 <H_I>`.
 """
@@ -43,21 +46,26 @@ def tty_ready(port, timeout):
     return False
 
 
-def one(a, lf):
-    hub = ['uhubctl', '-l', a.hub, '-p', str(a.hub_port)]
-    subprocess.run(hub + ['-a', 'off'], check=True, capture_output=True)
-    time.sleep(a.off)
-    subprocess.run(hub + ['-a', 'on'], check=True, capture_output=True)
-    if not tty_ready(a.port, 20):
-        raise RuntimeError('tty did not come back')
-    t = [time.time()]
-    for k in range(20):                        # libusb sees the FT231X a moment after the tty
-        p = subprocess.run(['openFPGALoader', '-b', 'ulx3s', '-m', a.bit], capture_output=True, text=True)
+def fpga(args):
+    """openFPGALoader with retries (libusb can miss the FT231X just after the tty reappears)."""
+    for k in range(20):
+        p = subprocess.run(['openFPGALoader', '-b', 'ulx3s'] + args, capture_output=True, text=True)
         if p.returncode == 0 and 'unable to open' not in p.stdout + p.stderr:
-            break
+            return k
         time.sleep(0.5)
-    else:
-        raise RuntimeError(f'openFPGALoader: {p.stdout[-200:]}{p.stderr[-200:]}')
+    raise RuntimeError(f'openFPGALoader: {p.stdout[-200:]}{p.stderr[-200:]}')
+
+
+def one(a, lf):
+    if a.hub:
+        hub = ['uhubctl', '-l', a.hub, '-p', str(a.hub_port)]
+        subprocess.run(hub + ['-a', 'off'], check=True, capture_output=True)
+        time.sleep(a.off)
+        subprocess.run(hub + ['-a', 'on'], check=True, capture_output=True)
+        if not tty_ready(a.port, 20):
+            raise RuntimeError('tty did not come back')
+    t = [time.time()]
+    k = fpga(['-r'] if a.restart == 'refresh' else ['-m', a.bit])
     t.append(time.time())
     p = subprocess.run([sys.executable, os.path.join(R, 'scripts', 'loader.py'), '--no-banner', '-t', '1',
                         '-p', a.port, a.prog], capture_output=True, text=True, timeout=60)
@@ -79,14 +87,15 @@ def main():
     ap.add_argument('--out', default=os.path.join(R, 'build', 'trng', 'restart'))
     ap.add_argument('--bit', default=os.path.join(R, 'build', 'ulx3s_top.bit'))
     ap.add_argument('--prog', default=os.path.join(R, 'test', 'trng_restart.bin'))
-    ap.add_argument('--hub', default='33-3.2')
+    ap.add_argument('--restart', choices=('refresh', 'sram'), default='refresh')
+    ap.add_argument('--hub', default=None, help='uhubctl hub location to power-cycle first (only with a hub that switches VBUS)')
     ap.add_argument('--hub-port', type=int, default=2)
-    ap.add_argument('--off', type=float, default=3.0, help='seconds without power')
+    ap.add_argument('--off', type=float, default=3.0, help='seconds without power (--hub)')
     ap.add_argument('-p', '--port', default='/dev/cu.usbserial-120001')
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
     lf = open(os.path.join(a.out, 'log.txt'), 'a')
-    log(lf, f'start: count {a.count}, bit {a.bit}, off {a.off} s')
+    log(lf, f'start: count {a.count}, restart {a.restart}, hub {a.hub}')
     fails = 0
     for i in range(a.count):
         path = os.path.join(a.out, f'{i:04d}.bits')

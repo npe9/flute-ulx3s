@@ -162,9 +162,17 @@ These are additions to the per-feature verification above. Status is as of 2026-
      (build/ext, clang + libomp), `ea_non_iid -a <file> 1`, 2,097,152 samples per run:
      run 1 H_original 0.911 (lowest: compression; MCV 0.997, Markov 0.999), run 2 0.859; ones
      0.5002 / 0.4996; no health-test failure in either run.  Sanity: os.urandom (1M bits) 0.851, a
-     p = 0.8 biased source 0.188 (true 0.32).  So the assumed H = 0.5 has margin.  Not done: the 90B
-     restart test (ea_restart: 1000 power-ups x 1000 samples), other boards / temperatures / voltage,
-     and the raw pre-decimation bits (not reachable from software; the claim is per decimated sample).
+     p = 0.8 biased source 0.188 (true 0.32).  So the assumed H = 0.5 has margin.
+   - **Restart test done 2026-11-16** (scripts/trng_restart.py, unattended, ~3.4 s per restart).
+     A restart is a full FPGA reconfiguration from flash (JTAG refresh; flash offset 0 now holds the
+     promoted lx46 SoC), NOT a power cut: the board's hub port (RTS5411) drops USB data but not VBUS.
+     Each restart: test/trng_restart.bin (N_WORDS=63), first 1000 samples after the source's startup.
+     1000 restarts, 0 retries, 0 health-test failures, 0 DEAD.  `ea_restart -v rows.bits 1 0.859`:
+     sanity check passed (X_max 557 < X_cutoff 621), validation passed, H_r 0.884, H_c 0.847,
+     min(H_r, H_c, H_I) = 0.847.
+   - Not done: restarts through a real power cut (needs a VBUS-switching hub or relay), other boards /
+     temperatures / voltage, and the raw pre-decimation bits (not reachable from software; the claim
+     is per decimated sample).
 
 ### Campaign workflow
 9. **Equivalence checking with YosysHQ EQY**, between pre- and post-change netlists, for behaviour-preserving E-series changes (retiming, FIFO insertion, ConfigReg swaps). Today equivalence is inferred from formal + J1 + bench.
