@@ -651,17 +651,25 @@ Sources checked (bsc install + Yosys 0.51):
     '.'.  For test images the scoreboard's final "hello banner missing from
     postload" FAIL is expected; judge by the T/M/D bytes.
 
+16. DOCS STAY CURRENT (user rule, 2026-11-16): every change that alters what the
+    project does or how it is built, run, tested or deployed updates README.md and
+    the matching notes/ file (and this file's map / rules if they go stale) IN THE
+    SAME COMMIT: device table, status block, clock, promoted build, gate counts,
+    board state (what is in flash), known issues.  A promotion updates the README
+    status block.  Before committing, grep the README for the facts the change
+    touches (clock, addresses, counts, build names) and fix every stale one.
+
 ## Repository map
 
-- `Flute/` — Bluespec Flute RISC-V core (git repo; ALL our work is
-  uncommitted on 9b2b056 — before any risky edit, snapshot the files you
-  will touch, e.g. `cp x build/timing-exp/x.mine`).
-- `src/` (top level) — ULX3S integration: Top.v (25 MHz native clock),
-  ULX3S_Top.bsv, Sdram_Controller.bsv, Uart_Pins.bsv, Uart_DMI_Bridge.bsv,
-  SoC_Info.bsv (perf counters), JtagTap.bsv.
-- `scripts/hw_test_suite.py` — the 70-check hardware gate (programs the
-  FPGA itself, hardcodes `build/ulx3s_top.bit`, port
-  `/dev/cu.usbserial-120001`).
+- `Flute/` — Bluespec Flute RISC-V core (submodule, origin npe9/Flute; our
+  work is committed on its lx50 / linux-isa branches; push Flute first).
+- `src/` (top level) — ULX3S integration: Top.v (25 MHz crystal, PLL to the
+  50 MHz system clock with SYS_PLL=50), ULX3S_Top.bsv, Sdram_Controller.bsv,
+  Uart_Pins.bsv, Uart_DMI_Bridge.bsv, SoC_Info.bsv, the peripherals (README
+  "Devices" table) and formal/fv/ (per-IP specs).
+- `scripts/hw_test_suite.py` — the hardware gate (programs the FPGA itself,
+  `HW_BITSTREAM` default `build/ulx3s_top.bit`, port `/dev/cu.usbserial-120001`;
+  lx48: 78 checks) and `scripts/hw_board_drv.py` (TempleOS board drivers).
 - `test/` — SoC_Boot_Tb / Repl_Boot_Tb (Bluesim testbenches),
   `cache_test.S`, `run_cache_test.py`.
 - `build/timing-exp/` — experiment logs/reports; `reqq-*.bsv.queue` =

@@ -47,11 +47,16 @@ def sd_native(fd):
     out = hw.check_repl(R, 'SdhShow(0): block 0 reads with a good CRC', fd, 'SdhShow(0);',
                         expect=('sdh: block 0:', 'ans='), forbid=('CRC error', 'timeout', 'no data'))
     if out:
-        hw.record('info', 'block 0 as SPI mode read it (sig ffff)', 'PASS' if ans(out) == 0xffff else 'WARN', hex(ans(out) or 0))
+        # 55aa: the card's MBR.  Every SPI-mode boot (lx40-lx47) read block 0 as all FF.
+        hw.record('info', 'block 0 MBR signature 55aa', 'PASS' if ans(out) == 0x55aa else 'WARN', hex(ans(out) or 0))
     for b in (1, 2048, 1000000):
         hw.check_repl(R, f'SdhShow({b}) reads with a good CRC', fd, f'SdhShow({b});',
                       expect=(f'sdh: block {b}:', 'ans='), forbid=('CRC error', 'timeout', 'no data'))
-    hw.check_repl(R, 'SD host still write-protected', fd, 'BrdRd(0xC000D004) & 4;', expect=('ans=0x0000000000000004',))
+    # The REPL prints the raw register value (ans=) whatever expression follows it: test CTRL bit 2 here.
+    out = hw.check_repl(R, 'SD host CTRL readable', fd, 'BrdRd(0xC000D004);', expect=('ans=',))
+    if out:
+        v = ans(out)
+        hw.record(R, 'SD host still write-protected (CTRL.WPROT)', 'PASS' if v is not None and v & 4 else 'FAIL', hex(v or 0))
 
 
 def main():
@@ -62,8 +67,6 @@ def main():
     subprocess.run(['openFPGALoader', '-b', 'ulx3s', '-m', hw.BITSTREAM], capture_output=True)
     fd = hw.open_port()
     hw.load_blob(fd, open(args.blob, 'rb').read())
-    if os.environ.get('HW_LX48', '0') == '1':          # lx48: native SD (needs a card fresh from power-up)
-        sd_native(fd)
     boot = b''
     t0 = time.time()
     while time.time() - t0 < 240:
@@ -74,6 +77,8 @@ def main():
         print('REPL never reached a prompt')
         return 1
     print('REPL up.', flush=True)
+    if os.environ.get('HW_LX48', '0') == '1':          # lx48: native SD (needs a card fresh from power-up)
+        sd_native(fd)
     R = 'required'
     hw.check_repl(R, 'BoardHelp', fd, 'BoardHelp;', expect=('RtcShow()', 'PowerOffFor'))
     if args.set_rtc:

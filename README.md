@@ -4,26 +4,45 @@
 
 This project brings up [Bluespec Flute](https://github.com/Bluespec/Flute) RV32IMAC on the [Radiona ULX3S-85F](https://ulx3s.github.io/) ECP5 board.
 
-Current status (`linux-isa` branch, 2026-10-28):
+Current status (`linux-isa` branch, 2026-11-16; promoted build lx48):
 - ISA: RV32IMAFDC + Zicsr/Zifencei, Zba/Zbb/Zbc/Zbs, Zkn/Zkr/Zkt; M, S and U privilege; Sv32
   with an 8-entry I-TLB and a D-side TLB; PMP (8 entries, 4 KiB grain). Every extension is
   checked against Sail (riscv-formal checks, RISCOF, Sail-generated test cases).
-- Boots OpenSBI 1.9 + Linux 6.12 to user space on the board, with an FPU-checking `/init`.
-- Clock: the Linux bitstream runs at 32.142857 MHz (`make FP=1 FPU_TRIM=1 SYS_PLL=1`):
-  post-route 35.99-38.94 MHz over 4 seeds, 59.2K LUT4 of 83.6K. mtime ticks at 25 MHz to
-  match the device tree timebase.
-- Memory path: streaming SDRAM requests, I-cache early restart, and the `ndmreset` fixes
-  (epoch-tagged AXI IDs, memory-controller drain, two-pass SoC reset).
-- FTDI UART at 1000000 baud; the boot loader in on-chip ROM loads images into SDRAM with a
-  chunked, checksummed protocol. The TempleOS HolyC REPL and the bare-metal tests still run.
+- Clock: 50 MHz system clock (`make SYS_PLL=50 FP=1 FPU_TRIM=1`); lx48 routes 55.36 / 55.82 /
+  52.85 MHz on seeds 3 / 5 / 7 (seed 3 is the promoted bit). mtime ticks at 25 MHz to match the
+  device tree timebase.
+- Boots OpenSBI + Linux 6.12 to user space on the board (FPU-checking `/init`, drivers for every
+  device below), and runs the TempleOS HolyC REPL with ULX3S board drivers.
+- Console: FTDI UART at 1000000 baud; the on-chip boot ROM loads images into SDRAM with a
+  chunked, checksummed protocol, or boots one from the configuration flash.
+- Debug: RISC-V Debug Module over the UART (`scripts/dmi.py`) and over the US1 cable's JTAG
+  (stock OpenOCD, `openocd/ulx3s_jtagg.ocd`).
+- Every block in the SoC has a formal spec (`formal/fv/`), besides riscv-formal on the core.
 - Every change ships only after the verification gates below.
 
 `main` carries the M/U-mode RV32IMAC base (E20, 25 MHz). This branch is not merged into main.
 
-Planned peripherals (after UART/SDRAM bring-up):
-- HDMI via the GPDI connector.
-- Stereo audio via the 3.5 mm jack (I2S / Sigma-Delta).
-- USB host/device controller via the USB-A and on-board ESP32/USB options.
+Devices (SoC Info at `0xC0003000` lists them at run time; 16 records on lx48):
+
+| Device | Address | Notes |
+|--------|---------|-------|
+| Boot ROM | `0x00001000` | UART loader and flash boot |
+| CLINT / PLIC | `0x02000000` / `0x0C000000` | mtime at 25 MHz |
+| SDRAM | `0x80000000` | 32 MB W9825G6KH |
+| uart0 | `0xC0000000` | console, 16550, IRQ 0 |
+| gpio | `0xC0002000` | LEDs, FIRE1 |
+| soc_info | `0xC0003000` | device table, clock, perf counters, bus error monitor |
+| spi0 | `0xC0004000` | config flash (CS 1); microSD in SPI mode (CS 0), IRQ 2 |
+| i2c0 | `0xC0006000` | RTC and HDMI DDC |
+| uart1 | `0xC0007000` | ESP32 UART0, IRQ 4 |
+| gpio1 | `0xC0008000` | buttons, DIP switches, ESP32 EN/strap, power-off, reconfigure, HDMI CEC/HPD |
+| audio | `0xC0009000` | 3.5 mm jack (PCM FIFO + tone), S/PDIF |
+| spi2 | `0xC000A000` | MAX11125 ADC, IRQ 3 |
+| sdh | `0xC000D000` | microSD in native 4-bit SD mode (lx48), read-only by default |
+| video | `0xC0010000`, fb `0xC1000000` | DVI on the GPDI connector |
+| Zkr `seed` CSR | CSR `0x015` | ring-oscillator TRNG with SP 800-90B health tests |
+
+Not done yet: USB host on US2, the OLED header, the 433 MHz antenna, HDMI Ethernet.
 
 ## Hardware setup
 
@@ -106,13 +125,17 @@ make sw          # build example RISC-V programs
 
 The default `make` target builds both the bitstream and the example software.
 
-`make SYS_PLL=1` builds for the 32.142857 MHz PLL clock. bsc -u does not notice -D changes,
-so switch with a clean bsc build (`rm -rf build/bsc build/verilog/mkULX3S_Top.v`).
+`make SYS_PLL=50` builds for the 50 MHz PLL clock (the shipped build: `make SYS_PLL=50 FP=1
+FPU_TRIM=1 BUILD=build/<name> bitstream`); `SYS_PLL=1` is the older 32.142857 MHz clock. bsc -u
+does not notice -D changes, so switch with a clean bsc build (`rm -rf build/bsc
+build/verilog/mkULX3S_Top.v`).
 `FP=1` adds F/D; `FPU_TRIM=1` uses the area-trimmed F/D unit (`Flute/src_Core/CPU/FPU_Trim.bsv`),
 which is what fits on the 85F. Use a separate `BUILD=` directory per flag set.
 
-Promoted bitstreams are kept under `bits/` (`openFPGALoader` needs the `.bit` extension in
-the file name).
+The promoted bitstream is `build/ulx3s_top.bit` (local, not in git; the previous one is kept
+beside it as `build/ulx3s_top.<build>.bit`). CI builds the shipped 50 MHz bitstream as an
+artifact. `bits/` holds the older rollback points up to E20 (`openFPGALoader` needs the `.bit`
+extension in the file name, so copy one to a `.bit` name before loading it).
 
 ## Program and run
 
@@ -265,7 +288,8 @@ are the documented I64-pair hi-half limitation (`Print("%d", expr)` and
 discovery goes through the REPL's `Reg("…")`; and the REPL's `$HC_DUMP`
 framing is fs/9P-backed — it stalls retrying without a 9P host, so the
 suite verifies registers over the DMI system bus instead.
-For a PLL bitstream set `EXPECT_HZ=32142857` (SoC Info clock and perf-counter rate checks).
+For the shipped 50 MHz bitstream set `EXPECT_HZ=50000000 EXPECT_MISA=4014112f` (SoC Info clock
+and perf-counter rate checks; `EXPECT_HZ=32142857` for a `SYS_PLL=1` build).
 
 #### Debug/verification roadmap (staged)
 
@@ -426,10 +450,15 @@ The kernel, OpenSBI and `/init` are built in Docker from `linux-sw/` (see `linux
 `./build-fp.sh` for the F/D image). Then:
 
 ```bash
-make FP=1 FPU_TRIM=1 SYS_PLL=1 BUILD=build/lx bitstream
-openFPGALoader -b ulx3s -m build/lx/ulx3s_top.bit      # program first
-python3 scripts/loader.py <linux-sw>/out-fp/fw_payload.bin -t 0
+make FP=1 FPU_TRIM=1 SYS_PLL=50 BUILD=build/lx bitstream
+openFPGALoader -b ulx3s -m build/lx/ulx3s_top.bit      # program first (needs the tty closed)
+python3 scripts/loader.py --no-banner <linux-sw>/out-fp/fw_payload.bin -t 0
 ```
+
+Start the loader right after programming: with a boot directory in flash the ROM boots the
+flash default after `wait_ms` unless a UART byte arrives first. The lx48 device tree drives the
+microSD with the native host (`flute-sdh`, read-only unless `flute_sdh.writable=1`); older
+payloads use `mmc-spi`.
 
 The console prints the OpenSBI banner, the kernel log, and then
 `tick N  uptime U s  fp ok` once a second. In simulation:
@@ -452,8 +481,14 @@ comes from architecture, with at least 10% margin before benching):
   `formal/README.md`); never run two at once against one riscv-formal checkout.
 - **ndmreset** — `sim/ndm_bram` in simulation and `test/ndmreset_board.py` on the board,
   idle and busy.
-- **Board bench** — `scripts/hw_test_suite.py`; on this branch use
-  `EXPECT_HZ=32142857 EXPECT_MISA=4014112f` (70/0/2 expected on the F/D PLL build).
+- **Board bench** — `scripts/hw_test_suite.py` with `EXPECT_HZ=50000000 EXPECT_MISA=4014112f`
+  (lx48: 78 PASS, 0 FAIL, 2 known WARN), and `scripts/hw_board_drv.py --blob
+  templeos/build/ulx3s_repl.blob.bin` for the TempleOS board drivers (lx48: 19/0; with
+  `HW_LX48=1` and a card fresh from power-up, also native SD: 28/0).
+- **IP formal** — `formal/fv/bin/fvgen.py run <ip> <checks>` for every SoC block (cfg per IP in
+  `formal/fv/ips/`, mutants with `fvgen mutate`); `formal/fv/README.md` has the method. The
+  ring oscillators are checked on the netlist by `formal/fv/bin/ro_trng_netlist.py`.
+- **Gate script** — each build's `build/<name>/gate.sh` runs the sims, formal and P&R seeds.
 - **ISA tests** — `sim/isa_bram/isa_run.py`: riscv-tests (Flute and Sail repos) and the
   generated PMP, B/K and F/D tests in the strict harness.
 - **RISCOF** — `compliance/run.sh` against the Sail C model.
@@ -593,7 +628,11 @@ openFPGALoader -b ulx3s -f --file-type raw -o 0x400000 build/flash-dir.bin
 With an image in flash, `loader.py` must start within `wait_ms` of programming the FPGA
 (FIRE1 restarts the countdown). The load runs at ~0.58 MB/s (CPU-bound: TempleOS ~5 s,
 Linux ~11 s). For power-on boot, also write the bitstream at offset 0
-(`openFPGALoader -b ulx3s -f build/ulx3s_top.bit`). The sim flash model is
+(`openFPGALoader -b ulx3s -f build/ulx3s_top.bit`). The board here has the promoted lx48 at
+offset 0 since 2026-11-16 (the factory self-test that was there is in a full flash backup,
+`build/flash_backup/ulx3s_flash_20261116.bin`), and its boot directory still defaults to an
+older SPI-mode Linux: send any byte within 3 s of power-up to keep the microSD in native mode.
+`openFPGALoader -b ulx3s -r` reloads the FPGA from flash in 0.2 s. The sim flash model is
 `sim/common/spi_flash_model.v` (`linux_run.py --flash <mkflashimg --hex output> none`).
 
 This lets you iterate on RISC-V software without rebuilding the FPGA bitstream:
@@ -652,7 +691,7 @@ instead of a silent reset, which is very useful during bring-up.
 ## SDRAM status
 
 The SDRAM controller targets the on-board Winbond W9825G6KH-6 32 MB SDR SDRAM.
-It runs at the system clock (25 MHz, or 32.14 MHz with `SYS_PLL=1`) with BL=8 bursts,
+It runs at the system clock (50 MHz with `SYS_PLL=50`; 25 MHz without a PLL) with BL=8 bursts,
 auto-precharge, and periodic refresh.
 
 The controller returns 256-bit words to Flute's raw-memory port as two back-to-back
@@ -672,6 +711,15 @@ In simulation the controller is exercised by the strict Verilator harnesses
 rules. The older Bluesim testbench (`test/Sdram_Tb.bsv`) is not maintained.
 
 ## Known issues
+
+- **microSD in SPI mode reads wrong data.** Every SPI-mode Linux boot (lx40-lx47) read the
+  card's block 0 as all `FF`; the native host (lx48) reads its MBR (`55AA`, one partition).
+  Cause not found; use the native host.
+- **A card that saw CMD0 in SPI mode stays in SPI mode until power is removed**, so native-mode
+  tests need a card fresh from power-up (unplug US1). The USB hub here cannot cut the board's
+  power (it switches data only), so this needs a hand.
+- `test/sdh_test.bin` on the board: CMD8 times out (check `0x10`) though the card takes it, and
+  its data / RCA checks expect the simulator's card; init, CRC and write refusal pass.
 
 - **Bulk image loading: SOLVED (2026-10-08).** The 2.58 MB REPL now loads
   over the FTDI UART in ~90 s with per-chunk `[seq, data, XOR, pad]`
@@ -724,6 +772,13 @@ rules. The older Bluesim testbench (`test/Sdram_Tb.bsv`) is not maintained.
 - `scripts/exp_chunk2.py` — small protocol-experiment driver (per-attempt ACK/NAK logging, diagnostic-NAK capture).
 - `scripts/dmi.py` — host client for the UART DMI debug bridge (halt/resume/regs/pc/mem).
 - `scripts/monitor.py` — automated smoke test for the TempleOS monitor.
+- `src/Sd_Host.v` — native 4-bit SD host (PIO, read-only by default); `src/AXI4_SPI.bsv` — SPI hosts.
+- `src/AXI4_RegBus.bsv` — AXI4 to the register bus for the small devices; `src/Board_IO.v` (I2C,
+  buttons, switches, power, CEC), `src/Audio.v`, `src/Spdif_Tx.v`, `src/Video_DVI.v`.
+- `src/RO_TRNG.v` — ring oscillators for the Zkr entropy source; `scripts/trng_capture.py`,
+  `scripts/trng_restart.py` — board captures for the SP 800-90B estimators.
+- `src/JtaggDtm.bsv` — RISC-V debug transport on the ECP5 JTAG port.
+- `formal/fv/` — per-IP formal specs, VIPs and the `fvgen` runner.
 - `src/SoC_Info.bsv` — self-describing SoC block (device table, build date, clock, bus error monitor).
 - `sim/strict_bram/`, `sim/ndm_bram/` — Verilator gate harnesses (J1, F2, ndmreset).
 - `formal/` — riscv-formal wrapper and gate runner.
@@ -733,6 +788,7 @@ rules. The older Bluesim testbench (`test/Sdram_Tb.bsv`) is not maintained.
 - `linux-sw/` — OpenSBI + Linux + `/init` build (Docker).
 - `sim/isa_bram/`, `sim/linux_bram/`, `sim/mc_ut/`, `sim/sdram_ut/`, `compliance/` — ISA, Linux,
   memory-controller, SDRAM and RISCOF harnesses.
-- `notes/` — `linux-isa-plan.md` (ISA program), `memlat-verification-plan.md` (memory path).
+- `notes/` — `linux-isa-plan.md` (ISA and verification program), `ulx3s-peripherals-plan.md`
+  (every peripheral, its pins, tests and board results), `memlat-verification-plan.md`.
 - `AGENTS.md`, `HANDOFF.md` — working rules and the campaign history.
 - `constraints/ulx3s_85f.lpf` — ULX3S-85F pin constraints.
