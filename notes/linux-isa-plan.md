@@ -113,23 +113,26 @@ Zkn/Zkr/Zkt, S-mode, Sv32 and PMP.
 
 ## Verification roadmap
 
-These are additions to the per-feature verification above. Status is as of 2026-10-21. TestRIG / RVFI-DII is **not started**: nothing in the tree uses it yet.
+These are additions to the per-feature verification above. Statuses were written 2026-10-21; each item's **Update 2026-11-16** line says what has happened since.
 
 ### High priority
 1. **riscv-arch-test under RISCOF, with Sail as the reference model.**
    - This is the official architectural compliance suite, separate from riscv-tests. It covers privileged behaviour, PMP, Zb*, Zk*, F/D and C at the encoding level.
    - It is required before claiming compliance, and would likely have caught the c.addi HINT bug earlier.
    - Status: not started. Sail (`~/src/sail-riscv`) and Spike (`~/src/spike`) are present locally.
+   - **Update 2026-11-16: running.** `compliance/run.sh` (RISCOF against the Sail C model; `config-fd.ini` for the trimmed FPU, EXCLUDE globs for subsets), in the README gates; e.g. B 32 / K 21 / M 8 vs Sail on m14p (notes/memlat-verification-plan.md).
 2. **Lockstep co-simulation against Sail or Spike on random instruction streams.**
    - Options:
      - **TestRIG** (Cambridge). It needs an RVFI-DII port: instruction injection plus an RVFI trace back. Flute's RVFI wrapper is the starting point.
      - A Spike step-and-compare harness on RVFI traces from the Verilator TB.
    - Why: riscv-formal BMC is only about 20–30 cycles deep. Long-sequence bugs slip past it: a TLB refill racing a page-table write, PMP changes mid-pipeline, interrupts during misaligned-access traps.
    - Status: **not started**.
+   - **Update 2026-11-16: done with TestRIG** (`testrig/`, 312ab51, 2026-10-23): Sail vs Flute over RVFI-DII in Bluesim. Campaigns found D1-D3 (fixed in Flute d9cc5c4; 6b487b4: campaign 4 clean of DUT bugs). Not in CI (needs Sail, GHC, bsc locally).
 3. **Random instruction generator: riscv-dv (CHIPS Alliance) or FORCE-RISCV.**
    - Stresses privilege-mode switches, Sv32 page-table configurations (megapages, A/D bits, permission combinations), PMP regions and interrupt injection.
    - Feeds item 2. TestRIG brings its own QuickCheck generators (VEngine).
    - Status: not started.
+   - **Update 2026-11-16:** QCVEngine's generators (arith, mem, control, cache, muldiv, atomic, compressed, fencei, csr, pte, random, unstructured, bk) drive the TestRIG campaigns; riscv-dv / FORCE-RISCV not used.
 4. **SDRAM device model.**
    - The vendor's (e.g. Micron) behavioural Verilog model of the ULX3S SDRAM chip, which checks tRCD/tRP/tRFC and refresh.
    - **Prerequisite for the Mem_Controller/Sdram_Controller latency rewrite (Order step 1).** The current TB memory would not flag a timing-parameter violation that fails only on silicon.
@@ -153,6 +156,7 @@ These are additions to the per-feature verification above. Status is as of 2026-
 7. **CDC and reset checks.**
    - The ring-oscillator TRNG crosses an async boundary into the core clock; candidate tool is `run_cdc.py` in the sv-yosys battery.
    - UART RX, buttons and other async inputs go through the same pass.
+   - **Update 2026-11-16:** not run as a CDC pass.  The TRNG's crossing is checked on the netlist (formal/fv/bin/ro_trng_netlist.py: each ring tap into a two-flop s1 -> s2 synchronizer without reset, all on the system clock), and the per-IP formal/fv specs leave pin inputs free.
 8. **Raw-sample entropy assessment.**
    - Run NIST SP 800-90B `ea_non_iid` on raw ring-oscillator samples captured from the board.
    - RCT/APT only detect failures; Zkr needs a justified min-entropy claim.
@@ -189,6 +193,8 @@ These are additions to the per-feature verification above. Status is as of 2026-
     |---|---|
     | Mem_Controller slave | 15 asserts. Response witnesses reachable. Protocol checks pass to the reached depth. A mid-traffic `server_reset` drops BVALID/RVALID, but reset is boot-only in the SoC. |
     | AXI4_Deburster, both sides | 74 asserts. **Finding:** its B path matches slave responses by position (`f_w_awlen`), so a downstream slave that reorders across IDs makes it return wrong or duplicate BIDs. This is latent in this SoC: Boot_ROM and Mem_Controller answer in order. |
+
+    **Update 2026-11-16:** formal/fv now has a spec for every SoC peripheral (audio, board_io, gpio, jtagg_dtm, regbus, sdh, sdram, soc_info, spdif, spi, uart_dmi, uart_pins, video, entropy_ro), with protocol VIPs (axi4_sb_vip, regbus_vip, ...) on their ports.
 
     Remaining:
     - Fabric_AXI4.
