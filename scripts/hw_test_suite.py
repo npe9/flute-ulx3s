@@ -542,11 +542,15 @@ def main():
         PERF_CNT = [0xC0003080, 0xC0003084, 0xC0003088, 0xC000308C]
 
         def _cycles_rate():
+            # Cycles per host second, timed at each read's completion: after an idle of 0.8 s or
+            # more dmi.py first waits out the bridge's frame timeout (~1.25 s), so a fixed sleep
+            # between the reads under-counts the interval.
             dmi.mem_write32(PERF_CNT[0], 0)    # clear (select defaults to 0=cycles)
             a = dmi.mem_read32(PERF_CNT[0])
+            ta = time.time()
             time.sleep(1.2)
             b = dmi.mem_read32(PERF_CNT[0])
-            return b - a
+            return round((b - a) / (time.time() - ta))
         dmi_check(f'perf cycles rate ~{EXPECT_HZ/1e6:.2f} MHz', _cycles_rate,
                   lambda d: 0.8 * EXPECT_HZ <= d <= 1.28 * EXPECT_HZ)
 

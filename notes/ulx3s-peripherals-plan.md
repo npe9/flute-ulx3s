@@ -505,8 +505,25 @@ Verification:
   the stopping falling edge not counted as a protocol fall.
 - Linux: kernel/drivers/flute-sdh.c (mmc host, PIO, 4-bit, read-only unless flute_sdh.writable=1),
   DT mmc@c000d000 replaces mmc-spi-slot. TempleOS: SdhInit, SdhShow(lba), SdhRead(lba,buf).
-Board facts for comparison: the slot's card is a 7.50 GiB SDHC, CID name "asdfg", block 0 all FF
-(as every SPI-mode Linux boot has read it).
+Board facts for comparison: the slot's card is a 7.50 GiB SDHC, CID name "asdfg".  Every SPI-mode
+Linux boot (lx40-lx47) read its block 0 as all FF; native mode reads an MBR (below), so SPI-mode
+data reads were wrong all along (cause not found yet).
+**Board run 2026-11-16** (build/lx48/ulx3s_top.bit s3 5d7b36ec, after a US1 replug, lx48 loaded at
+once so the flash image could not autoboot SPI-mode Linux; build/lx48/board_sdh.py, logs in
+build/lx48/board/):
+- Linux (build/lx48/linux-sw/out-fp, flute-sdh): "mmc0: new SDHC card at address 0001", mmcblk0
+  asdfg 7.50 GiB (ro), partition p1, `sd: sig 000055aa first fa33c08e` (x86 MBR code); 104 ticks fp ok.
+- test/sdh_test.bin (read-only): ID, reset CTRL, ESP32 interlock, CMD2/3/7, 4-bit 12.5 MHz single
+  and 3-block reads with no CRC error, WPROT refusing CMD24 all pass; the data and RCA checks
+  expect the sim card (all words differ, RCA 1, as expected).  One real miss: CMD8 timed out
+  (check 0x10) though the card then reports CCS, so it took CMD8; likely sdh_test sends CMD0/CMD8
+  too soon after the clock starts (Linux waits and inits fine).  Not yet fixed.
+- hw_test_suite 78/0 (2 known WARN); hw_board_drv 19/0 (HDMI HPD/CEC WARN, no TV).  The suite's
+  "perf cycles rate" check failed at 113 M until fixed: dmi.py's re-arm after 0.8 s idle (29854e1)
+  delays the second read ~1.25 s, so the check now divides by the host time between read completions.
+- After the native session SPI-mode Linux (lx47 payload, on lx48 and on lx47) finds no card; the
+  card clears at the next power-up.  The TempleOS SdhInit/SdhShow board check (HW_LX48=1) still
+  needs a card fresh from power-up.
 
 ### formal/fv: verification kept out of the RTL (2026-11-13)
 
