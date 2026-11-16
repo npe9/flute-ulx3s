@@ -18,7 +18,10 @@ __asm__ (".section .text.start\n.globl _start\n_start:\n"
 #define UART_RBR REG (0xC0000000)
 #define UART_THR REG (0xC0000000)
 #define UART_LSR REG (0xC0000014)
+#ifndef N_WORDS
 #define N_WORDS  131072u                    // 2,097,152 samples (90B wants >= 1,000,000)
+#endif
+// (-DN_WORDS=63u: test/trng_restart.bin, 1008 samples per power-up for the restart test)
 #define BUF      ((volatile uint16_t *) 0x80100000)
 
 static void putc_ (uint8_t c) { while (! (UART_LSR & 0x20)) ; UART_THR = c; }
