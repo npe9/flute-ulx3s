@@ -156,6 +156,15 @@ These are additions to the per-feature verification above. Status is as of 2026-
 8. **Raw-sample entropy assessment.**
    - Run NIST SP 800-90B `ea_non_iid` on raw ring-oscillator samples captured from the board.
    - RCT/APT only detect failures; Zkr needs a justified min-entropy claim.
+   - **Done 2026-11-16, one board (promoted lx46 bit in SRAM, room temperature).** test/trng_dump.bin
+     polls seed into SDRAM (168 clocks per word: 16 samples kept, ~5 dropped between words), then
+     scripts/trng_capture.py writes one sample per byte.  NIST SP800-90B_EntropyAssessment 87c104d
+     (build/ext, clang + libomp), `ea_non_iid -a <file> 1`, 2,097,152 samples per run:
+     run 1 H_original 0.911 (lowest: compression; MCV 0.997, Markov 0.999), run 2 0.859; ones
+     0.5002 / 0.4996; no health-test failure in either run.  Sanity: os.urandom (1M bits) 0.851, a
+     p = 0.8 biased source 0.188 (true 0.32).  So the assumed H = 0.5 has margin.  Not done: the 90B
+     restart test (ea_restart: 1000 power-ups x 1000 samples), other boards / temperatures / voltage,
+     and the raw pre-decimation bits (not reachable from software; the claim is per decimated sample).
 
 ### Campaign workflow
 9. **Equivalence checking with YosysHQ EQY**, between pre- and post-change netlists, for behaviour-preserving E-series changes (retiming, FIFO insertion, ConfigReg swaps). Today equivalence is inferred from formal + J1 + bench.
