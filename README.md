@@ -718,8 +718,6 @@ rules. The older Bluesim testbench (`test/Sdram_Tb.bsv`) is not maintained.
 - **A card that saw CMD0 in SPI mode stays in SPI mode until power is removed**, so native-mode
   tests need a card fresh from power-up (unplug US1). The USB hub here cannot cut the board's
   power (it switches data only), so this needs a hand.
-- `test/sdh_test.bin` on the board: CMD8 times out (check `0x10`) though the card takes it, and
-  its data / RCA checks expect the simulator's card; init, CRC and write refusal pass.
 
 - **Bulk image loading: SOLVED (2026-10-08).** The 2.58 MB REPL now loads
   over the FTDI UART in ~90 s with per-chunk `[seq, data, XOR, pad]`

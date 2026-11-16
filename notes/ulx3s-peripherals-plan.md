@@ -528,7 +528,11 @@ build/lx48/board/):
   `HW_LX48=1 hw_board_drv.py`: SdhInit 4-bit 12.5 MHz, 7680 MiB, block 0 MBR 55aa, blocks 1 /
   2048 / 1000000 with good CRCs, CTRL.WPROT still set; all 28/0 (after fixing the bench: the SD
   checks had run before the REPL prompt wait and eaten the prompt).
-- Open: why SPI-mode reads return FF; sdh_test's CMD8 timeout; the flash directory's default
+- sdh_test fixed 2026-11-16: it now waits 2 ms after CMD0 (Linux waits 1 ms; the real card missed
+  an immediate CMD8), and on a real card (RCA not the model's 0x4321) checks only block 0's 55AA
+  in place of the model's data pattern.  Board: `sdh_test: PASS`; strict sim sdh_test and
+  sdh_test_w PASS on the lx48 netlist.
+- Open: why SPI-mode reads return FF; the flash directory's default
   Linux is still an old SPI-mode payload (rewrite = a flash write, the user's call).
 
 ### formal/fv: verification kept out of the RTL (2026-11-13)

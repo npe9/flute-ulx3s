@@ -3,6 +3,7 @@
 // 510 of block 0).  Reset values, the ESP32 interlock, card init to 4-bit, a single and a 3-block
 // read (CRCs checked), WPROT refusing CMD24.  Read-only: built with -DSDH_WRITE it is sdh_test_w,
 // which also writes two blocks and reads them back -- SIMULATOR ONLY, never on the board.
+// On a real card (any RCA but the model's 0x4321) the data checks reduce to block 0's 55AA signature.
 // UART: 'T' on entry, "M <id> <exp> <got>" on a mismatch, 'D' when done (the strict-bench convention).
 //
 // Build: riscv64-unknown-elf-gcc -march=rv32imac_zicsr -mabi=ilp32 -Os -ffreestanding
@@ -54,7 +55,13 @@ static uint32_t cmd (uint32_t idx, uint32_t arg, uint32_t fl) {
    SDH (CMD) = idx | fl;
    return wait_not (CBUSY);
 }
+static void delay_cycles (uint32_t n) {
+   uint32_t t0, t;
+   __asm__ volatile ("rdcycle %0" : "=r" (t0));
+   do __asm__ volatile ("rdcycle %0" : "=r" (t)); while (t - t0 < n);
+}
 static uint32_t rca;
+static int model;                                     // the sim card (RCA 0x4321), not a real one
 static uint32_t acmd (uint32_t idx, uint32_t arg, uint32_t fl) {
    cmd (55, rca << 16, R48);
    return cmd (idx, arg, fl);
@@ -81,6 +88,10 @@ static void read_blocks (int id, uint32_t lba, uint32_t n, int written) {
       for (uint32_t w = 0; w < 128; w++) {
          uint32_t v = SDH (FIFO);
          uint32_t e = written ? 0xA5000000u + (lba + b) * 0x10000u + w : pat (lba + b, w);
+         if (!model) {                                  // a real card: only block 0's 55AA signature
+            if (lba + b != 0 || w != 127) continue;
+            v >>= 16; e = 0xAA55;
+         }
          if (v != e) { if (!bad) first = b << 16 | w; bad++; }
       }
    }
@@ -102,6 +113,8 @@ int main (void) {
    check (0x04, NATIVE, SDH (STATUS) & NATIVE);
    for (volatile int i = 0; i < 3000; i++) ;            // 74+ clocks
    cmd (0, 0, 0);
+   delay_cycles (100000);                                // >= 1 ms after CMD0, as Linux waits (a
+                                                         // real card missed an immediate CMD8)
    uint32_t s = cmd (8, 0x1AA, R48);
    check (0x10, 0, s & (CTMO | CCRC));
    check (0x11, 0x1AA, SDH (RESP0) & 0xFFF);
@@ -115,7 +128,8 @@ int main (void) {
    check (0x13, 0, s & CTMO);
    cmd (3, 0, R48);
    rca = SDH (RESP0) >> 16;
-   check (0x14, 0x4321, rca);
+   model = (rca == 0x4321);
+   check (0x14, 1, rca != 0);
    s = cmd (7, rca << 16, R48);
    check (0x15, 0, s & (CTMO | CCRC));
    acmd (6, 2, R48);
