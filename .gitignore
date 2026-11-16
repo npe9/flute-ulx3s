@@ -22,3 +22,4 @@ templeos/build/
 compliance/.*.gen
 # ---- bsc -show-schedule output (written next to the sources) ----
 *.sched
+test/debug/logs/

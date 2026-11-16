@@ -153,6 +153,26 @@ These are additions to the per-feature verification above. Statuses were written
 6. **Debug spec compliance.**
    - The riscv-tests debug suite (gdbserver.py through OpenOCD) covers the Debug Module and JTAG: abstract commands, halt/resume, single-step over traps, DM system bus.
    - Nothing else checks these today.
+   - **Update 2026-11-16: running on the board** (`test/debug/run.sh`, README "JTAG").  lx48:
+     27 pass, 33 not applicable, 18 fail or error.  Triage:
+     - Caches not flushed on resume (Flute flushes on Debug Mode entry only).  With no program
+       buffer the debugger cannot run FENCE.I, so memory it writes while halted (software
+       breakpoints, loaded code) can be hidden by I-cache lines fetched during the halt:
+       StepTest (stepi stays on the breakpoint), PrivChange, ProgramSwWatchpoint, DebugExit,
+       DebugBreakpoint, DebugSymbols, DebugChangeString, DebugFunctionCall.
+     - A resume ignored `dcsr.prv`: the hart kept its old mode (PrivRw: `$priv=0` then stepi
+       ran in M).  `dcsr.prv` was also not WARL (2 = H accepted).
+     - A debugger access to a CSR that does not exist returned ok (SimpleNoExistTest); spec
+       says cmderr 3 (exception).  The DM mapped every hart error to cmderr 4 (halt/resume).
+     - RV32 with D: the DM rejected aarsize 64, so OpenOCD could not read the 64-bit FPRs
+       (SimpleF18Test).
+     - Not hart bugs: the four trigger tests (no trigger module; Sdtrig is not implemented),
+       RepeatReadTest (expects riscv-openocd's newer message), SemihostingFileio (needs host
+       semihosting set up): skipped in FluteUlx3s.py with these reasons.
+     - Sv32Test (a gdb read through the page table at `$priv=0` failed) passes on lx49: the
+       stale-cache bug, the page table had been written while halted.
+     - lx49 (all four fixed; see its gate) first build: 37 pass, 39 not applicable, 2 fail
+       (PrivChange, PrivRw: the `dcsr.prv` bug, fixed in the next lx49 build).
 7. **CDC and reset checks.**
    - The ring-oscillator TRNG crosses an async boundary into the core clock; candidate tool is `run_cdc.py` in the sv-yosys battery.
    - UART RX, buttons and other async inputs go through the same pass.

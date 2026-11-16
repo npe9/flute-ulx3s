@@ -2,7 +2,8 @@
 """Bit-banged JTAG on the ULX3S's FT231X (US1) through libftdi (ctypes), the way openFPGALoader does
 it: TCK = DSR, TMS = DCD, TDI = RI, TDO = CTS, synchronous bitbang.  OpenOCD 0.12's ft232r driver
 reads all ones on this chip, so this module either runs as an OpenOCD remote_bitbang server
-(`--server PORT`, then openocd -f openocd/ulx3s_jtagg.ocd) or reads the IDCODE (`--idcode`).
+(`--server PORT`, then openocd -f openocd/ulx3s_jtagg.ocd; `--persist` keeps serving across
+OpenOCD runs) or reads the IDCODE (`--idcode`).
 While it runs the FT231X is not a UART; it is put back on exit (bitmode reset).
 """
 import argparse, ctypes, socket, sys
@@ -71,11 +72,11 @@ def idcode(f):
     f.shift([(1, 0), (0, 0)])                        # Update-DR, RTI
     return sum(b << i for i, b in enumerate(t))
 
-def server(f, port):
+def server(f, port, persist=False):
     s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     s.bind(('127.0.0.1', port)); s.listen(1)
     print(f'remote_bitbang on 127.0.0.1:{port}', flush=True)
-    while serve_one(f, s.accept()[0]):
+    while serve_one(f, s.accept()[0]) or persist:
         pass
 
 TDI_EARLY = False   # --tdi-early
@@ -128,6 +129,8 @@ if __name__ == '__main__':
     ap.add_argument('--serial', default='120001')
     ap.add_argument('--idcode', action='store_true')
     ap.add_argument('--server', type=int)
+    ap.add_argument('--persist', action='store_true',
+                    help="keep serving after OpenOCD quits (one OpenOCD per test: the riscv-tests debug suite)")
     ap.add_argument('--tdi-early', action='store_true',
                     help='change TDI while TCK is high, before the falling edge (JTDI test)')
     a = ap.parse_args()
@@ -137,6 +140,6 @@ if __name__ == '__main__':
         if a.idcode:
             print(f'idcode 0x{idcode(f):08x}')
         if a.server:
-            server(f, a.server)
+            server(f, a.server, a.persist)
     finally:
         f.close()

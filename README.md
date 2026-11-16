@@ -568,6 +568,20 @@ Board (lx45d): OpenOCD examines the hart (misa 0x4014112f, datacount 4, no progr
 halts it, reads and writes registers and memory, and resumes. On the LFE5U-85F, JTAGG's JTDI is
 TDI registered on TCK's rising edge, so the DTM takes it one system clock after the edge.
 
+Debug-spec conformance: `test/debug/run.sh [TestName ...]` runs the riscv-tests debug suite
+(gdbserver.py, riscv-tests 3df703c checked out in `build/ext/riscv-tests` with its `env`
+submodule; pexpect + pyyaml in `build/ext/debug-venv`) against the board over this JTAG path.
+It starts `ft231x_jtag.py --server 4567 --persist` (one server for the suite's many OpenOCD
+runs), and `test/debug/openocd012.sh` turns the suite's `gdb port` / `tcl port` / `telnet port`
+into OpenOCD 0.12's `gdb_port` forms. Target: `test/debug/FluteUlx3s.py` (RAM test area
+0x80100000, 1 MiB; skip list with the reason for each: no trigger module, OpenOCD 0.12 message
+formats, semihosting file I/O). Logs go to `test/debug/logs/` (ignored). Program the FPGA first;
+the JTAG cable cannot be claimed while the UART tty is open. lx48: 27 pass, 33 not applicable,
+18 fail or error (about 35 min). The failures came from four hart bugs (fixed in lx49, see
+notes/linux-isa-plan.md item 6): the caches were not flushed on resume, so a breakpoint the
+debugger wrote was never fetched; a resume lost a debugger's write to `dcsr.prv`; a debugger read
+of a CSR that does not exist succeeded; and 64-bit FPR accesses were rejected on RV32.
+
 The J1-header soft TAP is gone (it was never connected to the debug module), so J1's
 A10/A11/B11/C11 are free GPIO.
 
