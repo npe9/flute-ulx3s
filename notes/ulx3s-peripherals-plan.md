@@ -660,3 +660,16 @@ XOR -> bit_q sampler (function evaluated), bit_q into the decimator, one clock; 
 Every block in the SoC now has formal.
 The original BSV blocks are ported.  RVFI stays: riscv-formal
 needs the core to emit its trace port; it is output-only and off unless RISCV_FORMAL is defined.
+
+## lx49 (2026-11-16, candidate, not promoted)
+
+- lx48 + the Debug Module / hart fixes from the riscv-tests debug suite (notes/linux-isa-plan.md
+  item 6) + the HDMI serializer's per-lane load flags.  The first lx49 routes had the shift clock
+  at 122 MHz on seeds 3 and 7 (one shared phase decode fanned out to the four lanes across the
+  die); with a load flop per lane: shift 175/162/170, pixel 69/65/67, system 53.86/51.30/57.54
+  MHz (s3/s5/s7).  formal/dvi_ser/equiv.sh: PASS (a mutant with one lane a cycle late fails).
+- Gate: riscv-formal smoke 10/10, ISA 94/94, strict cache/esp32/io/audio/sd/sdh/sdh_w, J1, ndm,
+  Linux tick 2, Bluesim, video_ut, every formal/fv proof, ro_trng_netlist.
+- Board (seed 7 bit in SRAM): hw suite 78/0 (2 known WARN), drivers 19/0, Linux native SD
+  (MBR 55aa, 118 ticks, fp ok), debug suite 38 pass / 39 N/A / 1 race (DisconnectTest).
+

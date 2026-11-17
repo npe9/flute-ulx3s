@@ -431,18 +431,29 @@ module dvi_ser (
     input  wire [9:0] tmds_b,
     output wire [3:0] gpdi_dp       // [0] blue, [1] green, [2] red, [3] clock
 );
+    // One load flag per lane, set a shift clock early from ph's next value: each lane's load
+    // select is then a local flop.  One shared (ph == 1) decode fanned out to the four lanes'
+    // shift registers across the die (x 23..117) and routed at 122 MHz (lx49 seeds 3 and 7).
+    // keep: yosys would otherwise merge the four equal flops back into one.
+    // Equal to the shared-decode version cycle for cycle (formal/dvi_ser/equiv.ys).
     reg       t1 = 0, t2 = 0;
     reg [2:0] ph = 0;
+    (* keep *) reg ld_r = 0;
+    (* keep *) reg ld_g = 0;
+    (* keep *) reg ld_b = 0;
+    (* keep *) reg ld_c = 0;
     reg [9:0] sr = 0, sg = 0, sb = 0, sc = 0;
+    wire [2:0] ph_n = (t1 != t2) ? 3'd0 : ph + 3'd1;
     always @(posedge sclk) begin
         t1 <= ptog;
         t2 <= t1;
-        ph <= (t1 != t2) ? 3'd0 : ph + 1;
-        if (ph == 3'd1) begin
-            sr <= tmds_r; sg <= tmds_g; sb <= tmds_b; sc <= 10'b0000011111;
-        end else begin
-            sr <= sr >> 2; sg <= sg >> 2; sb <= sb >> 2; sc <= sc >> 2;
-        end
+        ph <= ph_n;
+        ld_r <= (ph_n == 3'd1); ld_g <= (ph_n == 3'd1);
+        ld_b <= (ph_n == 3'd1); ld_c <= (ph_n == 3'd1);
+        sr <= ld_r ? tmds_r : sr >> 2;
+        sg <= ld_g ? tmds_g : sg >> 2;
+        sb <= ld_b ? tmds_b : sb >> 2;
+        sc <= ld_c ? 10'b0000011111 : sc >> 2;
     end
     ODDRX1F ddr_b (.D0(sb[0]), .D1(sb[1]), .SCLK(sclk), .RST(1'b0), .Q(gpdi_dp[0]));
     ODDRX1F ddr_g (.D0(sg[0]), .D1(sg[1]), .SCLK(sclk), .RST(1'b0), .Q(gpdi_dp[1]));

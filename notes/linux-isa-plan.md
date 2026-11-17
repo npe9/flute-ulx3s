@@ -171,8 +171,17 @@ These are additions to the per-feature verification above. Statuses were written
        semihosting set up): skipped in FluteUlx3s.py with these reasons.
      - Sv32Test (a gdb read through the page table at `$priv=0` failed) passes on lx49: the
        stale-cache bug, the page table had been written while halted.
-     - lx49 (all four fixed; see its gate) first build: 37 pass, 39 not applicable, 2 fail
-       (PrivChange, PrivRw: the `dcsr.prv` bug, fixed in the next lx49 build).
+     - lx49 (Flute d455742) fixes all four.  First build: 37 pass, 2 fail (PrivChange, PrivRw:
+       a resume ignored `dcsr.prv`).  That fix made the restart rule wait on near_mem's fence
+       response RDY, which reached the fetch-request select (seeds 46.17/52.78/49.39): the
+       flush ack now only sets a flag and the restart fires off registers (55.87/51.15/51.47).
+     - The suite never resets the hart between test classes; TooManyHwbp hung in 3 of 5 runs
+       when an earlier test's timer interrupt was taken before the new program's first
+       instruction through the old `mtvec`.  `FluteUlx3s.cfg` now does `reset halt`.
+     - lx49 final (seed 7 bit, 57.54 MHz): 38 pass, 39 not applicable, 1 fail: DisconnectTest
+       compares `mcycleh` across a disconnect and lost the race with the low half's wrap
+       (`mcycle` was 0xff5f8282).  Open: honor `dcsr.stopcount` (counters stop in Debug Mode;
+       it is writable but ignored today), likewise `stoptime` and `stepie`, in the next build.
 7. **CDC and reset checks.**
    - The ring-oscillator TRNG crosses an async boundary into the core clock; candidate tool is `run_cdc.py` in the sv-yosys battery.
    - UART RX, buttons and other async inputs go through the same pass.

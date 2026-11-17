@@ -16,7 +16,8 @@ Current status (`linux-isa` branch, 2026-11-16; promoted build lx48):
 - Console: FTDI UART at 1000000 baud; the on-chip boot ROM loads images into SDRAM with a
   chunked, checksummed protocol, or boots one from the configuration flash.
 - Debug: RISC-V Debug Module over the UART (`scripts/dmi.py`) and over the US1 cable's JTAG
-  (stock OpenOCD, `openocd/ulx3s_jtagg.ocd`).
+  (stock OpenOCD, `openocd/ulx3s_jtagg.ocd`). The riscv-tests debug suite runs on the board
+  (`test/debug/run.sh`); candidate lx49 fixes the hart bugs it found (not promoted yet).
 - Every block in the SoC has a formal spec (`formal/fv/`), besides riscv-formal on the core.
 - Every change ships only after the verification gates below.
 
@@ -487,7 +488,9 @@ comes from architecture, with at least 10% margin before benching):
   `HW_LX48=1` and a card fresh from power-up, also native SD: 28/0).
 - **IP formal** — `formal/fv/bin/fvgen.py run <ip> <checks>` for every SoC block (cfg per IP in
   `formal/fv/ips/`, mutants with `fvgen mutate`); `formal/fv/README.md` has the method. The
-  ring oscillators are checked on the netlist by `formal/fv/bin/ro_trng_netlist.py`.
+  ring oscillators are checked on the netlist by `formal/fv/bin/ro_trng_netlist.py`, and
+  `formal/dvi_ser/equiv.sh` checks the HDMI serializer against its reference.
+- **Debug suite** — `test/debug/run.sh` on the board for Debug Module or hart debug changes.
 - **Gate script** — each build's `build/<name>/gate.sh` runs the sims, formal and P&R seeds.
 - **ISA tests** — `sim/isa_bram/isa_run.py`: riscv-tests (Flute and Sail repos) and the
   generated PMP, B/K and F/D tests in the strict harness.
@@ -576,11 +579,17 @@ runs), and `test/debug/openocd012.sh` turns the suite's `gdb port` / `tcl port` 
 into OpenOCD 0.12's `gdb_port` forms. Target: `test/debug/FluteUlx3s.py` (RAM test area
 0x80100000, 1 MiB; skip list with the reason for each: no trigger module, OpenOCD 0.12 message
 formats, semihosting file I/O). Logs go to `test/debug/logs/` (ignored). Program the FPGA first;
-the JTAG cable cannot be claimed while the UART tty is open. lx48: 27 pass, 33 not applicable,
-18 fail or error (about 35 min). The failures came from four hart bugs (fixed in lx49, see
-notes/linux-isa-plan.md item 6): the caches were not flushed on resume, so a breakpoint the
-debugger wrote was never fetched; a resume lost a debugger's write to `dcsr.prv`; a debugger read
-of a CSR that does not exist succeeded; and 64-bit FPR accesses were rejected on RV32.
+the JTAG cable cannot be claimed while the UART tty is open. `FluteUlx3s.cfg` runs `reset halt`
+(ndmreset) when each OpenOCD starts: the suite never resets the hart between test classes, and a
+timer interrupt an earlier test armed could otherwise be taken before the next program's first
+instruction, through the old program's `mtvec`. lx48: 27 pass, 33 not applicable, 18 fail or
+error. The failures came from four hart bugs, fixed in lx49 (notes/linux-isa-plan.md item 6):
+the caches were not flushed on resume, so a breakpoint the debugger wrote was never fetched; a
+resume lost a debugger's write to `dcsr.prv`; a debugger read of a CSR that does not exist
+succeeded; and 64-bit FPR accesses were rejected on RV32. lx49: 38 pass, 39 not applicable, in
+about 5 min. The one remaining failure, DisconnectTest, is a race: `mcycle` keeps counting in
+Debug Mode, so its high half can change between the test's two register dumps if the low half
+wraps (every 86 s). `dcsr.stopcount` is writable but not honored yet (open item).
 
 The J1-header soft TAP is gone (it was never connected to the debug module), so J1's
 A10/A11/B11/C11 are free GPIO.
@@ -681,6 +690,12 @@ switches mode 2 on; the kernel console stays on the UART (fbcon scrolling at ~32
 is too slow to be the default; add `console=tty0` to try it). In simulation,
 `sim/video_ut/run.sh` (`make sim-video-ut`) checks timing, TMDS and every mode against a model,
 and the strict and Linux benches take `+fb_ppm=<file>` to save the last full frame as a PPM.
+
+The serializer (`dvi_ser`) loads each lane's 10-bit word from that lane's own load flag, set one
+shift clock early (lx49): a single shared phase decode fanned out to the four lanes across the
+die and routed at 122 MHz against the 125 MHz shift clock. `formal/dvi_ser/equiv.sh` proves the
+new serializer equal, cycle for cycle and on both DDR bits of every lane, to the old one
+(`formal/dvi_ser/dvi_ser_ref.v`), by k-induction in yosys.
 
 ## Milestone LEDs
 
@@ -793,7 +808,8 @@ rules. The older Bluesim testbench (`test/Sdram_Tb.bsv`) is not maintained.
 - `formal/fv/` — per-IP formal specs, VIPs and the `fvgen` runner.
 - `src/SoC_Info.bsv` — self-describing SoC block (device table, build date, clock, bus error monitor).
 - `sim/strict_bram/`, `sim/ndm_bram/` — Verilator gate harnesses (J1, F2, ndmreset).
-- `formal/` — riscv-formal wrapper and gate runner.
+- `formal/` — riscv-formal wrapper and gate runner; `formal/dvi_ser/` the serializer equivalence.
+- `test/debug/` — riscv-tests debug suite target for the board (OpenOCD config, linker script).
 - `test/` — bare-metal gate tests (`cache_test`, `amo_test`, `ipc_bench`) and board scripts.
 - `scripts/hw_test_suite.py` — board interface conformance suite.
 - `bits/` — promoted bitstreams (rollback points).
