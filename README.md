@@ -17,7 +17,7 @@ Current status (`linux-isa` branch, 2026-11-16; promoted build lx48):
   chunked, checksummed protocol, or boots one from the configuration flash.
 - Debug: RISC-V Debug Module over the UART (`scripts/dmi.py`) and over the US1 cable's JTAG
   (stock OpenOCD, `openocd/ulx3s_jtagg.ocd`). The riscv-tests debug suite runs on the board
-  (`test/debug/run.sh`); candidate lx49 fixes the hart bugs it found (not promoted yet).
+  (`test/debug/run.sh`); candidate lx49b passes all of it that applies (not promoted yet).
 - Every block in the SoC has a formal spec (`formal/fv/`), besides riscv-formal on the core.
 - Every change ships only after the verification gates below.
 
@@ -587,9 +587,13 @@ error. The failures came from four hart bugs, fixed in lx49 (notes/linux-isa-pla
 the caches were not flushed on resume, so a breakpoint the debugger wrote was never fetched; a
 resume lost a debugger's write to `dcsr.prv`; a debugger read of a CSR that does not exist
 succeeded; and 64-bit FPR accesses were rejected on RV32. lx49: 38 pass, 39 not applicable, in
-about 5 min. The one remaining failure, DisconnectTest, is a race: `mcycle` keeps counting in
-Debug Mode, so its high half can change between the test's two register dumps if the low half
-wraps (every 86 s). `dcsr.stopcount` is writable but not honored yet (open item).
+about 5 min, and one failure, DisconnectTest: `mcycle` kept counting in Debug Mode, so its high
+half changed between the test's two register dumps when the low half wrapped (every 86 s).
+lx49b honors `dcsr.stopcount` (reset value 1: `mcycle` holds while the hart is halted) and
+`dcsr.stepie` (no interrupts while single-stepping unless set); `stoptime` reads 0, since
+`mtime` is the shared CLINT's. It also fixes CSR writes to `mcycle`/`mcycleh`, which upstream
+Flute dropped (the counter just kept incrementing; `test/csr_test` checks 0x22-0x24 catch it).
+lx49b: 39 pass, 39 not applicable, 0 fail.
 
 The J1-header soft TAP is gone (it was never connected to the debug module), so J1's
 A10/A11/B11/C11 are free GPIO.

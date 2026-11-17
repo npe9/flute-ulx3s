@@ -4,7 +4,8 @@
 # Covers CSRRW/RS/RC and the immediate forms (old value in rd, new value in the CSR),
 # rd = x0, rs1 = x0 (read only), CSR write then immediate read-back and immediate use of
 # rd, back-to-back CSR writes, mtvec/mepc/mcause/mtval through ECALL and an illegal write to
-# a read-only CSR (rd must stay unwritten), the hardwired-zero mhpm ranges, mstatus.MIE.
+# a read-only CSR (rd must stay unwritten), the hardwired-zero mhpm ranges, mstatus.MIE,
+# and writes to mcycle / mcycleh.
 # Build: riscv64-unknown-elf-gcc -march=rv32imac_zicsr -mabi=ilp32 -nostdlib -nostartfiles
 #   -Wl,-Ttext=0x80000000 -o csr_test.elf csr_test.S; objcopy -O binary; pad to 4 bytes.
 
@@ -168,6 +169,20 @@ after_mret:
     csrr a2, mstatus
     andi a2, a2, 0x8
     CHK  0x21, a2, 0
+
+    # ---- mcycle / mcycleh are writable (lx49b: a write used to be dropped, mcycle kept counting)
+    li   a3, 0x10000000
+    csrw mcycle, a3
+    csrr a2, mcycle
+    sub  a2, a2, a3            # cycles since the write: small and non-negative
+    srli a2, a2, 8
+    CHK  0x22, a2, 0
+    li   a3, 0x12345
+    csrw mcycleh, a3
+    csrr a2, mcycleh
+    CHK  0x23, a2, 0x12345
+    csrr a2, cycleh            # the user-mode alias reads the same counter
+    CHK  0x24, a2, 0x12345
 
     li   t0, 'D'
     sw   t0, 0(s0)

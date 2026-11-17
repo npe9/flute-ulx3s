@@ -180,8 +180,18 @@ These are additions to the per-feature verification above. Statuses were written
        instruction through the old `mtvec`.  `FluteUlx3s.cfg` now does `reset halt`.
      - lx49 final (seed 7 bit, 57.54 MHz): 38 pass, 39 not applicable, 1 fail: DisconnectTest
        compares `mcycleh` across a disconnect and lost the race with the low half's wrap
-       (`mcycle` was 0xff5f8282).  Open: honor `dcsr.stopcount` (counters stop in Debug Mode;
-       it is writable but ignored today), likewise `stoptime` and `stepie`, in the next build.
+       (`mcycle` was 0xff5f8282).
+     - lx49b (Flute 6b893dc): `dcsr.stopcount` resets to 1 and holds `mcycle` while the CPU is
+       in CPU_DEBUG_MODE / GDB_PAUSING / GDB_RESUMING (CPU rule -> `ma_debug_mode` ->
+       `rg_hold_mcycle`, a ConfigReg: as a plain Reg bsc found a cycle rl_mcycle_incr ->
+       ma_debug_mode -> mav_csr_write -> rl_mcycle_incr).  `dcsr.stepie` masks interrupts and
+       NMI in rl_int_pending_bridge while stepping.  `stoptime` reads 0 (mtime is the CLINT's).
+       Found on the way: CSR writes to `mcycle`/`mcycleh` were dropped (both arms of
+       rl_mcycle_incr incremented, upstream "TODO: fix this"); riscv-formal's csrc_inc check
+       cannot see that.  test/csr_test 0x22-0x24 now check it (FAIL on lx49, PASS on lx49b);
+       riscv-formal csrw_mcycle_ch0 and csrc_inc_mcycle_ch0 PASS on lx49b.
+     - lx49b board (seed 7): debug suite 39 pass, 39 not applicable, 0 fail (DisconnectTest
+       pass in 6.6 s).
 7. **CDC and reset checks.**
    - The ring-oscillator TRNG crosses an async boundary into the core clock; candidate tool is `run_cdc.py` in the sv-yosys battery.
    - UART RX, buttons and other async inputs go through the same pass.

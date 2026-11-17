@@ -661,6 +661,21 @@ Every block in the SoC now has formal.
 The original BSV blocks are ported.  RVFI stays: riscv-formal
 needs the core to emit its trace port; it is output-only and off unless RISCV_FORMAL is defined.
 
+## lx49b (2026-11-17, candidate, not promoted)
+
+- lx49 + debug-spec counter/step fixes (Flute 6b893dc, notes/linux-isa-plan.md item 6):
+  `mcycle`/`mcycleh` CSR writes take effect (they were dropped), `dcsr.stopcount` (reset 1)
+  holds `mcycle` in Debug Mode, `dcsr.stepie` honored, `stoptime` reads 0.
+- Seeds s3/s5/s7: system 54.70/50.43/55.97, shift 169/170/154, pixel 68.9/68.2/68.1 MHz.
+- Gate: riscv-formal smoke 10/10 (+ csrw_mcycle_ch0, csrc_inc_mcycle_ch0), ISA 94/94, strict
+  cache/csr/esp32/io/audio/sd/sdh/sdh_w (csr_test now includes the mcycle write checks), J1, ndm,
+  Linux tick 2, Bluesim, dvi_ser equivalence, video_ut, every formal/fv proof, ro_trng_netlist.
+- Board (seed 7 bit in SRAM): hw suite 78/0 (2 known WARN), drivers 19/0, debug suite 39 pass /
+  39 N/A / 0 fail.  Linux boots (127 ticks, fp ok) but found no card: the card was in SPI mode
+  (TempleOS SdhInit: "no answer to CMD8"), and lx49 now sees the same, so it is the card's state;
+  the likely cause is the flash directory's SPI-mode Linux, which autoboots after each JTAG
+  refresh.  Native-SD Linux on lx49b waits for a US1 replug (power-cycles the card).
+
 ## lx49 (2026-11-16, candidate, not promoted)
 
 - lx48 + the Debug Module / hart fixes from the riscv-tests debug suite (notes/linux-isa-plan.md
