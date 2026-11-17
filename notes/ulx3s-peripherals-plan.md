@@ -661,7 +661,7 @@ Every block in the SoC now has formal.
 The original BSV blocks are ported.  RVFI stays: riscv-formal
 needs the core to emit its trace port; it is output-only and off unless RISCV_FORMAL is defined.
 
-## lx49b (2026-11-17, candidate, not promoted)
+## lx49b (2026-11-17, promoted: flash 0)
 
 - lx49 + debug-spec counter/step fixes (Flute 6b893dc, notes/linux-isa-plan.md item 6):
   `mcycle`/`mcycleh` CSR writes take effect (they were dropped), `dcsr.stopcount` (reset 1)
@@ -674,7 +674,13 @@ needs the core to emit its trace port; it is output-only and off unless RISCV_FO
   39 N/A / 0 fail.  Linux boots (127 ticks, fp ok) but found no card: the card was in SPI mode
   (TempleOS SdhInit: "no answer to CMD8"), and lx49 now sees the same, so it is the card's state;
   the likely cause is the flash directory's SPI-mode Linux, which autoboots after each JTAG
-  refresh.  Native-SD Linux on lx49b waits for a US1 replug (power-cycles the card).
+  refresh.
+- Promoted 2026-11-17: `lx49b-s7.bit` at flash offset 0 and a new boot directory at 0x400000
+  (`mkflashimg.py --image templeos=templeos/build/ulx3s_repl.blob.bin --image
+  linux=build/lx48/linux-sw/out-fp/fw_payload.bin --default 1 --wait-ms 3000 --sckdiv 1`),
+  both written with `--verify`.  The old directory's SPI-mode Linux is gone (it is in
+  build/flash_backup/ulx3s_flash_20261116.bin).  After a US1 replug the board booted from flash
+  alone into native-SD Linux: `flash: ok`, mmcblk0 7.50 GiB (ro), MBR 55aa, 145 ticks, fp ok.
 
 ## lx49 (2026-11-16, candidate, not promoted)
 

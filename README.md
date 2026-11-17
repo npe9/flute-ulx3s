@@ -17,7 +17,7 @@ Current status (`linux-isa` branch, 2026-11-16; promoted build lx48):
   chunked, checksummed protocol, or boots one from the configuration flash.
 - Debug: RISC-V Debug Module over the UART (`scripts/dmi.py`) and over the US1 cable's JTAG
   (stock OpenOCD, `openocd/ulx3s_jtagg.ocd`). The riscv-tests debug suite runs on the board
-  (`test/debug/run.sh`); candidate lx49b passes all of it that applies (not promoted yet).
+  (`test/debug/run.sh`); lx49b (promoted, flash 0) passes all of it that applies.
 - Every block in the SoC has a formal spec (`formal/fv/`), besides riscv-formal on the core.
 - Every change ships only after the verification gates below.
 
@@ -655,10 +655,12 @@ openFPGALoader -b ulx3s -f --file-type raw -o 0x400000 build/flash-dir.bin
 With an image in flash, `loader.py` must start within `wait_ms` of programming the FPGA
 (FIRE1 restarts the countdown). The load runs at ~0.58 MB/s (CPU-bound: TempleOS ~5 s,
 Linux ~11 s). For power-on boot, also write the bitstream at offset 0
-(`openFPGALoader -b ulx3s -f build/ulx3s_top.bit`). The board here has the promoted lx48 at
-offset 0 since 2026-11-16 (the factory self-test that was there is in a full flash backup,
-`build/flash_backup/ulx3s_flash_20261116.bin`), and its boot directory still defaults to an
-older SPI-mode Linux: send any byte within 3 s of power-up to keep the microSD in native mode.
+(`openFPGALoader -b ulx3s -f build/ulx3s_top.bit`). The board here has the promoted lx49b
+(seed 7) at offset 0 since 2026-11-17 (lx48 before it from 2026-11-16; the factory self-test
+and the older SPI-mode Linux are in a full flash backup, `build/flash_backup/ulx3s_flash_20261116.bin`).
+Its boot directory (`build/lx49b/flash.bin`) holds TempleOS and the native-SD Linux and defaults
+to Linux. The old directory booted an SPI-mode Linux, which left the microSD in SPI mode until
+the next power cycle; the native host cannot talk to a card in SPI mode.
 `openFPGALoader -b ulx3s -r` reloads the FPGA from flash in 0.2 s. The sim flash model is
 `sim/common/spi_flash_model.v` (`linux_run.py --flash <mkflashimg --hex output> none`).
 
