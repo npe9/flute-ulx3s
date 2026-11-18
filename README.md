@@ -499,7 +499,9 @@ comes from architecture, with at least 10% margin before benching):
   `formal/dvi_ser/equiv.sh` checks the HDMI serializer against its reference.
   Both caches have bounded deadlock-freedom checks: the D side (`mmu_cache`, `mmu_cache_tiny`,
   with the E8b / E25 hangs as mutants) and the I side (`icache`, `icache_tiny`, with the
-  054d309 ndmreset hang as a mutant). Neither is in the gate (`short`: 34 / 19 min).
+  054d309 ndmreset hang as a mutant). On the 1 KB D-cache build, PDR proves the AXI stability
+  rules and K_IDLE (busy with nothing pending never lasts) for all depths; the rest is bounded.
+  Neither is in the gate (`short`: 61 / 19 min).
 - **Debug suite** — `test/debug/run.sh` on the board for Debug Module or hart debug changes.
 - **Gate script** — each build's `build/<name>/gate.sh` runs the sims, formal and P&R seeds.
 - **ISA tests** — `sim/isa_bram/isa_run.py`: riscv-tests (Flute and Sail repos) and the

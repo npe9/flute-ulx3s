@@ -27,6 +27,11 @@
 //   K_IDLE: nor K_IDLE cycles in a row with nothing owed: no request launched and unanswered,
 //           no AR / AW / W offered, no read burst or write response outstanding (E8b / E25: a
 //           hold state counted as busy is exactly this, and the CPU then waits forever);
+//   K_WAIT: a launched request unanswered never waits K_WAIT cycles in a row with nothing owed by
+//           the fabric (no AR / AW / W offered, nothing outstanding).  The longest such run seen
+//           is 9 (a uDTLB fill, a re-request, then the refill's AR); K_WAIT = 16.  With K_IDLE
+//           this is the hang half of deadlock freedom, free of latency: a wait the fabric
+//           doesn't owe ends within a few cycles;
 //   K_RST:  a reset or flush request gets its response within K_RST cycles;
 //   K_R / K_B: a read beat / write response offered is taken within K_R / K_B cycles;
 //   the master side of AXI4: AR / AW / W held, with stable payload, until accepted.
@@ -65,11 +70,20 @@ module mmu_cache_wb (
 `ifndef FV_K_IDLE
 `define FV_K_IDLE 4
 `endif
+`ifndef FV_K_WAIT
+`define FV_K_WAIT 16
+`endif
     localparam integer L = `FV_L, K_RSP = `FV_K_RSP, K_BUSY = `FV_K_BUSY, K_RST = `FV_K_RST,
-                       K_IDLE = `FV_K_IDLE;
+                       K_IDLE = `FV_K_IDLE, K_WAIT = `FV_K_WAIT;
     // a refill's AR leaves before CACHE_SNAPSHOT (cwords_per_cline + 2 = 10 cycles) has read the
     // victim's other-way words, so its beats can wait that long in the 2-entry R FIFO
-    localparam integer K_R = 16, K_B = 16;
+`ifndef FV_K_R
+`define FV_K_R 16
+`endif
+`ifndef FV_K_B
+`define FV_K_B 16
+`endif
+    localparam integer K_R = `FV_K_R, K_B = `FV_K_B;
     wire rst = !rst_n;
 
     // ---------------- the CPU ----------------
@@ -194,7 +208,13 @@ module mmu_cache_wb (
     reg [1:0] req_op_q;
     always @(posedge clk) if (en_req) req_op_q <= req_op;
     reg [7:0] c_rsp = 0, c_busy = 0, c_rst = 0, c_idle = 0; reg [4:0] c_rr = 0, c_br = 0;
-    wire owed = pend || arvalid || awvalid || wvalid || ar_n != 0 || aw_n != 0;
+    wire axi_owed = arvalid || awvalid || wvalid || ar_n != 0 || aw_n != 0;
+    wire owed = pend || axi_owed;
+    reg [7:0] c_wait = 0;    // a launched op unanswered with nothing owed by the fabric
+    always @(posedge clk) begin
+        c_wait <= (pend && !valid && !axi_owed) ? c_wait + 1 : 0;
+        if (rst) c_wait <= 0;
+    end
     always @(posedge clk) begin
         c_rsp  <= (pend && !valid) ? c_rsp + 1 : 0;
         c_busy <= (busy && !rst_out) ? c_busy + 1 : 0;   // a reset / flush: K_RST
@@ -208,6 +228,7 @@ module mmu_cache_wb (
         assert (c_rsp < K_RSP);
         assert (c_busy < K_BUSY);
         assert (c_idle < K_IDLE);
+        assert (c_wait < K_WAIT);
         assert (c_rst < K_RST);
         assert (c_rr < K_R);
         assert (c_br < K_B);
