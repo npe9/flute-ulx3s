@@ -150,6 +150,25 @@ These are additions to the per-feature verification above. Statuses were written
 5. **Memory-model litmus tests (riscv-litmus / herd, RVWMO).**
    - Single-hart issues: I/D and MMIO ordering, fence.i with the write-through D$, sfence.vma, AMO and LR/SC ordering, fences around non-posted MMIO.
    - Small and cheap to run.
+   - **Update 2026-11-17: done as `test/mm_test.S`** (litmus by construction, no herd: on one hart
+     RVWMO reduces to "a load sees the latest program-order store to its bytes", plus FENCE.I
+     for fetch and SFENCE.VMA for translation, so each check is a store/fence/load sequence with
+     a fixed expected value).  0x1x FENCE.I: rewrite a slot already in the I$ twice, a never-run
+     slot in the same line, a compressed slot by `sh`.  0x2x cached store -> load back to back:
+     byte/half merges with sign extension, both halves of a 64-bit cache word, WAW of mixed
+     widths, WAR, three tags on one index, and a cached and an uncached address with equal low
+     12 bits.  0x3x uncached (framebuffer RAM, palette): partial-width stores then loads, two
+     MMIO stores then loads, MMIO/cached interleaving with and without FENCE, palette [23:0]
+     write semantics and restore.  0x4x Sv32 from M-mode with MPRV=1/MPP=S (PMP entry 0 NAPOT
+     all, RWX): remap + full SFENCE.VMA, remap + address-specific flush, a store through the VA
+     lands in the new page only, megapage, read-only PTE (load ok, store -> cause 15, mtval =
+     VA), invalid PTE (load -> cause 13), the faulting store left memory unchanged.
+     lx49b: PASS in the strict sim and on the board.  Mutant (one FENCE.I and one SFENCE.VMA
+     removed): fails 0x11 (old instruction) and 0x41 (old translation) in both, so this core's
+     I$ and TLB really do hold stale state and the fences are what clear it.  In CI (strict
+     matrix `mm`, with `csr`).  Not covered: fences around a non-posted MMIO side effect
+     visible elsewhere (no device here has one the hart can observe), and A/D updates (Svade:
+     TLB.bsv faults on A=0, or D=0 for a store, before its update branch; Linux sets them).
 6. **Debug spec compliance.**
    - The riscv-tests debug suite (gdbserver.py through OpenOCD) covers the Debug Module and JTAG: abstract commands, halt/resume, single-step over traps, DM system bus.
    - Nothing else checks these today.

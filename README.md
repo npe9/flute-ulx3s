@@ -476,8 +476,15 @@ comes from architecture, with at least 10% margin before benching):
   Compare the hello-banner cycle count against the previous netlist, not just PASS.
 - **F2 X-sweep** — `sim/strict_bram/run_sweep.sh 8`: 8 Verilator seeds with randomized
   uninitialized state; output must be byte-identical.
-- **Cache / AMO tests** — `test/cache_test.S`, `test/amo_test.S` in the strict sim
-  (`TB_TX_TRACE=1`, pass = `T` ... `D`) and on the board (`test/run_cache_test.py`).
+- **Cache / AMO / ordering tests** — `test/cache_test.S`, `test/amo_test.S`, `test/mm_test.S`,
+  `test/csr_test.S` in the strict sim (`TB_TX_TRACE=1`, pass = `T` ... `D`) and on the board
+  (`test/run_cache_test.py`, or `loader.py -t 8 <bin>`). mm_test is the single-hart
+  memory-ordering litmus set: FENCE.I over lines already in the I$ (word and compressed
+  halfword rewrites), store -> load at every width on the write-through D$ (merges, both halves
+  of a 64-bit cache word, conflict misses, cached and uncached addresses with equal low bits),
+  uncached MMIO store -> load on the framebuffer RAM and palette, and SFENCE.VMA against the
+  TLB (remap, address-specific flush, read-only and invalid PTEs fault, megapage). A mutant
+  without one FENCE.I and one SFENCE.VMA fails 0x11 and 0x41, in sim and on the board.
 - **riscv-formal** — `formal/run.sh`: 10 smoke checks on mkCPU with RVFI (see
   `formal/README.md`); never run two at once against one riscv-formal checkout.
 - **ndmreset** — `sim/ndm_bram` in simulation and `test/ndmreset_board.py` on the board,
@@ -816,7 +823,7 @@ rules. The older Bluesim testbench (`test/Sdram_Tb.bsv`) is not maintained.
 - `sim/strict_bram/`, `sim/ndm_bram/` — Verilator gate harnesses (J1, F2, ndmreset).
 - `formal/` — riscv-formal wrapper and gate runner; `formal/dvi_ser/` the serializer equivalence.
 - `test/debug/` — riscv-tests debug suite target for the board (OpenOCD config, linker script).
-- `test/` — bare-metal gate tests (`cache_test`, `amo_test`, `ipc_bench`) and board scripts.
+- `test/` — bare-metal gate tests (`cache_test`, `amo_test`, `mm_test`, `csr_test`, `ipc_bench`) and board scripts.
 - `scripts/hw_test_suite.py` — board interface conformance suite.
 - `bits/` — promoted bitstreams (rollback points).
 - `linux-sw/` — OpenSBI + Linux + `/init` build (Docker).

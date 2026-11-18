@@ -109,7 +109,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        test: [j1, cache, amo, sd, fb, io, video]
+        test: [j1, cache, amo, mm, csr, sd, fb, io, video]
+        # mm: single-hart memory ordering (test/mm_test.S: FENCE.I, store->load, MMIO, SFENCE.VMA)
+        # csr: CSR behaviour incl. the mcycle write and the Debug-Mode counter hold (test/csr_test.S)
         include:
           # DVI framebuffer through the register-bus bridge: registers, pixel RAM fill/readback,
           # byte/halfword stores, palette, frame counter (test/fb_test.c)
