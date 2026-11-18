@@ -219,7 +219,7 @@ def gen(ip, c, work, rtl_override=None, only=None):
         return rtl_override.get(r, os.path.join(root, r)) if rtl_override else os.path.join(root, r)
     rtl = [src(r) for r in c.get('rtl', '').split()]
     bsv_v = []
-    if 'bsv' in c:                       # a BSV module: compiled with the SoC's flags, no defines
+    if 'bsv' in c:                       # a BSV module: compiled with the SoC's flags (+ bsvdefs)
         bsrc, *btops = c['bsv'].split()   # the package, then its module(s) (several: one per check)
         out = os.path.abspath(os.path.join(work, 'bsv'))
         if os.path.isdir(out):
@@ -227,7 +227,8 @@ def gen(ip, c, work, rtl_override=None, only=None):
         # bsvwrap: a formal/fv package of (* synthesize *) wrappers instantiating the package's
         # parameterized module; the (possibly mutated) package is found through FV_BSV_PATH.
         wrap = c.get('bsvwrap')
-        mk = ['make', '-s', '-C', REPO, 'fv-bsv', f'FV_BSV_TOP={" ".join(btops)}', f'FV_BSV_OUT={out}']
+        mk = ['make', '-s', '-C', REPO, 'fv-bsv', f'FV_BSV_TOP={" ".join(btops)}', f'FV_BSV_OUT={out}',
+              f'FV_BSV_DEFS={c.get("bsvdefs", "")}']   # bsvdefs: extra bsc defines (e.g. a geometry)
         mk += [f'FV_BSV_SRC={fvpath(wrap)}', f'FV_BSV_PATH={os.path.dirname(src(bsrc))}'] if wrap else \
               [f'FV_BSV_SRC={src(bsrc)}']
         r = subprocess.run(mk, capture_output=True, text=True)
@@ -364,7 +365,9 @@ def cmd_mutate(ip, only):
 
     def evaluate(tag, override):
         work = os.path.join(tmp, tag)
-        dirs = gen(ip, c, work, override)
+        # mutchecks: the checks a sweep runs (default all but cover; a slow prove / deep bmc
+        # can be left to the plain run)
+        dirs = gen(ip, c, work, override, c.get('mutchecks', '').split() or None)
         res = []
         for name, d in dirs.items():
             if c['checks'][name].split()[0] == 'cover':

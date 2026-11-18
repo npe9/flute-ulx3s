@@ -243,6 +243,13 @@ These are additions to the per-feature verification above. Statuses were written
     - Run riscv-formal's liveness check routinely; there were hangs in E8a/E8b.
     - Add the FVIP MAXWAIT checks with properly composed bounds.
     - From the crossbar oracle: equal MAXWAIT on both sides does not compose through register slices. The far side needs a smaller bound, reduced by the pipeline latency.
+
+    **Update 2026-11-18: MMU_Cache deadlock freedom, bounded** (`formal/fv/ips/mmu_cache`, `mmu_cache_tiny`; table in formal/fv/README.md). E8, E8b and E8c were all hangs at the D-cache's request / busy contract, so the checker states that contract at the ports: the CPU side as CPU_Stage2 and Near_Mem keep it, and the fabric as fair AXI4 (every channel within L = 2 cycles, in order). It asserts that every request is answered, busy drops, and reset / flush complete, each within 96 cycles. It also asserts that busy never holds 4 cycles with nothing owed.
+    - The cache RAMs are cut to two sets (`vip/bsclib/bram2_lowsets.v`, free reads elsewhere: sound). Even so, the shipped 8 KB build spends ~66 of a BMC's steps in the reset loop. The 1 KB build (riscv-formal's RVFI_TINY_CACHES geometry, same FSM, 1 way) resets in ~16.
+    - Bounded, not proved: 8 KB live has no counterexample through step 139. PDR proved 3 of 9 properties at the 2 h limit and left the rest open.
+    - Latency, not hangs: every K = 24 / 48 counterexample was real latency (an AMO that misses the uDTLB, does a 2-level walk, refills the uDTLB, then snapshots and refills an 8-beat line: 49+ cycles before AMO_EXEC). Those bounds were raised, not waived.
+    - Mutants: reverting E8b (CACHE_ST_AMO_RSP counted as busy) or E25 (CACHE_LD_RSP) fails the K_IDLE assertion within 80 steps; the unmutated cache passes.
+    - Next: an unbounded proof (k-induction with invariants on the FSM, or PDR with a smaller loop counter), then compose with the I side and Near_Mem's arbiter.
 12. **FVIP on the remaining ports.**
 
     Done (`formal/axi4_fvip`, vendored @250f1ff, see its README):

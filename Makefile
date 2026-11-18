@@ -450,7 +450,7 @@ clean:
 .PHONY: fv-bsv
 fv-bsv:
 	mkdir -p $(FV_BSV_OUT)/bsc $(FV_BSV_OUT)/v
-	$(BSC) -u -verilog $(addprefix -g ,$(FV_BSV_TOP)) $(BSC_FLAGS) $(DEFINES) \
+	$(BSC) -u -verilog $(addprefix -g ,$(FV_BSV_TOP)) $(BSC_FLAGS) $(DEFINES) $(addprefix -D ,$(FV_BSV_DEFS)) \
 	    -p $(abspath $(dir $(FV_BSV_SRC))):$(if $(FV_BSV_PATH),$(FV_BSV_PATH):)$(BSC_PATH) \
 	    -bdir $(FV_BSV_OUT)/bsc -vdir $(FV_BSV_OUT)/v \
 	    $(FV_BSV_SRC) > $(FV_BSV_OUT)/bsc.log 2>&1 || { tail -20 $(FV_BSV_OUT)/bsc.log; exit 1; }
