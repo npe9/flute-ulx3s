@@ -497,8 +497,9 @@ comes from architecture, with at least 10% margin before benching):
   `formal/fv/ips/`, mutants with `fvgen mutate`); `formal/fv/README.md` has the method. The
   ring oscillators are checked on the netlist by `formal/fv/bin/ro_trng_netlist.py`, and
   `formal/dvi_ser/equiv.sh` checks the HDMI serializer against its reference.
-  The D-cache (`mmu_cache`, `mmu_cache_tiny`) has a bounded deadlock-freedom check, and the
-  E8b / E25 hangs are its mutants; it is not in the gate (`short` takes 34 min).
+  Both caches have bounded deadlock-freedom checks: the D side (`mmu_cache`, `mmu_cache_tiny`,
+  with the E8b / E25 hangs as mutants) and the I side (`icache`, `icache_tiny`, with the
+  054d309 ndmreset hang as a mutant). Neither is in the gate (`short`: 34 / 19 min).
 - **Debug suite** — `test/debug/run.sh` on the board for Debug Module or hart debug changes.
 - **Gate script** — each build's `build/<name>/gate.sh` runs the sims, formal and P&R seeds.
 - **ISA tests** — `sim/isa_bram/isa_run.py`: riscv-tests (Flute and Sail repos) and the
