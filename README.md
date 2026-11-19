@@ -505,7 +505,7 @@ comes from architecture, with at least 10% margin before benching):
   those assumed) proves K_WAIT (a pending request never waits 16 cycles with nothing on the
   fabric) and its FSM / uDTLB / fabric lemmas for all depths. The latency bounds are
   bounded only.
-  Neither is in the gate (`short`: 69 / 19 min).
+  Neither is in the gate (`short`: 13 / 19 min; D-side `kind`: 3 min).
 - **Debug suite** — `test/debug/run.sh` on the board for Debug Module or hart debug changes.
 - **Gate script** — each build's `build/<name>/gate.sh` runs the sims, formal and P&R seeds.
 - **ISA tests** — `sim/isa_bram/isa_run.py`: riscv-tests (Flute and Sail repos) and the

@@ -46,6 +46,7 @@ module mmu_cache_wb (
     input wire [2:0]  rf_cw,      // the low bits of rg_cset_cword_in_cache: the refill's next word
     input wire        r_ne,       // the transactor's R FIFO (FIFO2) not empty; rready is its not-full
     input wire        b_ne,       // the transactor's B FIFO (FIFO2) not empty; bready is its not-full
+    input wire        w_nf,       // the transactor's W FIFO (FIFO2) not full; wvalid is its not-empty
     input wire        kecho,      // the cache's rg_kill_echo (RLD-4: set by ma_kill_echo, cleared by req)
     input wire [1:0]  rq_op, input wire [2:0] rq_f3, input wire [31:0] rq_addr,   // rg_op / rg_f3 / rg_addr (written only by req)
     input wire        u_any_d, u_any, u_byp,   // rg_u_any's D_IN (a uDTLB entry matches now), rg_u_any (last cycle), rg_udtlb_bypass
@@ -286,6 +287,10 @@ module mmu_cache_wb (
         if (ar_n != 0) assert (ar_h[7:0] == ((st == 5'd13 || st == 5'd14 || st == 5'd15) ? 8'd7 : 8'd0));
         // exactly: counted = held by the fabric + offered (the 1-entry AW FIFO) + answered but
         // not yet popped (the 2-entry B FIFO), so a nonzero count always has something owed
+        // AW and W balance: each fabric write enqueues one AW and its one W beat together, so
+        // AWs offered + held by the fabric = Ws buffered + last beats held.  An accepted AW therefore
+        // has its W offered or in (B owed): every term of axi_owed obliges the fabric
+        assert ({1'b0, aw_n} + (awvalid ? 5'd1 : 5'd0) == {1'b0, n_wl} + (!wvalid ? 5'd0 : w_nf ? 5'd1 : 5'd2));
         assert ({1'b0, wr_ctr} == {1'b0, aw_n} + (awvalid ? 5'd1 : 5'd0) + (!b_ne ? 5'd0 : bready ? 5'd1 : 5'd2));
         // a read burst outstanding only in a state waiting for its R beats (PTW_LEVEL_1 / _0,
         // CACHE_START_REFILL / SNAPSHOT / REFILL, IO_AWAITING_READ_RSP / _AMO_READ_RSP): a lemma
@@ -392,7 +397,7 @@ endmodule
 
 bind mkMMU_Cache mmu_cache_wb wb (
     .wr_ctr(ctr_wr_rsps_pending_crg), .st(rg_state), .snap_cnt(rg_snap_cnt),
-    .ar_enqs(rg_ar_enqs), .ar_deqs(rg_ar_deqs), .b_ne(\master_xactor_f_wr_resp$EMPTY_N ), .r_ne(\master_xactor_f_rd_data$EMPTY_N ), .rf_cw(rg_cset_cword_in_cache[2:0]), .epoch(rg_epoch), .kecho(rg_kill_echo), .rq_op(rg_op), .rq_f3(rg_f3), .rq_addr(rg_addr), .u_any_d(\rg_u_any$D_IN ), .u_any(rg_u_any), .u_byp(rg_udtlb_bypass),
+    .ar_enqs(rg_ar_enqs), .ar_deqs(rg_ar_deqs), .b_ne(\master_xactor_f_wr_resp$EMPTY_N ), .w_nf(\master_xactor_f_wr_data$FULL_N ), .r_ne(\master_xactor_f_rd_data$EMPTY_N ), .rf_cw(rg_cset_cword_in_cache[2:0]), .epoch(rg_epoch), .kecho(rg_kill_echo), .rq_op(rg_op), .rq_f3(rg_f3), .rq_addr(rg_addr), .u_any_d(\rg_u_any$D_IN ), .u_any(rg_u_any), .u_byp(rg_udtlb_bypass),
     .u_cq(rg_udtlb_ctx_seq), .u_cn(rg_udtlb_ctx_seen), .u_pq(rg_udtlb_pmp_seq), .u_pn(rg_udtlb_pmp_seen),
     .u_tq(rg_udtlb_tlb_seq), .u_tn(rg_udtlb_tlb_seen), .rg_pmp_in(rg_pmp), .age_seen(rg_age_seen), .req_seq(rg_req_seq),
     .clk(CLK), .rst_n(RST_N), .en_verb(EN_set_verbosity),
