@@ -40,6 +40,7 @@ module mmu_cache_wb (
     input wire        clk, rst_n,
     input wire [3:0]  wr_ctr,     // the cache's ctr_wr_rsps_pending (for the lemma)
     input wire [4:0]  st,         // the cache's rg_state (Module_State, MODULE_PRERESET = 0)
+    input wire [7:0]  snap_cnt,   // the cache's rg_snap_cnt (CACHE_SNAPSHOT's word counter)
     input wire        en_verb,
     input wire        en_rst_req, rdy_rst_req, en_rst_rsp, rdy_rst_rsp,
     input wire [1:0]  req_op, input wire [2:0] req_f3, input wire [31:0] req_addr, input wire en_req,
@@ -244,6 +245,12 @@ module mmu_cache_wb (
         assert (c_rst < K_RST);
         assert (c_rr < K_R);
         assert (c_br < K_B);
+        // per-state bound on an R beat's wait, a lemma toward K_R: the 2-entry R FIFO only backs
+        // up while CACHE_SNAPSHOT reads the victim line (rg_snap_cnt <= cwords_per_cline + 1),
+        // and CACHE_REFILL drains it; every other state takes a beat the cycle it is offered
+        if (st == 5'd14) assert (c_rr <= snap_cnt);
+        else if (st == 5'd15) assert (c_rr <= 10);
+        else assert (c_rr == 0);
     end
 `ifdef FV_REACH
     // Reachability by a failing assertion (abc bmc3 is far faster here than smtbmc's cover):
@@ -264,7 +271,7 @@ module mmu_cache_wb (
 endmodule
 
 bind mkMMU_Cache mmu_cache_wb wb (
-    .wr_ctr(ctr_wr_rsps_pending_crg), .st(rg_state),
+    .wr_ctr(ctr_wr_rsps_pending_crg), .st(rg_state), .snap_cnt(rg_snap_cnt),
     .clk(CLK), .rst_n(RST_N), .en_verb(EN_set_verbosity),
     .en_rst_req(EN_server_reset_request_put), .rdy_rst_req(RDY_server_reset_request_put),
     .en_rst_rsp(EN_server_reset_response_get), .rdy_rst_rsp(RDY_server_reset_response_get),
