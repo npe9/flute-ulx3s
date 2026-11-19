@@ -501,8 +501,10 @@ comes from architecture, with at least 10% margin before benching):
   with the E8b / E25 hangs as mutants) and the I side (`icache`, `icache_tiny`, with the
   054d309 ndmreset hang as a mutant). On the 1 KB D-cache build, PDR proves the AXI stability
   rules, K_IDLE (busy with nothing pending never lasts), one read burst at a time, and that R
-  and B beats are taken (B at once, R within 11) for all depths; K_WAIT (a pending request with nothing on the fabric) and
-  the latency bounds are bounded only.
+  and B beats are taken (B at once, R within 11) for all depths, and k-induction (`kind`, with
+  those assumed) proves K_WAIT (a pending request never waits 16 cycles with nothing on the
+  fabric) and its FSM / uDTLB / fabric lemmas for all depths. The latency bounds are
+  bounded only.
   Neither is in the gate (`short`: 69 / 19 min).
 - **Debug suite** — `test/debug/run.sh` on the board for Debug Module or hart debug changes.
 - **Gate script** — each build's `build/<name>/gate.sh` runs the sims, formal and P&R seeds.

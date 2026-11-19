@@ -42,7 +42,16 @@ module mmu_cache_wb (
     input wire [4:0]  st,         // the cache's rg_state (Module_State, MODULE_PRERESET = 0)
     input wire [7:0]  snap_cnt,   // the cache's rg_snap_cnt (CACHE_SNAPSHOT's word counter)
     input wire        ar_enqs, ar_deqs,   // rg_ar_enqs / rg_ar_deqs: an AR staged when they differ
+    input wire [1:0]  epoch,      // the cache's rg_epoch (the low ARID / AWID bits; stale R / B dropped)
+    input wire [2:0]  rf_cw,      // the low bits of rg_cset_cword_in_cache: the refill's next word
+    input wire        r_ne,       // the transactor's R FIFO (FIFO2) not empty; rready is its not-full
     input wire        b_ne,       // the transactor's B FIFO (FIFO2) not empty; bready is its not-full
+    input wire        kecho,      // the cache's rg_kill_echo (RLD-4: set by ma_kill_echo, cleared by req)
+    input wire [1:0]  rq_op, input wire [2:0] rq_f3, input wire [31:0] rq_addr,   // rg_op / rg_f3 / rg_addr (written only by req)
+    input wire        u_any_d, u_any, u_byp,   // rg_u_any's D_IN (a uDTLB entry matches now), rg_u_any (last cycle), rg_udtlb_bypass
+    input wire        u_cq, u_cn, u_pq, u_pn, u_tq, u_tn,   // the uDTLB's ctx / pmp / tlb seq and seen bits
+    input wire [408:0] rg_pmp_in,  // the cache's rg_pmp (ma_pmp_t registered every cycle)
+    input wire        age_seen, req_seq,   // rg_age_seen / rg_req_seq: the probe waits a cycle after req / REREQ
     input wire        en_verb,
     input wire        en_rst_req, rdy_rst_req, en_rst_rsp, rdy_rst_rsp,
     input wire [1:0]  req_op, input wire [2:0] req_f3, input wire [31:0] req_addr, input wire en_req,
@@ -184,8 +193,9 @@ module mmu_cache_wb (
     // write responses: one per burst whose AW and last W are both in, in AW order
     wire [3:0] aw_h; wire [3:0] aw_n;
     // depth 15: the cache allows 15 writes in flight (ctr_wr_rsps_pending, 4 bits, blocks at max)
+    wire [59:0] aw_ents;
     fv_queue #(.W(4), .D(15)) qaw (.clk(clk), .rst(rst), .push(aw_hs), .din(awid),
-        .pop(b_hs), .head(aw_h), .n(aw_n), .full(), .ents());
+        .pop(b_hs), .head(aw_h), .n(aw_n), .full(), .ents(aw_ents));
     reg [3:0] n_wl = 0;    // last beats in, not yet answered
     always @(posedge clk) begin
         n_wl <= n_wl + ((w_hs && wlast) ? 1 : 0) - (b_hs ? 1 : 0);
@@ -220,6 +230,60 @@ module mmu_cache_wb (
         // uncounted only when its B is popped; one boot reset, so never cleared with writes in
         // flight): with D = 15 the write queue cannot overflow, with no timing argument
         `FV_PROVEN (aw_n <= wr_ctr);
+        // every write and read the fabric holds carries the current epoch (one boot reset), so
+        // the transactor takes each B / R the fabric gives
+        for (int i = 0; i < 15; i++) if (i < aw_n) assert (aw_ents[4*i +: 4] == {2'b00, epoch});
+        if (ar_n != 0) assert (ar_h[11:8] == {2'b00, epoch});
+        // an AR offered or staged only in a state awaiting its read (the same 7 states)
+        if (arvalid || ar_enqs != ar_deqs)
+            assert (st == 5'd9 || st == 5'd10 || st == 5'd13 || st == 5'd14 ||
+                    st == 5'd15 || st == 5'd23 || st == 5'd26);
+        // a state working on a request has it pending (uDTLB fill, page walk, refill, AMO, IO)
+        if ((st >= 5'd5 && st <= 5'd18) || (st >= 5'd21 && st <= 5'd23) || st >= 5'd25) assert (pend);
+        // a kill-echo is raised only with Stage2 empty and cleared by the next req, so a pending
+        // request never has it set (else EXCEPTION_RSP / LD_RSP would exit unanswered)
+        if (pend) assert (!kecho);
+        // req leaves READY, and the only ways back are the kill-echo exits and reset
+        if (pend) assert (st > 5'd2);
+        // rg_state is one of the 27 Module_State values (5 bits; 27..31 unused)
+        assert (st <= 5'd26);
+        // and an op is staged in Stage2 only once the previous one is answered (s2_empty)
+        if (stg) assert (!pend);
+        // the latched request (rg_op / rg_f3 / rg_addr, written only by req) is one the
+        // environment allows
+        if (pend) begin
+            assert (rq_op != 2'd3 && rq_addr[11:7] == 5'd0);
+            if (rq_op == 2'd0) assert (rq_f3 != 3'd6 && rq_f3 != 3'd7);
+            if (rq_op == 2'd1) assert (rq_f3[2] == 1'b0);
+            if (rq_op == 2'd2) assert (rq_f3 == 3'd2);
+        end
+        // the fabric model's own consistency: the beat counter is within the head burst
+        if (ar_n == 0) assert (beat == 0); else assert (beat <= ar_h[7:0]);
+        // R beats wait in the transactor only in a state awaiting a read, with no AR offered or
+        // staged; a one-beat read's beat only once the fabric has finished it
+        if (r_ne) begin
+            assert (!arvalid && ar_enqs == ar_deqs);
+            assert (st == 5'd9 || st == 5'd10 || st == 5'd13 || st == 5'd14 ||
+                    st == 5'd15 || st == 5'd23 || st == 5'd26);
+            if (!(st == 5'd13 || st == 5'd14 || st == 5'd15)) assert (ar_n == 0 && rready);
+        end
+        // refill progress: words taken + beats buffered + beats the fabric owes (+ 8 for an AR not
+        // yet accepted) is the line; before CACHE_START_REFILL fires, nothing of it exists
+        if (st == 5'd13) assert (!arvalid && ar_enqs == ar_deqs && ar_n == 0 && !r_ne);
+        // the snapshot reads the line before any word is taken (rl_cache_snapshot ends at cnt 9)
+        if (st == 5'd14) assert (rf_cw == 3'd0 && snap_cnt <= 8'd9);
+        if (st == 5'd14 || st == 5'd15)
+            assert ({1'b0, rf_cw} + (!r_ne ? 4'd0 : rready ? 4'd1 : 4'd2)
+                    + (ar_n != 0 ? 4'd8 - beat[3:0] : 4'd0)
+                    + ((arvalid || ar_enqs != ar_deqs) ? 4'd8 : 4'd0) == 4'd8);
+        // a one-beat read (a PTE or IO read) in its waiting state: exactly one beat in flight,
+        // offered or staged, held by the fabric, or buffered in the transactor
+        if (st == 5'd9 || st == 5'd10 || st == 5'd23 || st == 5'd26)
+            assert (((arvalid || ar_enqs != ar_deqs) ? 4'd1 : 4'd0) + (ar_n != 0 ? 4'd1 : 4'd0)
+                    + (!r_ne ? 4'd0 : rready ? 4'd1 : 4'd2) == 4'd1);
+        // a refill reads a line (8 beats on the 1 KB and 8 KB builds), a PTE or IO read one beat
+        if (arvalid) assert (arlen == ((st == 5'd13 || st == 5'd14 || st == 5'd15) ? 8'd7 : 8'd0));
+        if (ar_n != 0) assert (ar_h[7:0] == ((st == 5'd13 || st == 5'd14 || st == 5'd15) ? 8'd7 : 8'd0));
         // exactly: counted = held by the fabric + offered (the 1-entry AW FIFO) + answered but
         // not yet popped (the 2-entry B FIFO), so a nonzero count always has something owed
         assert ({1'b0, wr_ctr} == {1'b0, aw_n} + (awvalid ? 5'd1 : 5'd0) + (!b_ne ? 5'd0 : bready ? 5'd1 : 5'd2));
@@ -233,6 +297,29 @@ module mmu_cache_wb (
         if (ar_n != 0) `FV_PROVEN (!arvalid && ar_enqs == ar_deqs);   // nothing offered or staged
         if (ar_n != 0) `FV_PROVEN (st == 5'd9 || st == 5'd10 || st == 5'd13 || st == 5'd14 ||
                                st == 5'd15 || st == 5'd23 || st == 5'd26);
+    end
+    // the uDTLB keeps a request's translation: once it hits (or the fill writes an entry), it hits
+    // until the request is answered, so a request never fills twice and never refills without
+    // a translation.  hit is the uDTLB's combinational hit, hit_r the registered one
+    // (rl_probe_and_immed_rsp's, a cycle behind the entries).
+    wire u_fresh = (u_cq == u_cn) && (u_pq == u_pn) && (u_tq == u_tn);
+    wire u_hit   = (u_fresh && u_any_d) || u_byp;
+    wire u_hit_r = (u_fresh && u_any) || u_byp;
+    reg u_ok = 1'b0, u_ok1 = 1'b0;
+    always @(posedge clk) begin
+        u_ok  <= pend && !en_req && (u_ok || u_hit);
+        u_ok1 <= u_ok && !en_req;
+        if (rst) begin u_ok <= 1'b0; u_ok1 <= 1'b0; end
+    end
+    always @(*) if (rst_n) begin
+        if (pend) assert (rg_pmp_in == pmp);   // so ma_pmp never toggles pmp_seq mid-request (the table is fixed; pend implies no reset last cycle)
+        if (pend && u_ok) assert (u_hit);
+        if (pend && u_ok1) assert (u_hit_r);
+        if (pend && (st == 5'd13 || st == 5'd14 || st == 5'd15)) assert (u_ok);
+        // req and CACHE_REREQ toggle rg_req_seq and enter RUNNING; only RUNNING ages it, so the
+        // probe always sees a rg_u_any captured from the current request's address
+        if (st != 5'd3) assert (age_seen == req_seq);
+        if (pend && st == 5'd3 && age_seen == req_seq) assert (u_any == u_any_d);
     end
     // bounded liveness
     reg [1:0] req_op_q;
@@ -305,7 +392,9 @@ endmodule
 
 bind mkMMU_Cache mmu_cache_wb wb (
     .wr_ctr(ctr_wr_rsps_pending_crg), .st(rg_state), .snap_cnt(rg_snap_cnt),
-    .ar_enqs(rg_ar_enqs), .ar_deqs(rg_ar_deqs), .b_ne(\master_xactor_f_wr_resp$EMPTY_N ),
+    .ar_enqs(rg_ar_enqs), .ar_deqs(rg_ar_deqs), .b_ne(\master_xactor_f_wr_resp$EMPTY_N ), .r_ne(\master_xactor_f_rd_data$EMPTY_N ), .rf_cw(rg_cset_cword_in_cache[2:0]), .epoch(rg_epoch), .kecho(rg_kill_echo), .rq_op(rg_op), .rq_f3(rg_f3), .rq_addr(rg_addr), .u_any_d(\rg_u_any$D_IN ), .u_any(rg_u_any), .u_byp(rg_udtlb_bypass),
+    .u_cq(rg_udtlb_ctx_seq), .u_cn(rg_udtlb_ctx_seen), .u_pq(rg_udtlb_pmp_seq), .u_pn(rg_udtlb_pmp_seen),
+    .u_tq(rg_udtlb_tlb_seq), .u_tn(rg_udtlb_tlb_seen), .rg_pmp_in(rg_pmp), .age_seen(rg_age_seen), .req_seq(rg_req_seq),
     .clk(CLK), .rst_n(RST_N), .en_verb(EN_set_verbosity),
     .en_rst_req(EN_server_reset_request_put), .rdy_rst_req(RDY_server_reset_request_put),
     .en_rst_rsp(EN_server_reset_response_get), .rdy_rst_rsp(RDY_server_reset_response_get),
