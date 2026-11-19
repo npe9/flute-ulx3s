@@ -41,6 +41,7 @@ module mmu_cache_wb (
     input wire [3:0]  wr_ctr,     // the cache's ctr_wr_rsps_pending (for the lemma)
     input wire [4:0]  st,         // the cache's rg_state (Module_State, MODULE_PRERESET = 0)
     input wire [7:0]  snap_cnt,   // the cache's rg_snap_cnt (CACHE_SNAPSHOT's word counter)
+    input wire        ar_enqs, ar_deqs,   // rg_ar_enqs / rg_ar_deqs: an AR staged when they differ
     input wire        en_verb,
     input wire        en_rst_req, rdy_rst_req, en_rst_rsp, rdy_rst_rsp,
     input wire [1:0]  req_op, input wire [2:0] req_f3, input wire [31:0] req_addr, input wire en_req,
@@ -87,6 +88,13 @@ module mmu_cache_wb (
 `define FV_K_B 16
 `endif
     localparam integer K_R = `FV_K_R, K_B = `FV_K_B;
+    // FV_ASSUME_PROVEN: the properties abc pdr proves on the 1 KB build (safet) become assumptions,
+    // sound once proved, so a k-induction counterexample is about what is still open (K_WAIT)
+`ifdef FV_ASSUME_PROVEN
+`define FV_PROVEN assume
+`else
+`define FV_PROVEN assert
+`endif
     wire rst = !rst_n;
 
     // ---------------- the CPU ----------------
@@ -203,18 +211,23 @@ module mmu_cache_wb (
         if (rst) begin arv_q <= 0; awv_q <= 0; wv_q <= 0; end
     end
     always @(*) if (rst_n) begin
-        if (arv_q) assert (arvalid && {arid, araddr, arlen} == ar_p);
-        if (awv_q) assert (awvalid && {awid, awaddr, awlen} == aw_p);
-        if (wv_q)  assert (wvalid && {wdata, wstrb, wlast} == w_p);
-        assert (ar_n < 2);                 // one read burst at a time (each FSM path waits for its R)
+        if (arv_q) `FV_PROVEN (arvalid && {arid, araddr, arlen} == ar_p);
+        if (awv_q) `FV_PROVEN (awvalid && {awid, awaddr, awlen} == aw_p);
+        if (wv_q)  `FV_PROVEN (wvalid && {wdata, wstrb, wlast} == w_p);
+        `FV_PROVEN (ar_n < 2);                 // one read burst at a time (each FSM path waits for its R)
         // the fabric holds no more writes than the cache counts (each AW counted when enqueued,
         // uncounted only when its B is popped; one boot reset, so never cleared with writes in
         // flight): with D = 15 the write queue cannot overflow, with no timing argument
-        assert (aw_n <= wr_ctr);
+        `FV_PROVEN (aw_n <= wr_ctr);
         // a read burst outstanding only in a state waiting for its R beats (PTW_LEVEL_1 / _0,
         // CACHE_START_REFILL / SNAPSHOT / REFILL, IO_AWAITING_READ_RSP / _AMO_READ_RSP): a lemma
         // toward ar_n < 2 and K_R
-        if (ar_n != 0) assert (st == 5'd9 || st == 5'd10 || st == 5'd13 || st == 5'd14 ||
+        // the environment's own consistency: ops only while booted and not resetting, and the
+        // cache out of its reset states then (k-induction starts from arbitrary states)
+        if (pend || stg) `FV_PROVEN (booted && !rst_out);
+        if (booted && !rst_out) `FV_PROVEN (st != 5'd0 && st != 5'd1);
+        if (ar_n != 0) `FV_PROVEN (!arvalid && ar_enqs == ar_deqs);   // nothing offered or staged
+        if (ar_n != 0) `FV_PROVEN (st == 5'd9 || st == 5'd10 || st == 5'd13 || st == 5'd14 ||
                                st == 5'd15 || st == 5'd23 || st == 5'd26);
     end
     // bounded liveness
@@ -228,6 +241,22 @@ module mmu_cache_wb (
         c_wait <= (pend && !valid && !axi_owed) ? c_wait + 1 : 0;
         if (rst) c_wait <= 0;
     end
+    // ghost: the uDTLB fill already happened in this fabric-free wait (UDTLB_FILL2 seen)
+    wire wait_on = pend && !valid && !axi_owed;
+    reg fill_done = 1'b0;
+    always @(posedge clk) begin
+        if (st == 5'd7 && wait_on) fill_done <= 1'b1;
+        if (!wait_on) fill_done <= 1'b0;
+        if (rst) fill_done <= 1'b0;
+    end
+    always @(*) if (rst_n && fill_done && wait_on) begin
+        assert (st != 5'd5);   // the uDTLB hits after a fill (a lemma toward K_WAIT)
+    end
+    // and the wait so far is short on each side of it: K_WAIT's inductive step
+    always @(*) if (rst_n && wait_on) begin
+        if (!fill_done) assert (c_wait <= 6);
+        else assert (c_wait <= 12);
+    end
     always @(posedge clk) begin
         c_rsp  <= (pend && !valid) ? c_rsp + 1 : 0;
         c_busy <= (busy && !rst_out) ? c_busy + 1 : 0;   // a reset / flush: K_RST
@@ -240,17 +269,17 @@ module mmu_cache_wb (
     always @(*) if (rst_n) begin
         assert (c_rsp < K_RSP);
         assert (c_busy < K_BUSY);
-        assert (c_idle < K_IDLE);
+        `FV_PROVEN (c_idle < K_IDLE);
         assert (c_wait < K_WAIT);
         assert (c_rst < K_RST);
-        assert (c_rr < K_R);
-        assert (c_br < K_B);
+        `FV_PROVEN (c_rr < K_R);
+        `FV_PROVEN (c_br < K_B);
         // per-state bound on an R beat's wait, a lemma toward K_R: the 2-entry R FIFO only backs
         // up while CACHE_SNAPSHOT reads the victim line (rg_snap_cnt <= cwords_per_cline + 1),
         // and CACHE_REFILL drains it; every other state takes a beat the cycle it is offered
-        if (st == 5'd14) assert (c_rr <= snap_cnt);
-        else if (st == 5'd15) assert (c_rr <= 10);
-        else assert (c_rr == 0);
+        if (st == 5'd14) `FV_PROVEN (c_rr <= snap_cnt);
+        else if (st == 5'd15) `FV_PROVEN (c_rr <= 10);
+        else `FV_PROVEN (c_rr == 0);
     end
 `ifdef FV_REACH
     // Reachability by a failing assertion (abc bmc3 is far faster here than smtbmc's cover):
@@ -272,6 +301,7 @@ endmodule
 
 bind mkMMU_Cache mmu_cache_wb wb (
     .wr_ctr(ctr_wr_rsps_pending_crg), .st(rg_state), .snap_cnt(rg_snap_cnt),
+    .ar_enqs(rg_ar_enqs), .ar_deqs(rg_ar_deqs),
     .clk(CLK), .rst_n(RST_N), .en_verb(EN_set_verbosity),
     .en_rst_req(EN_server_reset_request_put), .rdy_rst_req(RDY_server_reset_request_put),
     .en_rst_rsp(EN_server_reset_response_get), .rdy_rst_rsp(RDY_server_reset_response_get),
