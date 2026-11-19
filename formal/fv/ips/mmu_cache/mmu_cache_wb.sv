@@ -42,6 +42,7 @@ module mmu_cache_wb (
     input wire [4:0]  st,         // the cache's rg_state (Module_State, MODULE_PRERESET = 0)
     input wire [7:0]  snap_cnt,   // the cache's rg_snap_cnt (CACHE_SNAPSHOT's word counter)
     input wire        ar_enqs, ar_deqs,   // rg_ar_enqs / rg_ar_deqs: an AR staged when they differ
+    input wire        b_ne,       // the transactor's B FIFO (FIFO2) not empty; bready is its not-full
     input wire        en_verb,
     input wire        en_rst_req, rdy_rst_req, en_rst_rsp, rdy_rst_rsp,
     input wire [1:0]  req_op, input wire [2:0] req_f3, input wire [31:0] req_addr, input wire en_req,
@@ -219,6 +220,9 @@ module mmu_cache_wb (
         // uncounted only when its B is popped; one boot reset, so never cleared with writes in
         // flight): with D = 15 the write queue cannot overflow, with no timing argument
         `FV_PROVEN (aw_n <= wr_ctr);
+        // exactly: counted = held by the fabric + offered (the 1-entry AW FIFO) + answered but
+        // not yet popped (the 2-entry B FIFO), so a nonzero count always has something owed
+        assert ({1'b0, wr_ctr} == {1'b0, aw_n} + (awvalid ? 5'd1 : 5'd0) + (!b_ne ? 5'd0 : bready ? 5'd1 : 5'd2));
         // a read burst outstanding only in a state waiting for its R beats (PTW_LEVEL_1 / _0,
         // CACHE_START_REFILL / SNAPSHOT / REFILL, IO_AWAITING_READ_RSP / _AMO_READ_RSP): a lemma
         // toward ar_n < 2 and K_R
@@ -301,7 +305,7 @@ endmodule
 
 bind mkMMU_Cache mmu_cache_wb wb (
     .wr_ctr(ctr_wr_rsps_pending_crg), .st(rg_state), .snap_cnt(rg_snap_cnt),
-    .ar_enqs(rg_ar_enqs), .ar_deqs(rg_ar_deqs),
+    .ar_enqs(rg_ar_enqs), .ar_deqs(rg_ar_deqs), .b_ne(\master_xactor_f_wr_resp$EMPTY_N ),
     .clk(CLK), .rst_n(RST_N), .en_verb(EN_set_verbosity),
     .en_rst_req(EN_server_reset_request_put), .rdy_rst_req(RDY_server_reset_request_put),
     .en_rst_rsp(EN_server_reset_response_get), .rdy_rst_rsp(RDY_server_reset_response_get),
