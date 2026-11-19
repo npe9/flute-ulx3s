@@ -38,6 +38,8 @@
 `default_nettype none
 module mmu_cache_wb (
     input wire        clk, rst_n,
+    input wire [3:0]  wr_ctr,     // the cache's ctr_wr_rsps_pending (for the lemma)
+    input wire [4:0]  st,         // the cache's rg_state (Module_State, MODULE_PRERESET = 0)
     input wire        en_verb,
     input wire        en_rst_req, rdy_rst_req, en_rst_rsp, rdy_rst_rsp,
     input wire [1:0]  req_op, input wire [2:0] req_f3, input wire [31:0] req_addr, input wire en_req,
@@ -171,7 +173,8 @@ module mmu_cache_wb (
     end
     // write responses: one per burst whose AW and last W are both in, in AW order
     wire [3:0] aw_h; wire [3:0] aw_n;
-    fv_queue #(.W(4), .D(4)) qaw (.clk(clk), .rst(rst), .push(aw_hs), .din(awid),
+    // depth 15: the cache allows 15 writes in flight (ctr_wr_rsps_pending, 4 bits, blocks at max)
+    fv_queue #(.W(4), .D(15)) qaw (.clk(clk), .rst(rst), .push(aw_hs), .din(awid),
         .pop(b_hs), .head(aw_h), .n(aw_n), .full(), .ents());
     reg [3:0] n_wl = 0;    // last beats in, not yet answered
     always @(posedge clk) begin
@@ -202,7 +205,16 @@ module mmu_cache_wb (
         if (arv_q) assert (arvalid && {arid, araddr, arlen} == ar_p);
         if (awv_q) assert (awvalid && {awid, awaddr, awlen} == aw_p);
         if (wv_q)  assert (wvalid && {wdata, wstrb, wlast} == w_p);
-        assert (ar_n < 4 && aw_n < 4);     // within the model's depth (and nothing unbounded)
+        assert (ar_n < 2);                 // one read burst at a time (each FSM path waits for its R)
+        // the fabric holds no more writes than the cache counts (each AW counted when enqueued,
+        // uncounted only when its B is popped; one boot reset, so never cleared with writes in
+        // flight): with D = 15 the write queue cannot overflow, with no timing argument
+        assert (aw_n <= wr_ctr);
+        // a read burst outstanding only in a state waiting for its R beats (PTW_LEVEL_1 / _0,
+        // CACHE_START_REFILL / SNAPSHOT / REFILL, IO_AWAITING_READ_RSP / _AMO_READ_RSP): a lemma
+        // toward ar_n < 2 and K_R
+        if (ar_n != 0) assert (st == 5'd9 || st == 5'd10 || st == 5'd13 || st == 5'd14 ||
+                               st == 5'd15 || st == 5'd23 || st == 5'd26);
     end
     // bounded liveness
     reg [1:0] req_op_q;
@@ -252,6 +264,7 @@ module mmu_cache_wb (
 endmodule
 
 bind mkMMU_Cache mmu_cache_wb wb (
+    .wr_ctr(ctr_wr_rsps_pending_crg), .st(rg_state),
     .clk(CLK), .rst_n(RST_N), .en_verb(EN_set_verbosity),
     .en_rst_req(EN_server_reset_request_put), .rdy_rst_req(RDY_server_reset_request_put),
     .en_rst_rsp(EN_server_reset_response_get), .rdy_rst_rsp(RDY_server_reset_response_get),
