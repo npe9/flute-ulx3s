@@ -189,8 +189,8 @@ Z-buffered perspective-correct mode at 160x120 is a stretch demo, not a target.
 
 Status 2026-11-23 (notes/soc-family-plan.md, game2d status): G2's first step (one tile layer,
 64 sprites) and G3's voices (8 voices, no ADPCM / HDMI audio yet) are built and verified in sim
-and formal; game2d+VDP closes timing only with E7 (registered BTB read, 52.3+ MHz on all three
-seeds; a CPU change for the user to decide); the APU is not yet placed and routed.
+and formal; game2d+VDP timing is open (seed 7 45.6 MHz; E7's registered BTB read closes it but
+costs 23-30% IPC, rejected); the APU is not yet placed and routed.
 
 Order: B0 → G0 → G1 (shared by everything, and it unlocks the TempleOS/Linux framebuffer) →
 G3/G4 → `game2d` (G2) → `game3d` (G5, G6).

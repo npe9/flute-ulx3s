@@ -734,9 +734,9 @@ new serializer equal, cycle for cycle and on both DDR bits of every lane, to the
 
 `make SOC=game2d SYS_PLL=50 FP=1 FPU_TRIM=1` builds the 2D console profile
 (`profiles/game2d.mk`, into `build/game2d/`): the linux core and SoC without SPI2 and UART1,
-plus two game blocks on the register bus. **Timing:** with the VDP it closes only with the
-registered BTB read (`make ... BTB_OUTREG=1`, E7: 55.86 / 52.29 / 55.62 MHz on seeds 3/5/7;
-without it seed 7 is 45.6), a CPU change whose adoption is the user's decision
+plus two game blocks on the register bus. **Its timing is open:** with the VDP seed 7 routes at
+45.6 MHz. The registered BTB read (`make ... BTB_OUTREG=1`, E7) closes it (55.86 / 52.29 / 55.62
+MHz) but costs 23% of Dhrystone and 30% of CoreMark per clock, so it is not used
 (`notes/soc-family-plan.md`, game2d status); the APU is not yet placed and routed. It is not a
 flash image.
 

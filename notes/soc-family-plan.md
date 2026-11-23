@@ -78,7 +78,9 @@ Drift (sw/game2d: graphics, music and effects).  Verification:
 - The SoC: sim/game2d/frame_check.sh runs the title on the strict sim and compares the screen
   pixel for pixel with the host build's prediction (PASS at 40 and 240 frames before the APU:
   mean ~3,750-4,120 CPU cycles a frame of 840,000), replays the APU's samples into the model and
-  checks its writes equal the host build's.
+  checks its writes equal the host build's: with the APU (2026-11-23, 40 frames) PASS -- screen
+  identical, 15,454 samples equal, the 548 APU writes = the host build's; mean 3,902 cycles a
+  frame, worst 6,547.  The software itself: notes/sw-verification-plan.md.
 
 **Timing: open.**  game2d without the VDP: 56.68 / 53.76 / 55.22 MHz (seeds 3/5/7).  With the
 VDP: 50.82 / 46.13 / 49.30 with its RAMs in the CPU rows, 53.20 / 51.08 / 45.60 with them in
@@ -94,10 +96,15 @@ shift_clk PASS (156.6+ at 125).  The BTB loop left the critical path on seeds 3 
 multiplier, stage2_mbox, 8.0 ns logic + 10 ns routing); on seed 5 the path still ends at the BTB
 RAM's address (icache rg_pc -> btb ADB, 3.3 ns logic + 15.9 ns routing) but at 52.3.  The read is
 a cycle later, so a prediction can be stale: Stage1 verifies every prediction (E42), so that is
-a mispredict, not an error.  Gate so far: riscv-formal 10/10 PASS on the BTB_OUTREG core
-(build/formal-e7.log); the 94 ISA tests: see below; Dhrystone / CoreMark: not yet run (needs the
-board).  Whether E7 goes into game2d only or the promoted core is the user's decision: it is not
-in profiles/game2d.mk.  The APU (19 more block RAMs, ~3.1K LUT) is not yet placed and routed.
+a mispredict, not an error.  riscv-formal 10/10 PASS on the BTB_OUTREG core
+(build/formal-e7.log).  **But it costs a quarter of the performance** (board, SRAM-loaded, 50 MHz):
+Dhrystone 1,206 cycles a run (0.472 DMIPS/MHz) and CoreMark 53.32 it/s (1.066 CM/MHz), against
+930 / 76.58 (0.612 / 1.532) on the same game2d+VDP SoC without it -- identical to lx49c, so the
+loss is E7's alone: -23% / -30%.  At a fixed 50 MHz the extra fmax buys nothing, so **E7 as built
+is rejected** (kept as a build option; not in profiles/game2d.mk).  A timing fix must keep the
+prediction in the fetch cycle -- e.g. a smaller BTB in LUT RAM read in the same cycle, or
+predicting a cycle ahead from the registered read -- or move the VDP's logic out of the CPU's
+region by architecture; open, and the user's call which.  The APU (19 more block RAMs, ~3.1K LUT) is not yet placed and routed.
 
 ## Profiles
 
