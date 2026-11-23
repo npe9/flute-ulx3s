@@ -17,7 +17,7 @@ Current status (`linux-isa` branch, 2026-11-16; promoted build lx48):
   chunked, checksummed protocol, or boots one from the configuration flash.
 - Debug: RISC-V Debug Module over the UART (`scripts/dmi.py`) and over the US1 cable's JTAG
   (stock OpenOCD, `openocd/ulx3s_jtagg.ocd`). The riscv-tests debug suite runs on the board
-  (`test/debug/run.sh`); lx49b (promoted, flash 0) passes all of it that applies.
+  (`test/debug/run.sh`); lx49c (promoted, flash 0) passes all of it that applies.
 - Every block in the SoC has a formal spec (`formal/fv/`), besides riscv-formal on the core.
 - Every change ships only after the verification gates below.
 
@@ -512,6 +512,13 @@ comes from architecture, with at least 10% margin before benching):
   Neither is in the gate (`short`: 13 / 19 min; D-side `kind`: 3 min).
 - **Debug suite** — `test/debug/run.sh` on the board for Debug Module or hart debug changes.
 - **Gate script** — each build's `build/<name>/gate.sh` runs the sims, formal and P&R seeds.
+- **Benchmarks** — `test/bench/build.sh` builds Dhrystone (riscv-tests' copy) and CoreMark
+  (upstream eembc/coremark, core files unmodified) for rv32imac at -O2, bare-metal in M-mode;
+  run with `scripts/loader.py --no-banner -t 40 test/bench/<name>.bin`. Time is `mcycle`,
+  checked against the CLINT `mtime` (the ratio prints 2.000 at 50 MHz). lx49b and lx49c
+  (2026-11-23, identical to the cycle; the change is in the uDTLB, which M-mode does not use):
+  Dhrystone 930 cycles per run, 0.612 DMIPS/MHz (30.6 DMIPS); CoreMark 76.58 iterations/s,
+  1.532 CoreMark/MHz (1100 iterations, 14.4 s, validated). Logs in `build/bench/`.
 - **ISA tests** — `sim/isa_bram/isa_run.py`: riscv-tests (Flute and Sail repos) and the
   generated PMP, B/K and F/D tests in the strict harness.
 - **RISCOF** — `compliance/run.sh` against the Sail C model.
@@ -613,7 +620,7 @@ lx49b honors `dcsr.stopcount` (reset value 1: `mcycle` holds while the hart is h
 `dcsr.stepie` (no interrupts while single-stepping unless set); `stoptime` reads 0, since
 `mtime` is the shared CLINT's. It also fixes CSR writes to `mcycle`/`mcycleh`, which upstream
 Flute dropped (the counter just kept incrementing; `test/csr_test` checks 0x22-0x24 catch it).
-lx49b: 39 pass, 39 not applicable, 0 fail.
+lx49b and lx49c: 39 pass, 39 not applicable, 0 fail.
 
 The J1-header soft TAP is gone (it was never connected to the debug module), so J1's
 A10/A11/B11/C11 are free GPIO.
@@ -675,10 +682,10 @@ openFPGALoader -b ulx3s -f --file-type raw -o 0x400000 build/flash-dir.bin
 With an image in flash, `loader.py` must start within `wait_ms` of programming the FPGA
 (FIRE1 restarts the countdown). The load runs at ~0.58 MB/s (CPU-bound: TempleOS ~5 s,
 Linux ~11 s). For power-on boot, also write the bitstream at offset 0
-(`openFPGALoader -b ulx3s -f build/ulx3s_top.bit`). The board here has the promoted lx49b
-(seed 7) at offset 0 since 2026-11-17 (lx48 before it from 2026-11-16; the factory self-test
+(`openFPGALoader -b ulx3s -f build/ulx3s_top.bit`). The board here has the promoted lx49c
+(seed 3) at offset 0 since 2026-11-23 (lx49b seed 7 from 2026-11-17, lx48 from 2026-11-16; the factory self-test
 and the older SPI-mode Linux are in a full flash backup, `build/flash_backup/ulx3s_flash_20261116.bin`).
-Its boot directory (`build/lx49b/flash.bin`) holds TempleOS and the native-SD Linux and defaults
+Its boot directory (`build/lx49b/flash.bin`, unchanged by the lx49c promotion) holds TempleOS and the native-SD Linux and defaults
 to Linux. The old directory booted an SPI-mode Linux, which left the microSD in SPI mode until
 the next power cycle; the native host cannot talk to a card in SPI mode.
 `openFPGALoader -b ulx3s -r` reloads the FPGA from flash in 0.2 s. The sim flash model is
@@ -774,8 +781,8 @@ rules. The older Bluesim testbench (`test/Sdram_Tb.bsv`) is not maintained.
   op with another permission, after a PTE change without `sfence.vma`) gave a physical
   address that was the OR of both frames, and the access refilled forever. Formal found both
   (item 11 in `notes/linux-isa-plan.md`), and `test/mm_test.bin` 0x4e reproduces the first on
-  the promoted lx49b in sim and on the board. lx49c has a sticky dirty bit and evicts
-  same-page entries on a fill; it passes the gate, but promotion is pending.
+  lx49b in sim and on the board. lx49c (promoted 2026-11-23) has a sticky dirty bit and
+  evicts same-page entries on a fill.
 - **microSD in SPI mode reads wrong data.** Every SPI-mode Linux boot (lx40-lx47) read the
   card's block 0 as all `FF`; the native host (lx48) reads its MBR (`55AA`, one partition).
   Cause not found; use the native host.

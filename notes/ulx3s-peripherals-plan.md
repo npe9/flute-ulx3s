@@ -661,7 +661,29 @@ Every block in the SoC now has formal.
 The original BSV blocks are ported.  RVFI stays: riscv-formal
 needs the core to emit its trace port; it is output-only and off unless RISCV_FORMAL is defined.
 
-## lx49b (2026-11-17, promoted: flash 0)
+## lx49c (2026-11-23, promoted: flash 0)
+
+- lx49b + the two uDTLB fixes found by formal (LX50, Flute 7fad86b; notes/linux-isa-plan.md
+  item 11): a sticky dirty bit (two back-to-back SFENCE.VMAs brought stale entries back) and a
+  fill that evicts other entries for its page (an OR'd PA and a refill livelock).
+  `test/mm_test` 0x4d / 0x4e: FAIL on lx49b (strict sim and board), PASS on lx49c (both).
+- Seeds s3/s5/s7: system 56.35/54.88/53.90, shift 161.68/177.30/179.34, pixel 70.08/68.69/68.18 MHz.
+- Gate (build/lx49c/gate.sh): riscv-formal smoke 10/10, ISA 94/94, strict cache/csr/mm/esp32/io/
+  audio/sd/sdh/sdh_w, J1, ndm, Linux tick 2, Bluesim, dvi_ser equivalence, video_ut, spdif_ut,
+  sdh_ut, bio_ut, every formal/fv proof, dmi_tb, jtagg_tb, ro_trng_netlist.  The first attempt
+  (one dirty-set PulseWire shared by req / tlb_flush / ma_pmp) failed riscv-formal insn_lw /
+  insn_sw and hung two ISA tests: a shared PulseWire makes its callers conflict, and ma_pmp
+  (every cycle) starved req.
+- Board (seed 3 bit in SRAM, build/lx49c/board_run.sh): hw suite 78/0 (2 known WARN), drivers
+  19/0, Linux native SD (mmcblk0 ro, MBR 55aa, 112 ticks, fp ok), debug suite 39 pass / 39 N/A /
+  0 fail.
+- Benchmarks (test/bench, M-mode bare-metal, rv32imac -O2): Dhrystone 0.612 DMIPS/MHz, CoreMark
+  1.532 / MHz, identical to the cycle on lx49b (the change is uDTLB-only).
+- Promoted 2026-11-23: `lx49c-s3.bit` (md5 808de684) at flash offset 0, written with --verify;
+  the boot directory at 0x400000 (lx49b's) is unchanged.  From flash: mm_test PASS.
+  Rollback: `build/lx49b/lx49b-s7.bit` (md5 e343f31e).
+
+## lx49b (2026-11-17, promoted until 2026-11-23)
 
 - lx49 + debug-spec counter/step fixes (Flute 6b893dc, notes/linux-isa-plan.md item 6):
   `mcycle`/`mcycleh` CSR writes take effect (they were dropped), `dcsr.stopcount` (reset 1)
