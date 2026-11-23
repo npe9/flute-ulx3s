@@ -29,9 +29,12 @@ if [ ! -x "$SAIL" ] || [ "$HERE/sail/soc-mmio.patch" -nt "$SAIL" ] || [ "$HERE/s
       || { echo "fuzz: Sail build failed ($OUT/sail-build.log)"; exit 2; }
 fi
 
-# the binary under test (exactly what build.sh makes for the board's frame check) and the host spec
-FRAMES=$FRAMES "$ROOT/sw/game2d/build.sh" > "$OUT/build.log" 2>&1 || { echo "fuzz: build failed ($OUT/build.log)"; exit 2; }
-ELF=$ROOT/sw/game2d/lantern_f$FRAMES.elf
+# the binary under test: the board's own lantern.elf (formal/sw/rocq proves about the same file),
+# stopped after FRAMES frames by socdev (SOC_FRAMES); and the host spec
+"$ROOT/sw/game2d/build.sh" > "$OUT/build.log" 2>&1 || { echo "fuzz: build failed ($OUT/build.log)"; exit 2; }
+ELF=$ROOT/sw/game2d/lantern.elf
+echo "fuzz: $(md5 -q "$ELF") $ELF"
+export SOC_FRAMES=$FRAMES
 cc -O2 -Wall -o "$OUT/host_trace" "$ROOT/formal/sw/host_trace.c" "$ROOT/sw/game2d/lantern.c" "$ROOT/sw/game2d/sound.c" \
    || { echo "fuzz: host build failed"; exit 2; }
 

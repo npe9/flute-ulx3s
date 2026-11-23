@@ -83,7 +83,8 @@ Tiers 1 and 2 are done; tier 3 has its model, program logic and first theorem (b
 commit, in a shared clone at `build/sail-soc`): word accesses in 0xC0000000-0xC1FFFFFF go to
 `formal/sw/sail/socdev.c`, every trap to `soc_trap`, and a program without an HTIF `tohost`
 symbol runs (the port is parked at 0xBFFFFFF0, outside the map).  The binary is unchanged: the
-exact `lantern_f<n>.elf` `sw/game2d/build.sh` makes.  `formal/sw/fuzz.sh [runs] [frames] [seed]`:
+board's own `lantern.elf` (since 2026-11-23; before, the `lantern_f<n>.elf` variant), stopped by
+socdev after n frames (`SOC_FRAMES`); fuzz.sh prints its md5, the same file tier 3 proves about.  `formal/sw/fuzz.sh [runs] [frames] [seed]`:
 2,000 frames take ~4 s on Sail.  Results:
 - 40 frames, no buttons: Sail's trace = the host build's (4,585 writes).
 - Campaigns of 200 runs x 2,000 frames: PASS, ~116,750 writes a run (seed 7 on the source before
@@ -91,13 +92,16 @@ exact `lantern_f<n>.elf` `sw/game2d/build.sh` makes.  `formal/sw/fuzz.sh [runs] 
   coverage of the host build over three scripts: lantern.c 100% of 184 lines, 97% of 196 branch
   directions; sound.c 100% / 96%.  Never taken: a game over in attract mode, all 12 logs on at
   once, `if (on)` false (every music step keys a voice).
+- Rerun from a clean tree on `lantern.elf` (md5 db30082c..., 2026-11-23): 20 x 2,000 frames
+  seed 13 PASS, mutants 8/8, CBMC base / step / vacuity PASS, CBMC mutants 8/8, Rocq all checked.
 - `formal/sw/mutants.sh`: 8 planted bugs, all caught -- 5 by S1 (one past the sprite table at
   start-up and, deep, only at a game over; a wrong button register; halfword VDP writes; a write
   to the APU's read-only ENV), 3 by S2 (plain `char` signedness, RISC-V unsigned vs the host's
   signed; a target-only change, what a miscompilation looks like; input depending on the frame
   counter).
 
-**Tier 2, done (2026-11-23).**  `formal/sw/cbmc/run.sh` (CBMC 6.11, ~10 s each): the base case
+**Tier 2, done (2026-11-23).**  `formal/sw/cbmc/run.sh` (CBMC 6.11, ~10 s each; the target's
+data model, `--ILP32 --unsigned-char --little-endian`, not the host's): the base case
 (`lantern_init` establishes INV) and the inductive step (INV, any buttons, one `lantern_frame`,
 INV again) pass with bounds, pointer, signed-overflow, shift and division checks and unwinding
 assertions; S1 at the hw.h calls, S3 (KEYON only for voices whose MODE / PITCH / VOL / ADSR, and
@@ -127,8 +131,9 @@ into Rocq that Rocq 9 checks, and reason about `lantern.elf`'s instructions? -- 
   `encdec_compressed_backwards`); 78 axioms remain (floating point, LR/SC reservations, the
   unused prompt-monad memory hooks).
 - Program logic: `formal/sw/rocq/Run.v` -- `run` interprets an event tree against a register
-  file and an arbitrary memory / device environment and logs memory writes (a trap, failure or
-  nondeterministic choice is None); `step` mirrors riscv_step.sail on the no-trap path
+  file and an arbitrary memory / device environment and logs memory writes (a Sail exception,
+  failure or nondeterministic choice is None; a trap is not an event in this model but register
+  writes ending in RETIRE_FAIL, which `step` rejects); `step` mirrors riscv_step.sail on the no-trap path
   (fetch, decode, nextPC, execute, RETIRE_SUCCESS, PC); `steps`.  `step` is hand-written: part
   of the trusted base, with the theorem statements, coq-sail, sail's Rocq backend and Rocq.
 - `formal/sw/rocq/gen_code.py` writes `Code.v` from the ELF's bytes (with its md5), so the
@@ -137,7 +142,9 @@ into Rocq that Rocq 9 checks, and reason about `lantern.elf`'s instructions? -- 
   the compiled `hw_palette` (lui / addi / c.add / c.slli / c.sw / c.jr; it reaches the window
   only modulo 2^32) retires on Sail without a trap, makes exactly one 4-byte write at
   0xC0010400 + 4 * index of a1, and returns to ra.  Fixed in the statement: privilege M with
-  mstatus 0x1800 (MPRV clear), a1 = 0x00ABCDEF, ra = 0x80001000.  `Mutants.v`: four wrong
+  mstatus 0x1800 (MPRV clear), the 8 PMP entries off (reset; the title never writes them),
+  a1 = 0x00ABCDEF, ra = 0x80001000; the model is configured as Flute (RV32IMAC+F, 8 PMP entries,
+  grain 10).  `Mutants.v`: four wrong
   binaries (shift 1, one entry off, no store, an illegal instruction) fail the same check.
 - Why the fixed values: the proof is by computation (vm_compute).  With mstatus symbolic the
   MPRV branch normalises the whole address-translation path; with a1 or ra symbolic the store's

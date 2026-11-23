@@ -25,9 +25,8 @@ Definition shift_bits_right_arith {a b} (v : mword a) (n : mword b) : mword a :=
 Definition print_bits {n} (msg : string) (bs : mword n) : unit := prerr_endline (msg ++ string_of_bits bs).
 
 (* The model's configuration switches (Sail binds them only for C / OCaml).  Values for the
-   ulx3s Flute core: RV32IMAC with F (FP=1), no V, N, Svinval, Zcb or Zfinx, misa read-only.
-   PMP: 0 entries here -- irrelevant to the M-mode programs proved against this model (M-mode
-   accesses ignore unlocked entries), stated so a proof that needs PMP must change it. *)
+   ulx3s Flute core (notes/linux-isa-plan.md): RV32IMAC with F (FP=1), no V, N, Svinval, Zcb or
+   Zfinx, misa read-only; PMP 8 entries, grain G = 10. *)
 Definition sys_enable_rvc (_ : unit) : bool := true.
 Definition sys_enable_fdext (_ : unit) : bool := true.
 Definition sys_enable_next (_ : unit) : bool := false.
@@ -37,8 +36,8 @@ Definition sys_enable_writable_fiom (_ : unit) : bool := true.
 Definition sys_enable_writable_misa (_ : unit) : bool := false.
 Definition sys_enable_zcb (_ : unit) : bool := false.
 Definition sys_enable_zfinx (_ : unit) : bool := false.
-Definition sys_pmp_count (_ : unit) : Z := 0.
-Definition sys_pmp_grain (_ : unit) : Z := 0.
+Definition sys_pmp_count (_ : unit) : Z := 8.
+Definition sys_pmp_grain (_ : unit) : Z := 10.
 
 (* The platform (bound for Rocq by formal/sw/rocq/soc-coq.patch), from the SoC map
    (Flute/src_Testbench/SoC/SoC_Map.bsv): boot ROM 0x1000 (4 KB), SDRAM 0x80000000 (32 MB),

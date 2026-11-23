@@ -4,7 +4,9 @@
 #   formal/sw/cbmc/run.sh [base|step]     (default both)
 cd "$(dirname "$0")"
 OUT=../../../build/swfv/cbmc; mkdir -p $OUT
-CHECKS="--bounds-check --pointer-check --pointer-overflow-check --signed-overflow-check
+# the target's data model (RV32 ILP32: 32-bit long and pointers, unsigned char), not the host's
+CHECKS="--ILP32 --unsigned-char --little-endian
+        --bounds-check --pointer-check --pointer-overflow-check --signed-overflow-check
         --undefined-shift-check --div-by-zero-check --unwinding-assertions"
 rc=0
 for h in ${1:-base step}; do

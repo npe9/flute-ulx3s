@@ -16,7 +16,9 @@
 //   VDP_ID / APU_ID: their ID values;  UART LSR: THR empty;  video FRAME: advances.
 //   SOC_CHAOS=<seed>: LSR's THR-empty bit and the frame counter's advance are random instead
 //   (any value the hardware may show): the trace must not depend on them.
-// The run ends (exit 0) when the program prints BENCH-DONE (bench_rt.c, after main returns).
+// The run ends (exit 0) when the program prints BENCH-DONE (bench_rt.c, after main returns), or
+// with SOC_FRAMES=<n> at the (n+1)th button read: so the board's own binary (lantern.elf, which
+// never returns) runs exactly n frames.
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,7 +30,7 @@ typedef int unit;
 
 static FILE *trace, *btns;
 static int init, chaos;
-static uint32_t rng = 1, frame_ctr, nframes;
+static uint32_t rng = 1, frame_ctr, nframes, maxframes;
 static char uart [64]; static int un;
 
 static void setup (void) {
@@ -40,6 +42,8 @@ static void setup (void) {
    btns = b ? fopen (b, "r") : NULL;
    if (b && !btns) { perror (b); exit (2); }
    if (c) { chaos = 1; rng = (uint32_t) strtoul (c, NULL, 0) | 1; }
+   const char *f = getenv ("SOC_FRAMES");
+   if (f) maxframes = (uint32_t) strtoul (f, NULL, 0);
 }
 static uint32_t xr (void) { rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5; return rng; }
 
@@ -76,6 +80,11 @@ mach_bits soc_read (mach_bits pa) {
    case 0xC0000014u: return chaos ? (xr () & 0x20) : 0x20;              // UART LSR
    case 0xC0008004u: {                                                  // buttons: a new frame
       uint32_t v = 0;
+      if (maxframes && nframes == maxframes) {                          // n frames done
+         if (trace) fclose (trace);
+         fprintf (stderr, "socdev: done, %u frames\n", nframes);
+         exit (0);
+      }
       if (btns && fscanf (btns, "%x", &v) != 1) v = 0;
       if (trace) fprintf (trace, "F\n");
       nframes++;

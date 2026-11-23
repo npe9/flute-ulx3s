@@ -14,6 +14,8 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$HERE/../../.." && pwd)
 B=$REPO/build/sail-coq
 eval "$(opam env --switch=omp-rocq-9.0 --set-switch)"
+mkdir -p "$REPO/build/swfv"
+"$REPO/sw/game2d/build.sh" > "$REPO/build/swfv/rocq-sw-build.log" 2>&1    # lantern.elf, the binary proved about
 if [ ! -d "$B" ]; then
    git clone -q --shared ~/src/sail-riscv "$B"
    git -C "$B" checkout -q af5c2f2

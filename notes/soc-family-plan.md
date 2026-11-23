@@ -104,7 +104,8 @@ loss is E7's alone: -23% / -30%.  At a fixed 50 MHz the extra fmax buys nothing,
 is rejected** (kept as a build option; not in profiles/game2d.mk).  A timing fix must keep the
 prediction in the fetch cycle -- e.g. a smaller BTB in LUT RAM read in the same cycle, or
 predicting a cycle ahead from the registered read -- or move the VDP's logic out of the CPU's
-region by architecture; open, and the user's call which.  The APU (19 more block RAMs, ~3.1K LUT) is not yet placed and routed.
+region by architecture; being worked on (a game2d fix goes into profiles/game2d.mk with its
+gate; changing the promoted core stays the user's decision).  The APU (19 more block RAMs, ~3.1K LUT) is not yet placed and routed.
 
 ## Profiles
 

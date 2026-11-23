@@ -12,7 +12,9 @@
    0xC0010400 + 4 * index, of a1's value -- and return to ra.
 
    Fixed in the statement (not yet general): privilege M with mstatus = 0x1800 (MPRV clear: the
-   title runs in M-mode and never sets it), the data a1 = 0x00ABCDEF and ra = 0x80001000.  The
+   title runs in M-mode and never sets it); the 8 PMP entries off (their reset value: the title
+   never writes them); the data a1 = 0x00ABCDEF and ra = 0x80001000.  The model's configuration
+   (support/riscv_extras.v) is Flute's: RV32IMAC+F, 8 PMP entries of grain 10.  The
    proof is by computation (vm_compute); with a1 or ra symbolic the model's store and jump
    paths branch on them (alignment checks, byte packing) and vm_compute's normal form blows
    up, so generalising them needs symbolic execution (stepwise rewriting, or coq-sail's Hoare
@@ -33,10 +35,12 @@ Definition RA : mword 32 := Ox"80001000".
 
 (* the state at the call: pc at hw_palette, a0 = index, a1 = data, ra; everything else s0 *)
 Definition at_call (s0 : regs) (i : Z) : regs :=
-  upd (upd (upd (upd (upd (upd s0 (R_bitvector_32 PC) (Ox"80000030"))
+  upd (upd (upd (upd (upd (upd (upd (upd s0 (R_bitvector_32 PC) (Ox"80000030"))
      (R_bitvector_32 x10) (Z_to_bv 32 i)) (R_bitvector_32 x11) D)
      (R_bitvector_32 x1) RA) (R_Privilege cur_privilege) Machine)
-     (R_bitvector_32 mstatus) (Ox"00001800").
+     (R_bitvector_32 mstatus) (Ox"00001800"))
+     (R_vector_64_bitvector_8 pmpcfg_n) inhabitant)          (* every PMP entry off (reset) *)
+     (R_vector_64_bitvector_32 pmpaddr_n) inhabitant.
 
 Definition the_write (i : Z) : wr := {| w_pa := 0xC0010400 + 4 * i; w_n := 4; w_v := bv_unsigned D |}.
 

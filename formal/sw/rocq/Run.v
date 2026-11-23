@@ -7,15 +7,19 @@
 
    - [run]: interprets a tree against a register file (every register: a dependent function)
      and the device / memory environment [env] (what a memory read returns: anything -- a
-     theorem quantifies over env), logging every memory write.  A trap, an exception, a failure
-     or a nondeterministic choice makes [run] return None: a theorem that [run] gives [Some]
-     says the code does not trap (S1).
+     theorem quantifies over env), logging every memory write.  A Sail exception ([throw]), a
+     model failure, a nondeterministic choice or an event not modelled here makes [run] return
+     None.  A trap is NOT an event in this model: the instruction's semantics writes mepc,
+     mcause, ... itself and returns RETIRE_FAIL -- which [step] rejects.  So [steps] giving
+     [Some] says every instruction retired without a trap (S1).
    - [step]: one instruction from a code map, as sail-riscv's riscv_step.sail does it on the
      path without traps or interrupts: fetch the halfword or word at PC, decode
      (encdec_compressed_backwards / encdec_backwards), set nextPC = PC + length, execute,
      require RETIRE_SUCCESS, PC := nextPC.  This step is the one piece of the semantics written
      here rather than generated from Sail (part of the trusted base; riscv_step.sail is not in
      sail-riscv's Rocq build).  Interrupts are not modelled: the title runs with them off.
+     Unlike riscv_step.sail, [step] does not count minstret / mcycle (no theorem here reads
+     them).
 
    The trusted base of a theorem below: the Sail model (sail-riscv af5c2f2 + soc-coq.patch),
    sail's Rocq backend, coq-sail-stdpp, support/riscv_extras.v (configuration and platform
