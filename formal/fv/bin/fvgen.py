@@ -278,17 +278,21 @@ def gen(ip, c, work, rtl_override=None, only=None):
         for b in binds:
             # parameterized too ($paramod$<hash>\\<name> when the parameter list is long)
             s.append(f'select -assert-count 1 t:{b} t:$paramod\\{b}\\* %u t:$paramod$*\\{b} %u')
+        for cmd in c.get('prescript', '').split(';'):       # passes on the hierarchy (before the
+            if cmd.strip():                                 # taps' flatten), e.g. a bound-checker count
+                s.append(cmd.strip())
         taps = c.get('taps', '').split()
         if taps:                # internals inside library submodules (bsc FIFOs): a bind cannot
             s.append('flatten')  # name them, so the checker port is left open and driven here
+        # keep: a tap port a build leaves unused (FV_NO_INV, a lemma's define off) must survive
+        # opt_clean, the cfg script's included
+        for t in taps:
+            s.append(f"setattr -set keep 1 w:{t.partition('=')[0]}")
         for cmd in c.get('script', '').split(';'):          # extra passes, e.g. memory_map (before
             if cmd.strip():                                 # the taps: a FIFO ring's words are
                 s.append(cmd.strip())                       # wires <inst>.arr[i] only after it)
         # Merge flatten's alias wires before connecting: connect -set cuts its target's driver,
         # which can be the alias joining a tapped port to the checker submodule that uses it.
-        # keep: a tap port an FV_NO_INV build leaves unused must survive opt_clean.
-        for t in taps:
-            s.append(f"setattr -set keep 1 w:{t.partition('=')[0]}")
         if taps:
             s.append('opt_clean')
         for t in taps:
@@ -366,8 +370,9 @@ def cmd_mutate(ip, only):
     def evaluate(tag, override):
         work = os.path.join(tmp, tag)
         # mutchecks: the checks a sweep runs (default all but cover; a slow prove / deep bmc
-        # can be left to the plain run)
-        dirs = gen(ip, c, work, override, c.get('mutchecks', '').split() or None)
+        # can be left to the plain run); MUT_CHECKS="a b" overrides it for one sweep
+        dirs = gen(ip, c, work, override,
+                   (os.environ.get('MUT_CHECKS') or c.get('mutchecks', '')).split() or None)
         res = []
         for name, d in dirs.items():
             if c['checks'][name].split()[0] == 'cover':

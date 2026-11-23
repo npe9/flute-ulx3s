@@ -40,6 +40,7 @@ module mmu_cache_wb (
     input wire        clk, rst_n,
     input wire [3:0]  wr_ctr,     // the cache's ctr_wr_rsps_pending (for the lemma)
     input wire [4:0]  st,         // the cache's rg_state (Module_State, MODULE_PRERESET = 0)
+    input wire [4:0]  st_dn, input wire st_en,   // rg_state's D_IN and EN (the next state)
     input wire [7:0]  snap_cnt,   // the cache's rg_snap_cnt (CACHE_SNAPSHOT's word counter)
     input wire        ar_enqs, ar_deqs,   // rg_ar_enqs / rg_ar_deqs: an AR staged when they differ
     input wire [1:0]  epoch,      // the cache's rg_epoch (the low ARID / AWID bits; stale R / B dropped)
@@ -51,6 +52,9 @@ module mmu_cache_wb (
     input wire [1:0]  rq_op, input wire [2:0] rq_f3, input wire [31:0] rq_addr,   // rg_op / rg_f3 / rg_addr (written only by req)
     input wire        u_any_d, u_any, u_byp,   // rg_u_any's D_IN (a uDTLB entry matches now), rg_u_any (last cycle), rg_udtlb_bypass
     input wire        u_cq, u_cn, u_pq, u_pn, u_tq, u_tn,   // the uDTLB's ctx / pmp / tlb seq and seen bits
+    input wire        u_dirty,    // rg_udtlb_dirty (LX50: a change since the last fill)
+    input wire [1:0]  req_priv, input wire req_sum, req_mxr, input wire [31:0] req_satp,   // req's context
+    input wire [35:0] ctx_reg,    // {rg_priv, rg_sstatus_SUM, rg_mstatus_MXR, rg_satp}: the last req's context
     input wire [408:0] rg_pmp_in,  // the cache's rg_pmp (ma_pmp_t registered every cycle)
     input wire        age_seen, req_seq,   // rg_age_seen / rg_req_seq: the probe waits a cycle after req / REREQ
     input wire        en_verb,
@@ -68,7 +72,15 @@ module mmu_cache_wb (
     input wire        rvalid, rready, input wire [3:0] rid, input wire [63:0] rdata,
     input wire [1:0]  rresp, input wire rlast, input wire [1:0] bresp,
     input wire        en_ddr4, input wire [408:0] pmp,
-    input wire        busy
+    input wire        busy,
+    // FV_TAGS (the 1 KB 1-way build, mmu_cache_tiny.cfg taps): the kept tag-RAM words (sets 0
+    // and 1: {state, ctag = PA[33:10]}), its B read register, rg_uhitw, rg_pa,
+    // rg_error_during_refill and the four uDTLB entries ({valid, vpn, ppn, ok_ld, ok_st, ok_amo})
+    input wire [24:0] tag0, tag1, tdob,
+    input wire        uhitw, rf_err,
+    input wire [33:0] rpa,
+    input wire [45:0] ue0, ue1, ue2, ue3,
+    input wire [4:0]  amo_f5      // rg_amo_funct7[6:2] (LR 00010, SC 00011)
 );
 `ifndef FV_L
 `define FV_L 2
@@ -127,6 +139,7 @@ module mmu_cache_wb (
         if (en_req) begin
             assume (req_op != 2'd3);
             assume (req_addr[11:7] == 5'd0);    // cache sets 0 and 1 (vip/bsclib/bram2_lowsets.v)
+            assume (req_priv != 2'd2);          // U, S or M (Flute has no priv 2)
             if (req_op == 2'd0) assume (req_f3 != 3'd6 && req_f3 != 3'd7);    // LB..LD, LBU, LHU
             if (req_op == 2'd1) assume (req_f3[2] == 1'b0);                   // SB..SD
             if (req_op == 2'd2) assume (req_f3 == 3'd2);                      // AMO*.W, LR.W, SC.W
@@ -307,7 +320,7 @@ module mmu_cache_wb (
     // until the request is answered, so a request never fills twice and never refills without
     // a translation.  hit is the uDTLB's combinational hit, hit_r the registered one
     // (rl_probe_and_immed_rsp's, a cycle behind the entries).
-    wire u_fresh = (u_cq == u_cn) && (u_pq == u_pn) && (u_tq == u_tn);
+    wire u_fresh = (u_cq == u_cn) && (u_pq == u_pn) && (u_tq == u_tn) && !u_dirty;
     wire u_hit   = (u_fresh && u_any_d) || u_byp;
     wire u_hit_r = (u_fresh && u_any) || u_byp;
     reg u_ok = 1'b0, u_ok1 = 1'b0;
@@ -326,6 +339,73 @@ module mmu_cache_wb (
         if (st != 5'd3) assert (age_seen == req_seq);
         if (pend && st == 5'd3 && age_seen == req_seq) assert (u_any == u_any_d);
     end
+    // a request's phases are one-shot (toward K_RSP): the uDTLB fills at most twice (a miss, then
+    // again after a page walk), the page table is walked at most once and the line refilled at
+    // most once, so a request cannot loop through the fabric forever (K_WAIT and K_IDLE both
+    // pass on such a loop, since the fabric is always owed).  Counted on entry, per request.
+    // (st_d is the next rg_state, so a count changes on the same edge as the state it counts)
+    wire [4:0] st_d = st_en ? st_dn : st;
+    reg [1:0] n_fill = 2'd0, n_ptw = 2'd0, n_refill = 2'd0;
+    always @(posedge clk) begin
+        if (st_d == 5'd5 && st != 5'd5 && n_fill != 2'd3) n_fill <= n_fill + 2'd1;
+        if (st_d == 5'd8 && st != 5'd8 && n_ptw != 2'd3) n_ptw <= n_ptw + 2'd1;
+        if (st_d == 5'd13 && st != 5'd13 && n_refill != 2'd3) n_refill <= n_refill + 2'd1;
+        if (en_req || rst) begin n_fill <= 2'd0; n_ptw <= 2'd0; n_refill <= 2'd0; end
+    end
+    always @(*) if (rst_n && pend) begin
+        assert (n_fill <= 2'd2);
+        assert (n_ptw <= 2'd1);
+        assert (n_refill <= 2'd1);
+        // the phases come in order: fill, (walk, fill), refill
+        if (st >= 5'd5 && st <= 5'd7) assert (n_fill != 2'd0 && n_refill == 2'd0);
+        if (st >= 5'd8 && st <= 5'd12) assert (n_fill == 2'd1 && n_ptw == 2'd1 && n_refill == 2'd0);
+        if (st >= 5'd13 && st <= 5'd15) assert (n_refill == 2'd1);
+        if (n_fill == 2'd2) assert (n_ptw == 2'd1);
+        // a fill that wrote an entry (no walk followed, or the walk's second fill) keeps it; the
+        // states reached only through a uDTLB hit (not ST_AMO_RSP: UDTLB_FILL2 answers a failed
+        // SC there without an entry)
+        if (n_fill != 2'd0 && (n_ptw == 2'd0 || n_fill == 2'd2) &&
+            (st == 5'd3 || (st >= 5'd13 && st <= 5'd15) || st == 5'd17 || st == 5'd18 || st == 5'd20))
+            assert (u_ok);
+        // the bypass (a partial memory page: use rg_pa) is cleared by req and set only by
+        // UDTLB_FILL2 on its way to CACHE_REREQ; every probe hits after it
+        if (u_byp) assert (n_fill != 2'd0 && !(st >= 5'd5 && st <= 5'd12));
+        // a fill starts on a miss and writes its entry only as UDTLB_FILL2 leaves, so through the
+        // fill and the walk (and after a walk, until its second fill) the uDTLB does not hit
+        if ((st >= 5'd5 && st <= 5'd12) || (n_ptw != 2'd0 && n_fill == 2'd1)) assert (!u_ok && !u_hit);
+        // the line is refilled only once the entry exists
+        if (n_refill != 2'd0) assert (n_ptw == 2'd0 || n_fill == 2'd2);
+    end
+`ifdef FV_TAGS
+    // ... and a refill that completes installs the line, so the probe after it hits (no second
+    // refill).  The refill writes the tag at its first clean beat; CACHE_REREQ reads it back on
+    // port B; rl_capture_udtlb compares it in the wait cycle against the PA of the matching
+    // uDTLB entries (or rg_pa, bypassed), whose PA is rg_pa's.
+    wire [24:0] tag_rq = rq_addr[6] ? tag1 : tag0;   // the request's set (address [11:7] = 0)
+    wire [24:0] tag_ok = {1'b1, rpa[33:10]};          // CTAG_CLEAN, the line's tag
+    // fn_udtlb_match: valid, the VPN, and the op's permission bit (a stale entry for the page
+    // without it may carry another PPN)
+    wire u_ld = rq_op == 2'd0 || (rq_op == 2'd2 && amo_f5 == 5'b00010);
+    wire u_st = rq_op == 2'd1 || (rq_op == 2'd2 && amo_f5 == 5'b00011);
+    function automatic [21:0] ue_ppn(input [45:0] e, input [31:0] a, input ld, st);
+        ue_ppn = (e[45] && e[44:25] == a[31:12] && (ld ? e[2] : st ? e[1] : e[0])) ? e[24:3] : 22'd0;
+    endfunction
+    // udtlb_ppn: the OR of the matching entries' PPNs (one entry at most since LX50)
+    wire [21:0] u_ppn = ue_ppn(ue0, rq_addr, u_ld, u_st) | ue_ppn(ue1, rq_addr, u_ld, u_st) |
+                        ue_ppn(ue2, rq_addr, u_ld, u_st) | ue_ppn(ue3, rq_addr, u_ld, u_st);
+    wire refilled = pend && n_refill != 2'd0 && (st == 5'd16 || st == 5'd3);
+    always @(*) if (rst_n) begin
+        if (pend && n_refill != 2'd0) assert (rpa[11:0] == rq_addr[11:0]);
+        if (pend && ((st == 5'd15 && rf_cw != 3'd0 && !rf_err) || refilled)) assert (tag_rq == tag_ok);
+        if (refilled && st == 5'd3 && age_seen != req_seq) assert (tdob == tag_rq);
+        if (refilled && st == 5'd3 && age_seen == req_seq) assert (uhitw);
+        if (pend && n_refill != 2'd0 && !u_byp && st != 5'd4) assert (u_ppn == rpa[33:12]);
+        // LX50: a fill evicts any other entry for its page, so at most one matches
+        assert (!(ue0[45] && ue1[45] && ue0[44:25] == ue1[44:25]) && !(ue0[45] && ue2[45] && ue0[44:25] == ue2[44:25]) &&
+                !(ue0[45] && ue3[45] && ue0[44:25] == ue3[44:25]) && !(ue1[45] && ue2[45] && ue1[44:25] == ue2[44:25]) &&
+                !(ue1[45] && ue3[45] && ue1[44:25] == ue3[44:25]) && !(ue2[45] && ue3[45] && ue2[44:25] == ue3[44:25]));
+    end
+`endif
     // bounded liveness
     reg [1:0] req_op_q;
     always @(posedge clk) if (en_req) req_op_q <= req_op;
@@ -377,6 +457,26 @@ module mmu_cache_wb (
         else if (st == 5'd15) `FV_PROVEN (c_rr <= 10);
         else `FV_PROVEN (c_rr == 0);
     end
+    // the uDTLB forgets on every change (LX50): after an SFENCE.VMA (tlb_flush) or a req whose
+    // priv / SUM / MXR / satp differ from the last req's, no probe hits an entry until a fill
+    // has rewritten them (UDTLB_FILL2 -> CACHE_REREQ, not bypassed).  The ghost follows the
+    // interface, not the cache's seq bits.  Before LX50 two back-to-back SFENCE.VMAs toggled
+    // the seq back and the next load hit the entry filled before them (bmc, 37 steps).
+    // The PMP table is fixed here, so a PMP change is not exercised.
+    reg [35:0] ctx_q; reg ctx_v = 1'b0, stale = 1'b0, fill_w = 1'b0;
+    always @(posedge clk) begin
+        fill_w <= st == 5'd7 && st_d == 5'd16;
+        if (fill_w && !u_byp) stale <= 1'b0;
+        if (en_req) begin ctx_q <= {req_priv, req_sum, req_mxr, req_satp}; ctx_v <= 1'b1; end
+        if (en_tlb_flush || (en_req && ctx_v && {req_priv, req_sum, req_mxr, req_satp} != ctx_q))
+            stale <= 1'b1;
+        if (rst) begin stale <= 1'b0; ctx_v <= 1'b0; fill_w <= 1'b0; end
+    end
+    always @(*) if (rst_n && pend && stale && st == 5'd3 && age_seen == req_seq && !u_byp) assert (!u_hit_r);
+    // inductive support: while the ghost is stale (bar the cycle it clears, after a fill that wrote
+    // the entries) the cache's dirty bit holds, so the uDTLB is not fresh
+    always @(*) if (rst_n && stale && !(fill_w && !u_byp)) assert (u_dirty);
+    always @(*) if (rst_n && ctx_v) assert (ctx_q == ctx_reg);
 `ifdef FV_REACH
     // Reachability by a failing assertion (abc bmc3 is far faster here than smtbmc's cover):
     // the expected result is FAIL, its trace the witness.  The refill takes ~50 steps past reset.
@@ -396,10 +496,11 @@ module mmu_cache_wb (
 endmodule
 
 bind mkMMU_Cache mmu_cache_wb wb (
-    .wr_ctr(ctr_wr_rsps_pending_crg), .st(rg_state), .snap_cnt(rg_snap_cnt),
+    .wr_ctr(ctr_wr_rsps_pending_crg), .st(rg_state), .st_dn(\rg_state$D_IN ), .st_en(\rg_state$EN ), .snap_cnt(rg_snap_cnt),
     .ar_enqs(rg_ar_enqs), .ar_deqs(rg_ar_deqs), .b_ne(\master_xactor_f_wr_resp$EMPTY_N ), .w_nf(\master_xactor_f_wr_data$FULL_N ), .r_ne(\master_xactor_f_rd_data$EMPTY_N ), .rf_cw(rg_cset_cword_in_cache[2:0]), .epoch(rg_epoch), .kecho(rg_kill_echo), .rq_op(rg_op), .rq_f3(rg_f3), .rq_addr(rg_addr), .u_any_d(\rg_u_any$D_IN ), .u_any(rg_u_any), .u_byp(rg_udtlb_bypass),
     .u_cq(rg_udtlb_ctx_seq), .u_cn(rg_udtlb_ctx_seen), .u_pq(rg_udtlb_pmp_seq), .u_pn(rg_udtlb_pmp_seen),
-    .u_tq(rg_udtlb_tlb_seq), .u_tn(rg_udtlb_tlb_seen), .rg_pmp_in(rg_pmp), .age_seen(rg_age_seen), .req_seq(rg_req_seq),
+    .u_tq(rg_udtlb_tlb_seq), .u_tn(rg_udtlb_tlb_seen), .u_dirty(rg_udtlb_dirty), .ctx_reg({rg_priv, rg_sstatus_SUM, rg_mstatus_MXR, rg_satp}),
+    .req_priv(req_priv), .req_sum(req_sstatus_SUM), .req_mxr(req_mstatus_MXR), .req_satp(req_satp), .rg_pmp_in(rg_pmp), .age_seen(rg_age_seen), .req_seq(rg_req_seq),
     .clk(CLK), .rst_n(RST_N), .en_verb(EN_set_verbosity),
     .en_rst_req(EN_server_reset_request_put), .rdy_rst_req(RDY_server_reset_request_put),
     .en_rst_rsp(EN_server_reset_response_get), .rdy_rst_rsp(RDY_server_reset_response_get),

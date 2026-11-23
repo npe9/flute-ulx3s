@@ -503,8 +503,12 @@ comes from architecture, with at least 10% margin before benching):
   rules, K_IDLE (busy with nothing pending never lasts), one read burst at a time, and that R
   and B beats are taken (B at once, R within 11) for all depths, and k-induction (`kind`, with
   those assumed) proves K_WAIT (a pending request never waits 16 cycles with nothing on the
-  fabric) and its FSM / uDTLB / fabric lemmas for all depths. The latency bounds are
-  bounded only.
+  fabric) and its FSM / uDTLB / fabric lemmas for all depths. With taps on the tag RAM and
+  the uDTLB entries (`FV_TAGS`), `kind` also proves that a request fills the uDTLB at most
+  twice, walks at most once and refills at most once, that a finished refill installs its
+  line, that the uDTLB holds one entry per page, and that after an SFENCE.VMA or a context
+  change no probe hits until the entries are refilled. That last proof found the two LX50
+  uDTLB bugs (Known issues). The latency bounds are bounded only.
   Neither is in the gate (`short`: 13 / 19 min; D-side `kind`: 3 min).
 - **Debug suite** — `test/debug/run.sh` on the board for Debug Module or hart debug changes.
 - **Gate script** — each build's `build/<name>/gate.sh` runs the sims, formal and P&R seeds.
@@ -763,6 +767,15 @@ rules. The older Bluesim testbench (`test/Sdram_Tb.bsv`) is not maintained.
 
 ## Known issues
 
+- **Stale uDTLB translations in lx49b and earlier (LX50, fixed in lx49c).** The D-cache's uDTLB
+  dropped its entries through 1-bit toggles, so two changes with no refill between (two
+  back-to-back `sfence.vma`s, or a faulting context change and then another) brought the old
+  entries back: a remapped page read its old frame. Separately, two entries for one page (an
+  op with another permission, after a PTE change without `sfence.vma`) gave a physical
+  address that was the OR of both frames, and the access refilled forever. Formal found both
+  (item 11 in `notes/linux-isa-plan.md`), and `test/mm_test.bin` 0x4e reproduces the first on
+  the promoted lx49b in sim and on the board. lx49c has a sticky dirty bit and evicts
+  same-page entries on a fill; it passes the gate, but promotion is pending.
 - **microSD in SPI mode reads wrong data.** Every SPI-mode Linux boot (lx40-lx47) read the
   card's block 0 as all `FF`; the native host (lx48) reads its MBR (`55AA`, one partition).
   Cause not found; use the native host.

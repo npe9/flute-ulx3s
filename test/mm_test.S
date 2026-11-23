@@ -11,7 +11,8 @@
 # the uncached MMIO path (framebuffer RAM and palette, non-posted: a load after a store
 # must see it), FENCE.I against an I$ that already holds the line, and SFENCE.VMA
 # against the TLB (remap, address-specific flush, invalidate -> page fault, read-only
-# -> store page fault, megapage).  LR/SC and AMOs are amo_test.S's.
+# -> store page fault, megapage, two back-to-back flushes after a same-context remap).
+# LR/SC and AMOs are amo_test.S's.
 #
 #   0x1x  self-modifying code + FENCE.I     0x2x  cached store -> load
 #   0x3x  uncached MMIO store -> load       0x4x  SFENCE.VMA / TLB (M-mode, MPRV=1, MPP=S)
@@ -65,6 +66,7 @@
     .equ MEGA,   0x80400000    # megapage for VA 0x40400000
     .equ VA,     0x40000000
     .equ VAM,    0x40400000
+    .equ VAP,    0x40001000    # L0[1]: the level-0 table itself (0x4d / 0x4e)
     .equ RWAD,   0xC7          # D A - - - W R V
     .equ RAD,    0xC3          # D A - - - - R V
 
@@ -304,6 +306,26 @@ _start:
     li   t1, PGA               # the faulting store did not land
     lw   a3, 8(t1)
     CHK  0x4c, a3, 0
+    # Two back-to-back SFENCE.VMAs (a per-page flush loop issues them so) after a remap done in
+    # the same context: the next load must see the new mapping.  Before LX50 the uDTLB marked
+    # its entries dead with one toggle bit per cause, the second SFENCE toggled it back, and the
+    # load hit the entry from before both (formal/fv mmu_cache_tiny, 37 steps).  The PTE is
+    # rewritten through VAP (L0[1] maps L0 itself) so that no M-mode access refills the uDTLB.
+    li   t0, ((L0 >> 12) << 10) | RWAD
+    sw   t0, 4(s10)            # L0[1] -> L0
+    SETPTE PGA, RWAD
+    sfence.vma
+    li   t1, VAP
+    li   t2, ((PGB >> 12) << 10) | RWAD
+    MPRV_ON
+    lw   a2, 0(s9)             # fills the uDTLB: VA -> PGA
+    sw   t2, 0(t1)             # L0[0] = PGB, through VAP
+    sfence.vma
+    sfence.vma
+    lw   a3, 0(s9)             # PGB's word
+    MPRV_OFF
+    CHK  0x4d, a2, 0xaaaa0001
+    CHK  0x4e, a3, 0xbbbb0002
 
     csrw satp, zero
     sfence.vma

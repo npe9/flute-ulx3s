@@ -6,7 +6,7 @@ log = open(os.path.join(f, 'logfile.txt'), errors='replace').read()
 proved = {int(m) for m in re.findall(r'Proved output (\d+)', log)}
 srcs = {}
 for i, a in enumerate(d['asserts']):
-    m = re.search(r'check_assert_(\w+?)_sv_(\d+)_', a[-1])
+    m = re.search(r'assert_(\w+?)_sv_(\d+)_', a[-1])
     fn, ln = (m.group(1) + '.sv', int(m.group(2))) if m else ('?', 0)
     if fn not in srcs:
         p = os.path.join(f, 'src', fn)
