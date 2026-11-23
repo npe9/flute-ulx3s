@@ -88,11 +88,16 @@ The failing path is the CPU's branch-predictor loop (BTB RAM clock-to-out 5.6 ns
 levels -> the BTB / I-cache RAM address) with its logic placed 25-40 rows from the RAMs in row
 22: a placement dump shows the VDP's 2,100 logic cells put in the free top-left (rows 0-29),
 pushing the small devices and the fetch logic down -- congestion, not a net (a register slice
-in front of the VDP, src/Rb_Slice.v, changed nothing: 48.4 / 50.2 on s3 / s5; removed).  Being
-measured: E7, the registered BTB read (`make BTB_OUTREG=1`), which takes the RAM's clock-to-out
-off the loop.  It is a CPU change: its gate (riscv-formal, ISA tests, Dhrystone / CoreMark) and
-whether it goes into game2d only or the promoted core are the user's decision.  The APU (19 more
-block RAMs, ~3.1K LUT) is not placed and routed until VDP-only closes.
+in front of the VDP, src/Rb_Slice.v, changed nothing: 48.4 / 50.2 on s3 / s5; removed).  **E7, the registered BTB read (`make BTB_OUTREG=1`, Branch_Predictor.bsv
+`bram_has_output_reg`), closes it:** game2d+VDP 55.86 / 52.29 / 55.62 MHz on seeds 3/5/7,
+shift_clk PASS (156.6+ at 125).  The BTB loop left the critical path on seeds 3 and 7 (now the
+multiplier, stage2_mbox, 8.0 ns logic + 10 ns routing); on seed 5 the path still ends at the BTB
+RAM's address (icache rg_pc -> btb ADB, 3.3 ns logic + 15.9 ns routing) but at 52.3.  The read is
+a cycle later, so a prediction can be stale: Stage1 verifies every prediction (E42), so that is
+a mispredict, not an error.  Gate so far: riscv-formal 10/10 PASS on the BTB_OUTREG core
+(build/formal-e7.log); the 94 ISA tests: see below; Dhrystone / CoreMark: not yet run (needs the
+board).  Whether E7 goes into game2d only or the promoted core is the user's decision: it is not
+in profiles/game2d.mk.  The APU (19 more block RAMs, ~3.1K LUT) is not yet placed and routed.
 
 ## Profiles
 

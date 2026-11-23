@@ -734,8 +734,11 @@ new serializer equal, cycle for cycle and on both DDR bits of every lane, to the
 
 `make SOC=game2d SYS_PLL=50 FP=1 FPU_TRIM=1` builds the 2D console profile
 (`profiles/game2d.mk`, into `build/game2d/`): the linux core and SoC without SPI2 and UART1,
-plus two game blocks on the register bus. **Its timing is open** (seed 7 at 45.6 MHz with the
-VDP; `notes/soc-family-plan.md`, game2d status), so it is not a flash image.
+plus two game blocks on the register bus. **Timing:** with the VDP it closes only with the
+registered BTB read (`make ... BTB_OUTREG=1`, E7: 55.86 / 52.29 / 55.62 MHz on seeds 3/5/7;
+without it seed 7 is 45.6), a CPU change whose adoption is the user's decision
+(`notes/soc-family-plan.md`, game2d status); the APU is not yet placed and routed. It is not a
+flash image.
 
 - **VDP1** (`src/Vdp.v`, `sw/vdp/vdp.h`; registers `0xC0020000`, VRAM `0xC1080000`): a 64x32
   tile background layer with scrolling and flips, 64 sprites (16 a line), 16 palette banks,
@@ -766,7 +769,10 @@ frames pass. Tier 2 (`formal/sw/cbmc/run.sh`, proved): CBMC shows by induction t
 button sequence the C code never has undefined behaviour, writes only real registers, keys only
 configured APU voices and makes at most 75 writes a frame. It found two frame counters that
 overflowed after ~414 days, fixed. Each tier has planted bugs it must catch
-(`mutants.sh`). Tier 3, proofs about the binary in Rocq against Sail's generated model, is open.
+(`mutants.sh`). Tier 3 (`formal/sw/rocq/build.sh`, proved) checks the binary itself in Rocq against Sail's RV32
+model generated as Rocq: so far, that the compiled `hw_palette` writes exactly one word at
+`0xC0010400 + 4·index` for every index, in any machine state, without a trap (with the data and
+return address still fixed); the rest of the binary is open.
 
 ## Milestone LEDs
 

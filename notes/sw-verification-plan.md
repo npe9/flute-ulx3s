@@ -67,7 +67,7 @@ KEYON before its voice's registers, a host/target divergence) and must catch the
 |---|---|
 | C program satisfies S1, S3, S4, no UB, for every button sequence, forever | **proved** (tier 2, CBMC induction; the hw.h boundary is assumed to be the device spec) |
 | RISC-V binary refines the C program (S2) | **tested** (tier 1: 400,000 fuzzed frames, half with random device timing); tier 3 proof open |
-| binary on the Sail ISA model is S1 (device side) | **tested** (tier 1); tier 3 proof open |
+| binary on the Sail ISA model is S1 (device side) | **tested** (tier 1); **proved for hw_palette** (tier 3, Rocq; data and return address concrete); the rest open |
 | binary: fetch stays in .text, sp in the stack, no store to .text | **not checked** at the binary level (the C-level bounds / pointer proof covers the source; the compiler is trusted here) |
 | Flute CPU implements the ISA, per instruction | riscv-formal (proved, bounded per check) against riscv-formal's own ISA spec |
 | riscv-formal's ISA spec agrees with Sail | **tested only** (testrig: Sail vs Flute lockstep) |
@@ -76,6 +76,8 @@ KEYON before its voice's registers, a host/target divergence) and must catch the
 | whole SoC runs the binary as Sail does | tested: frame_check, the strict sim |
 
 ## Status
+
+Tiers 1 and 2 are done; tier 3 has its model, program logic and first theorem (below).
 
 **Tier 1, done (2026-11-23).**  `formal/sw/sail/soc-mmio.patch` (on sail-riscv af5c2f2, testrig's
 commit, in a shared clone at `build/sail-soc`): word accesses in 0xC0000000-0xC1FFFFFF go to
@@ -112,5 +114,39 @@ counters and a score capped at the six digits shown (999,990); no observable cha
 those limits.  `formal/sw/cbmc/mutants.sh`: 8 planted bugs, all caught, three in states the
 fuzzer never reached (every log on; a second crash in the hurt time; KEYON before its PITCH).
 
-Not covered by tiers 1-2: `bench_rt.c`'s start-up and printf (run by tier 1, not proved);
+**Tier 3, started (2026-11-23).**  The spike's question -- can the installed tools turn Sail RV32
+into Rocq that Rocq 9 checks, and reason about `lantern.elf`'s instructions? -- is answered yes.
+`formal/sw/rocq/build.sh` (opam switch omp-rocq-9.0: rocq 9.0, sail 0.20.2, coq-sail-stdpp
+0.20.2, coq-stdpp 1.12; ~1 min model build, 48 s when cached):
+- Model: sail-riscv af5c2f2 + `formal/sw/rocq/soc-coq.patch` (a stale termination measure
+  fixed; the platform functions bound to `support/riscv_extras.v`'s values from the SoC map;
+  the device window in `within_phys_mem`, so device accesses are memory events) +
+  `support/` (sail-riscv's hand-written Rocq support rewritten for coq-sail-stdpp: its
+  originals target the old bbv prompt monad).  No hand port of the 2024 snapshot.  Each
+  instruction is a free-monad tree of interface events (`execute`, `encdec_backwards`,
+  `encdec_compressed_backwards`); 78 axioms remain (floating point, LR/SC reservations, the
+  unused prompt-monad memory hooks).
+- Program logic: `formal/sw/rocq/Run.v` -- `run` interprets an event tree against a register
+  file and an arbitrary memory / device environment and logs memory writes (a trap, failure or
+  nondeterministic choice is None); `step` mirrors riscv_step.sail on the no-trap path
+  (fetch, decode, nextPC, execute, RETIRE_SUCCESS, PC); `steps`.  `step` is hand-written: part
+  of the trusted base, with the theorem statements, coq-sail, sail's Rocq backend and Rocq.
+- `formal/sw/rocq/gen_code.py` writes `Code.v` from the ELF's bytes (with its md5), so the
+  theorem is about the binary, not a transcription.
+- **`Palette.v`, proved:** for every index 0..255, in any machine state and any environment,
+  the compiled `hw_palette` (lui / addi / c.add / c.slli / c.sw / c.jr; it reaches the window
+  only modulo 2^32) retires on Sail without a trap, makes exactly one 4-byte write at
+  0xC0010400 + 4 * index of a1, and returns to ra.  Fixed in the statement: privilege M with
+  mstatus 0x1800 (MPRV clear), a1 = 0x00ABCDEF, ra = 0x80001000.  `Mutants.v`: four wrong
+  binaries (shift 1, one entry off, no store, an illegal instruction) fail the same check.
+- Why the fixed values: the proof is by computation (vm_compute).  With mstatus symbolic the
+  MPRV branch normalises the whole address-translation path; with a1 or ra symbolic the store's
+  byte packing / the jump's alignment check branch, and with a trap on a branch the whole trap
+  handler is normalised over symbolic CSRs (a model trap is register writes, not an event):
+  minutes, then a stack overflow.  Next: symbolic execution that prunes with hypotheses
+  (stepwise `cbn` + rewriting, or coq-sail's `Hoare.v`), then the other drivers (`hw_vdp_write`,
+  `hw_apu_write`, `hw_buttons`, already in Code.v), then `lantern_frame` against tier 2's
+  invariant.
+
+Not covered by tiers 1-3: `bench_rt.c`'s start-up and printf (run by tier 1, not proved);
 board.c's main loop (tier 1 only); the binary-level memory map (above); time per frame.
