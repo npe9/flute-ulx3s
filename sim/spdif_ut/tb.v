@@ -10,7 +10,7 @@ module tb;
     reg rst = 1, rb_valid = 0, rb_we = 0; reg [11:0] rb_addr = 0; reg [31:0] rb_wdata = 0; reg [3:0] rb_wstrb = 0;
     wire rb_ack; wire [31:0] rb_rdata; wire [3:0] al, ar, av;
     audio dut (.clk(clk), .rst(rst), .rb_valid(rb_valid), .rb_we(rb_we), .rb_addr(rb_addr), .rb_wdata(rb_wdata),
-               .rb_wstrb(rb_wstrb), .rb_ack(rb_ack), .rb_rdata(rb_rdata), .audio_l(al), .audio_r(ar), .audio_v(av));
+               .rb_wstrb(rb_wstrb), .rb_ack(rb_ack), .rb_rdata(rb_rdata), .audio_l(al), .audio_r(ar), .audio_v(av), .apu_l(16'd0), .apu_r(16'd0));
     task wr; input [11:0] a; input [31:0] d; begin
         @(negedge clk); rb_valid = 1; rb_we = 1; rb_addr = a; rb_wdata = d; rb_wstrb = 4'hF;
         @(negedge clk); while (!rb_ack) @(negedge clk);

@@ -7,6 +7,8 @@
 //     0x000 ID      RO  0x56494431 ("VID1")
 //     0x004 MODE    RW  [2:0]  0 off (no sync: the display sleeps), 1 640x480 4 bpp palette
 //                              (entries 0-15), 2 320x240 RGB565, 3 320x240 8 bpp palette,
+//                              4 320x240 from the VDP (src/Vdp.v, game2d: vdp_idx through the
+//                              palette; builds without INCLUDE_VDP treat 4 like 3),
 //                              7 test pattern (colour bars over a grey ramp, white border);
 //                              320x240 modes are doubled in both directions
 //     0x008 STATUS  RO  [0] in vertical blank
@@ -49,6 +51,13 @@ module video_fb #(
     output reg         dbg_de,
     output reg         dbg_hs,
     output reg         dbg_vs
+    ,
+    // VDP (src/Vdp.v): the stage-0 scan counters, and the palette index it returns for that
+    // pixel two pixel clocks later (stage 2)
+    output wire [9:0]  scan_hc,
+    output wire [9:0]  scan_vc,
+    output wire        scan_on,
+    input  wire [7:0]  vdp_idx
     ,
     // trace port (formal/fv/ips/video): spec events, unconnected in the FPGA build
     output wire        tr_fb_wr,     // sys clock: a pixel RAM write lands (the cycle after its take)
@@ -234,6 +243,7 @@ module video_fb #(
     wire m_pal4 = (mode_p == 3'd1);
     wire m_565  = (mode_p == 3'd2);
     wire m_test = (mode_p == 3'd7);
+    wire m_vdp  = (mode_p == 3'd4);
 
     reg [9:0]  hc = 0, vc = 0;
     reg [15:0] lb = 0;          // word address of the current source line
@@ -265,6 +275,10 @@ module video_fb #(
     // stage 4, the TMDS words into stage 5.
 
     assign pa = lb + (m_565 ? { 8'b0, hc[9:2] } : { 9'b0, hc[9:3] });
+
+    assign scan_hc = hc;
+    assign scan_vc = vc;
+    assign scan_on = on;
 
     wire de0 = on && (hc < 640) && (vc < 480);
     wire hs0 = !(on && (hc >= 656) && (hc < 752));
@@ -313,6 +327,11 @@ module video_fb #(
 
     // palette index at stage 2 (combinational from w2, registered into the palette RAM)
     always @(*) begin
+`ifdef INCLUDE_VDP
+        if (m_vdp)
+            pidx = vdp_idx;
+        else
+`endif
         if (m_pal4)
             case (sl2)
                 3'd0: pidx = { 4'b0, w2[3:0]   };

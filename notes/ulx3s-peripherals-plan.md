@@ -187,6 +187,10 @@ Z-buffered perspective-correct mode at 160x120 is a stretch demo, not a target.
 | G6 | Rasterizer: setup, edge walk, gouraud, affine texture, blending, BRAM tex cache | game3d | 8-12K LUT, ~140 BRAM, ~12 DSP | spinning textured mesh; pixel-exact vs a C rasterizer |
 | G7 | SDK: C bare-metal libs, asset tools, SD boot menu (FAT), TempleOS bindings for VDP/APU | game2d, game3d | — | an original 2D game and an original 3D demo |
 
+Status 2026-11-23 (notes/soc-family-plan.md, game2d status): G2's first step (one tile layer,
+64 sprites) and G3's voices (8 voices, no ADPCM / HDMI audio yet) are built and verified in sim
+and formal; game2d+VDP timing is open (seed 7 45.6 MHz); the APU is not yet placed and routed.
+
 Order: B0 → G0 → G1 (shared by everything, and it unlocks the TempleOS/Linux framebuffer) →
 G3/G4 → `game2d` (G2) → `game3d` (G5, G6).
 

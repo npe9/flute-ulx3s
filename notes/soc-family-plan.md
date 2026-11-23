@@ -47,6 +47,53 @@ PMOD's datasheet before any RTL is written.
    "boot SoC B/C/D". Recovery: JTAG always works; the golden image never gets overwritten by
    the menu.
 
+### P0 status (2026-11-23)
+
+Done: items 1-3.  `make SOC=<profile>` reads `profiles/<profile>.mk`, which sets `SOC_DROP` (exact
+define names removed from the Makefile's DEFINES) and `SOC_ADD` (defines added); non-linux
+profiles build in `build/<profile>/`.  `SOC=linux` is the default and expands to the same
+DEFINES string as before, and its netlist is logically identical to the committed source's:
+per-module yosys equivalence of every bsc module (only mkSoC_Info's BUILD_DATE constant differs),
+and of the hand-written top level (src/Top.v + src/Audio.v against HEAD, 1,242 cells, with the
+video block, itself proved equivalent with vdp_idx = 0, as a black box).
+`src/ULX3S_Top.bsv` keeps the full pin set for every profile and ties absent devices off (ESP32
+UART idle high, ADC chip select high).  `scripts/pnr_seeds.sh <build dir> [make vars]` places and
+routes seeds 3, 5 and 7 of any profile (`PNR_ONLY=1` reuses the netlist).
+
+Not done: item 4 (multiboot, flash slots, P13) waits for the user's decision 1 below; until then
+a profile's bitstream is loaded into SRAM (`openFPGALoader -m`) and flash 0 keeps the linux
+build.
+
+### game2d status (2026-11-23)
+
+Built: the VDP (src/Vdp.v, G2's first step: one 64x32 tile layer, 64 sprites / 16 a line, video
+MODE 4) and APU1 (src/Apu.v, G3: 8 voices -- pulse, triangle, noise, 8-bit sample -- with ADSR
+and stereo volume, 32 kHz, into the jack after Audio's VOLUME), and an original title, Lantern
+Drift (sw/game2d: graphics, music and effects).  Verification:
+- VDP: sim/vdp_ut against sw/vdp/vdp_ref.c (17 mutants); formal/fv/ips/vdp proves the bus, the
+  registers and the render deadline (9 mutants); memories bounded; covers not completed.
+- APU: sim/apu_ut against sw/apu/apu_ref.c sample for sample (23 mutants, 2 equivalent);
+  formal/fv/ips/apu proves the bus, registers, tick period, the per-tick deadline and that the
+  write queue never fills; memories bounded.
+- The SoC: sim/game2d/frame_check.sh runs the title on the strict sim and compares the screen
+  pixel for pixel with the host build's prediction (PASS at 40 and 240 frames before the APU:
+  mean ~3,750-4,120 CPU cycles a frame of 840,000), replays the APU's samples into the model and
+  checks its writes equal the host build's.
+
+**Timing: open.**  game2d without the VDP: 56.68 / 53.76 / 55.22 MHz (seeds 3/5/7).  With the
+VDP: 50.82 / 46.13 / 49.30 with its RAMs in the CPU rows, 53.20 / 51.08 / 45.60 with them in
+rows 70/82 (constraints/video_floorplan.py: the same mean, the worst seed moved; not a fix).
+Not area (lx49c uses 84% of the LUTs, game2d+VDP 82%, and lx49c passes every seed at >= 53.9).
+The failing path is the CPU's branch-predictor loop (BTB RAM clock-to-out 5.6 ns -> 8 LUT
+levels -> the BTB / I-cache RAM address) with its logic placed 25-40 rows from the RAMs in row
+22: a placement dump shows the VDP's 2,100 logic cells put in the free top-left (rows 0-29),
+pushing the small devices and the fetch logic down -- congestion, not a net (a register slice
+in front of the VDP, src/Rb_Slice.v, changed nothing: 48.4 / 50.2 on s3 / s5; removed).  Being
+measured: E7, the registered BTB read (`make BTB_OUTREG=1`), which takes the RAM's clock-to-out
+off the loop.  It is a CPU change: its gate (riscv-formal, ISA tests, Dhrystone / CoreMark) and
+whether it goes into game2d only or the promoted core are the user's decision.  The APU (19 more
+block RAMs, ~3.1K LUT) is not placed and routed until VDP-only closes.
+
 ## Profiles
 
 ### Core profiles (the computers)

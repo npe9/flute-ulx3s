@@ -30,7 +30,18 @@ BSC_VERILOG_LIB := $(abspath $(dir $(realpath $(BSC)))../lib/Verilog)
 BSC_VERILOG_FILES := $(foreach f,$(wildcard $(BSC_VERILOG_LIB)/*.v),\
 	$(if $(findstring Load,$(notdir $f)),,$(if $(findstring InoutConnect,$(notdir $f)),,$(if $(findstring Probe,$(notdir $f)),,$(if $(filter main.v ConstrainedRandom.v,$(notdir $f)),,$f)))))
 
+# SOC=<profile> selects profiles/<profile>.mk (notes/soc-family-plan.md P0): defines added or
+# dropped, applied after the base DEFINES below.  SOC=linux (the default) is today's build,
+# unchanged.  Another profile builds in build/<profile>/ unless BUILD is given (bsc -u does not
+# see -D changes, so profiles must not share a build directory).
+SOC ?= linux
+ifeq ($(wildcard profiles/$(SOC).mk),)
+$(error SOC=$(SOC): no profiles/$(SOC).mk)
+endif
 BUILD := build
+ifneq ($(SOC),linux)
+BUILD := build/$(SOC)
+endif
 BDIR  := $(BUILD)/bsc
 VDIR  := $(BUILD)/verilog
 IDIR  := $(BUILD)/info
@@ -64,6 +75,11 @@ DEFINES := -D RV32 -D ISA_I -D ISA_M -D ISA_A -D ISA_C \
 # 85F with everything else (notes/linux-isa-plan.md); the formal flow uses it (arithmetic under
 # RVFI_ALTOPS) to verify the ISA_F/ISA_D hooks.
 FP ?= 0
+# BTB_OUTREG=1: the branch predictor's BTB read registered (E7, Flute/src_Core/CPU/Branch_Predictor.bsv)
+BTB_OUTREG ?= 0
+ifeq ($(BTB_OUTREG),1)
+DEFINES += -D BTB_OUTREG
+endif
 ifeq ($(FP),1)
 DEFINES += -D ISA_F -D ISA_D -D INCLUDE_FDIV -D INCLUDE_FSQRT
 endif
@@ -74,6 +90,11 @@ FPU_TRIM ?= 0
 ifeq ($(FP)$(FPU_TRIM),11)
 DEFINES += -D FPU_TRIM
 endif
+# Profile: SOC_DROP lists define names removed ("-D NAME" exactly), SOC_ADD defines appended.
+SOC_DROP :=
+SOC_ADD  :=
+include profiles/$(SOC).mk
+DEFINES := $(strip $(subst -D|,-D ,$(filter-out $(addprefix -D|,$(SOC_DROP)),$(subst -D ,-D|,$(DEFINES)))) $(SOC_ADD))
 # Extra defines for the RVFI build only (formal/run.sh sets FORMAL_DEFINES=-D RVFI_ALTOPS with FP=1)
 FORMAL_DEFINES ?=
 
@@ -102,6 +123,13 @@ ifneq ($(filter JTAG_TAP,$(DEFINES)),)
 YOSYS_DEFS  += -DJTAG_TAP
 endif
 
+# game2d's VDP and APU are Verilog blocks in src/Top.v (src/Vdp.v, src/Apu.v): yosys and the sims need the defines too.
+ifneq ($(filter INCLUDE_VDP,$(DEFINES)),)
+YOSYS_DEFS  += -DINCLUDE_VDP
+endif
+ifneq ($(filter INCLUDE_APU,$(DEFINES)),)
+YOSYS_DEFS  += -DINCLUDE_APU
+endif
 # Sim builds omit the JTAG TAP (the Bluesim top is the BSV module
 # itself); the UART DMI bridge provides debug access in simulation too.
 # subst (not filter-out): "JTAG_TAP" alone would match nothing, "-D"
@@ -238,8 +266,8 @@ $(SYNTH_VERILOG): $(VERILOG) src/RO_TRNG.v
 NO_RW_CHECK_MEMS ?= *btb_bramcore2*
 YOSYS_RW_CHECK = $(if $(strip $(NO_RW_CHECK_MEMS)),synth_ecp5 -top $(TOP) -run :map_ram; $(foreach m,$(NO_RW_CHECK_MEMS),select -list t:$$mem_v2 n:$(m) %i; setattr -set no_rw_check 1 t:$$mem_v2 n:$(m) %i;) synth_ecp5 -top $(TOP) -run map_ram: -json $@,synth_ecp5 -top $(TOP) -json $@)
 
-$(JSON): $(SYNTH_VERILOG) src/Top.v src/Video_DVI.v src/Board_IO.v src/Audio.v src/Spdif_Tx.v src/Sd_Host.v src/ASSIGN1.v
-	$(YOSYS) -p 'read_verilog -DINCLUDE_GDB_CONTROL $(YOSYS_DEFS) $(BSC_VERILOG_FILES) src/ASSIGN1.v $(SYNTH_VERILOG) src/Top.v src/Video_DVI.v src/Board_IO.v src/Audio.v src/Spdif_Tx.v src/Sd_Host.v; $(YOSYS_RW_CHECK)'
+$(JSON): $(SYNTH_VERILOG) src/Top.v src/Vdp.v src/Apu.v src/Video_DVI.v src/Board_IO.v src/Audio.v src/Spdif_Tx.v src/Sd_Host.v src/ASSIGN1.v
+	$(YOSYS) -p 'read_verilog -DINCLUDE_GDB_CONTROL $(YOSYS_DEFS) $(BSC_VERILOG_FILES) src/ASSIGN1.v $(SYNTH_VERILOG) src/Top.v src/Vdp.v src/Apu.v src/Video_DVI.v src/Board_IO.v src/Audio.v src/Spdif_Tx.v src/Sd_Host.v; $(YOSYS_RW_CHECK)'
 
 synth: $(JSON)
 

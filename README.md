@@ -706,7 +706,7 @@ no AXI port of their own (a 256-cycle watchdog answers `SLVERR` for a dead addre
 | Address | Register |
 |---------|----------|
 | `0xC0010000` | ID, reads `0x56494431` ("VID1") |
-| `0xC0010004` | MODE: 0 off, 1 640x480 4 bpp palette, 2 320x240 RGB565, 3 320x240 8 bpp palette, 7 test pattern |
+| `0xC0010004` | MODE: 0 off, 1 640x480 4 bpp palette, 2 320x240 RGB565, 3 320x240 8 bpp palette, 4 320x240 from the VDP (game2d), 7 test pattern |
 | `0xC0010008` | STATUS: bit 0 = in vertical blank |
 | `0xC001000C` | FRAME: counts frames |
 | `0xC0010010` | FBSIZE: 153600 |
@@ -729,6 +729,32 @@ shift clock early (lx49): a single shared phase decode fanned out to the four la
 die and routed at 122 MHz against the 125 MHz shift clock. `formal/dvi_ser/equiv.sh` proves the
 new serializer equal, cycle for cycle and on both DDR bits of every lane, to the old one
 (`formal/dvi_ser/dvi_ser_ref.v`), by k-induction in yosys.
+
+## Game console (game2d)
+
+`make SOC=game2d SYS_PLL=50 FP=1 FPU_TRIM=1` builds the 2D console profile
+(`profiles/game2d.mk`, into `build/game2d/`): the linux core and SoC without SPI2 and UART1,
+plus two game blocks on the register bus. **Its timing is open** (seed 7 at 45.6 MHz with the
+VDP; `notes/soc-family-plan.md`, game2d status), so it is not a flash image.
+
+- **VDP1** (`src/Vdp.v`, `sw/vdp/vdp.h`; registers `0xC0020000`, VRAM `0xC1080000`): a 64x32
+  tile background layer with scrolling and flips, 64 sprites (16 a line), 16 palette banks,
+  rendered a line ahead into line buffers and shown through video MODE 4 (320x240).
+- **APU1** (`src/Apu.v`, `sw/apu/apu.h`; registers and a 32 KB wave RAM at `0xC0040000`): 8
+  voices, each a pulse (4 duties), triangle, noise (long or short LFSR) or 8-bit sample voice
+  (one-shot or looped), with an ADSR envelope and left/right volume, mixed at 32 kHz into the
+  jack through Audio's DAC path (after `VOLUME`, which resets to mute). Writes are queued and
+  applied at the next sample tick, so a program's sound is exactly determined by its writes.
+
+Both are original designs of the 8/16-bit console class, not compatible with any existing chip.
+`sw/game2d` is an original title, Lantern Drift (`sw/game2d/build.sh`; `lantern.bin` runs on the
+board with `scripts/loader.py`). Checks: `sim/vdp_ut/run.sh` and `sim/apu_ut/run.sh` compare each
+block with its C reference model (`sw/vdp/vdp_ref.c`, `sw/apu/apu_ref.c`; `mutants.sh` in each
+plants bugs the bench must catch); `formal/fv/ips/{vdp,apu}` prove the bus, the registers and
+each block's real-time deadline; `sim/game2d/frame_check.sh` runs the title on the strict sim of
+the whole SoC and compares the screen pixel for pixel, and every APU sample, with the host build
+(`sw/game2d/host.c`) of the same C code. `build/apu_render` (`sw/apu/render.c`) plays the host
+build's sound into a WAV.
 
 ## Milestone LEDs
 

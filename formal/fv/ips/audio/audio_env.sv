@@ -11,5 +11,5 @@ module audio_env (
     // RATE_RESET = 2 (the FPGA build: 1133) so a sample time comes within cover depth
     audio #(.RATE_RESET(16'd2)) dut (.clk(clk), .rst(init), .rb_valid(rb_valid), .rb_we(rb_we), .rb_addr(rb_addr),
         .rb_wdata(rb_wdata), .rb_wstrb(rb_wstrb), .rb_ack(), .rb_rdata(),
-        .audio_l(), .audio_r(), .audio_v());
+        .audio_l(), .audio_r(), .audio_v(), .apu_l(16'd0), .apu_r(16'd0));
 endmodule

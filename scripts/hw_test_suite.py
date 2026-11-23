@@ -35,6 +35,9 @@ EXPECT_MISA = os.environ.get('EXPECT_MISA', '40101105').lower()
 # SoC_Info device-table entries: 15 with spi0, spi2 (lx43), uart1 (lx44), the video block's two regions, i2c0, gpio1, audio; 10 before lx42 and with
 # only video (INCLUDE_VIDEO); EXPECT_NDEV=8 for lx38 and older, 7 before spi0.
 EXPECT_NDEV = int(os.environ.get('EXPECT_NDEV', '16'))
+# SoC profile of the bitstream under test (profiles/<name>.mk): linux (default) or game2d, which
+# has no spi2 / uart1 and adds the VDP's two regions (16 entries as well).
+EXPECT_SOC = os.environ.get('EXPECT_SOC', 'linux')
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dmi import DMI  # noqa: E402
@@ -465,9 +468,11 @@ def main():
         if rom:
             names = {0: 'boot_rom', 1: 'sdram', 2: 'clint', 3: 'uart0',
                      4: 'gpio', 5: 'plic', 6: 'soc_info', 7: 'spi0', 8: 'video', 9: 'i2c0',
-                     10: 'gpio1', 11: 'audio', 12: 'spi2', 13: 'uart1', 14: 'sdh'}
+                     10: 'gpio1', 11: 'audio', 12: 'spi2', 13: 'uart1', 14: 'sdh', 15: 'vdp'}
             recs = [rom[i * 8:(i + 1) * 8] for i in range(EXPECT_NDEV)]
-            byname = {names.get(r[0], str(r[0])): r for r in recs}
+            byname = {}                 # a device's lowest region (audio has two in game2d: + the APU)
+            for r in sorted(recs, key=lambda r: -r[2]):
+                byname[names.get(r[0], str(r[0]))] = r
             dmi_check('devROM uart0',
                       lambda: byname['uart0'][2] == 0xC0000000
                       and byname['uart0'][4] == 0,
@@ -494,12 +499,28 @@ def main():
                           lambda: [byname[n][2] for n in ('i2c0', 'gpio1', 'audio')]
                           == [0xC0006000, 0xC0008000, 0xC0009000],
                           lambda v: v)
-            if EXPECT_NDEV >= 14:
+            if EXPECT_SOC == 'game2d':
+                dmi_check('devROM no spi2 / uart1 (game2d)',
+                          lambda: 'spi2' not in byname and 'uart1' not in byname, lambda v: v)
+                dmi_check('devROM vdp registers + VRAM (game2d)',
+                          lambda: sorted(r[2] for r in recs if r[0] == 15)
+                          == [0xC0020000, 0xC1080000],
+                          lambda v: v)
+                dmi_check('VDP ID VDP1',
+                          lambda: dmi.mem_read32(0xC0020000), lambda v: v == 0x31504456)
+                dmi_check('devROM audio + APU regions (game2d)',
+                          lambda: sorted(r[2] for r in recs if r[0] == 11)
+                          == [0xC0009000, 0xC0040000],
+                          lambda v: v)
+                dmi_check('APU ID APU1, MASTER reset 64',
+                          lambda: (dmi.mem_read32(0xC0040000), dmi.mem_read32(0xC0040008)),
+                          lambda v: v == (0x31555041, 64))
+            if EXPECT_NDEV >= 14 and EXPECT_SOC != 'game2d':
                 dmi_check('devROM spi2 (ADC host, IRQ 3)',
                           lambda: byname['spi2'][2] == 0xC000A000
                           and byname['spi2'][4] == 3,
                           lambda v: v)
-            if EXPECT_NDEV >= 15:
+            if EXPECT_NDEV >= 15 and EXPECT_SOC != 'game2d':
                 dmi_check('devROM uart1 (ESP32 UART, IRQ 4)',
                           lambda: byname['uart1'][2] == 0xC0007000
                           and byname['uart1'][4] == 4,

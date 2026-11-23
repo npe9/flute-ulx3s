@@ -83,7 +83,7 @@ for f in "$BSC_LIB"/*.v; do
 done
 FILES+=("$ROOT/src/ASSIGN1.v"
         "$VERILOG_ALL"
-        "$ROOT/src/Top.v" "$ROOT/src/Video_DVI.v" "$ROOT/src/Board_IO.v" "$ROOT/src/Audio.v" "$ROOT/src/Spdif_Tx.v" "$ROOT/src/Sd_Host.v" "$ROOT/sim/common/i2c_slave_model.v" "$ROOT/sim/common/spi_echo_model.v"
+        "$ROOT/src/Top.v" "$ROOT/src/Vdp.v" "$ROOT/src/Apu.v" "$ROOT/src/Video_DVI.v" "$ROOT/src/Board_IO.v" "$ROOT/src/Audio.v" "$ROOT/src/Spdif_Tx.v" "$ROOT/src/Sd_Host.v" "$ROOT/sim/common/i2c_slave_model.v" "$ROOT/sim/common/spi_echo_model.v"
         ./BRAM2.v
         ./ecp5_cells.v
         ./sdram_model.v
@@ -123,6 +123,12 @@ if [[ "${VERILATOR_TRACE:-0}" == "1" ]]; then COMMON_FLAGS+=(--trace --trace-dep
 # UART_CPB=<n>: UART agent bit period in clocks for a netlist built at another clock
 # (clk_hz / 1000000: 50 for the SYS_PLL=50 netlist).  Part of the build too.
 if [[ -n "${UART_CPB:-}" ]]; then COMMON_FLAGS+=(-DUART_CPB=$UART_CPB); fi
+# INCLUDE_VDP=1: a game2d netlist (SOC=game2d): Top.v instantiates src/Vdp.v.  Part of the build.
+if [[ "${INCLUDE_VDP:-0}" == "1" ]]; then COMMON_FLAGS+=(-DINCLUDE_VDP); fi
+# INCLUDE_APU=1: with the APU too (src/Apu.v; game2d)
+if [[ "${INCLUDE_APU:-0}" == "1" ]]; then COMMON_FLAGS+=(-DINCLUDE_APU); fi
+# EXTRA_VFLAGS: more Verilator flags (sim/game2d/frame_check.sh: -DAPU_TRACE)
+if [[ -n "${EXTRA_VFLAGS:-}" ]]; then COMMON_FLAGS+=($EXTRA_VFLAGS); fi
 # BSV_POSITIVE_RESET (default 1): simulate the netlist the way the Makefile synthesizes
 # it since E35 (active-high bsc reset, Top.v's registered reset through a DCCA).
 # BSV_POSITIVE_RESET=0 takes Top.v's active-low path.  Part of the build too.

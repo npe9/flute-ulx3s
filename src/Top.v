@@ -209,21 +209,50 @@ module ulx3s_top(
     wire        rb_valid, rb_we, rb_ack;
     wire [31:0] rb_addr, rb_wdata, rb_rdata;
     wire [3:0]  rb_wstrb;
-    // The bridge's devices.  Only mapped windows get here, so bits 24 (0xC1xx_xxxx) and 16
-    // (0xC001_xxxx) tell the video windows from the 0xC000_6000+ small devices.
+    // The bridge's devices.  Only mapped windows get here, so a few address bits tell the
+    // windowed blocks apart: bits 24 (0xC1xx_xxxx) and 16 (0xC001_xxxx) the video block; in
+    // game2d, 17 (0xC002_xxxx) and 24 + 19 (0xC108_xxxx) the VDP, 18 (0xC004_xxxx) the APU.  The
+    // 0xC000_6000+ small devices decode only rb_addr[15:0], so every windowed block is excluded
+    // from them (a VDP pattern word at 0xC108_9008 must not also write audio's VOLUME).
+`ifdef INCLUDE_VDP
+    wire        rb_sel_vdp   = rb_addr[17] || (rb_addr[24] && rb_addr[19]);
+    wire        rb_sel_video = (rb_addr[24] && !rb_addr[19]) || rb_addr[16];
+`else
+    wire        rb_sel_vdp   = 1'b0;
     wire        rb_sel_video = rb_addr[24] || rb_addr[16];
-    wire        rb_sel_audio = !rb_sel_video && (rb_addr[15:12] == 4'h9);
-    wire        rb_sel_sdh   = !rb_sel_video && (rb_addr[15:12] == 4'hD);
-    wire        video_ack, io_ack, audio_ack, sdh_ack;
-    wire [31:0] video_rdata, io_rdata, audio_rdata, sdh_rdata;
-    assign rb_ack   = video_ack || io_ack || audio_ack || sdh_ack;
-    assign rb_rdata = io_ack ? io_rdata : audio_ack ? audio_rdata : sdh_ack ? sdh_rdata : video_rdata;
+`endif
+`ifdef INCLUDE_APU
+    wire        rb_sel_apu   = rb_addr[18] && !rb_addr[24];
+`else
+    wire        rb_sel_apu   = 1'b0;
+`endif
+    wire        rb_sel_win   = rb_sel_video || rb_sel_vdp || rb_sel_apu;
+    wire        rb_sel_audio = !rb_sel_win && (rb_addr[15:12] == 4'h9);
+    wire        rb_sel_sdh   = !rb_sel_win && (rb_addr[15:12] == 4'hD);
+    wire        video_ack, io_ack, audio_ack, sdh_ack, vdp_ack, apu_ack;
+    wire [31:0] video_rdata, io_rdata, audio_rdata, sdh_rdata, vdp_rdata, apu_rdata;
+    assign rb_ack   = video_ack || io_ack || audio_ack || sdh_ack || vdp_ack || apu_ack;
+    assign rb_rdata = io_ack ? io_rdata : audio_ack ? audio_rdata : sdh_ack ? sdh_rdata :
+                      vdp_ack ? vdp_rdata : apu_ack ? apu_rdata : video_rdata;
+    wire signed [15:0] apu_l, apu_r;
+`ifdef INCLUDE_APU
+    apu apu_0 (
+        .clk(sys_clk), .rst(~rst_n),
+        .rb_valid(rb_valid && rb_sel_apu), .rb_we(rb_we), .rb_addr(rb_addr), .rb_wdata(rb_wdata),
+        .rb_wstrb(rb_wstrb), .rb_ack(apu_ack), .rb_rdata(apu_rdata),
+        .out_l(apu_l), .out_r(apu_r), .tr_tick(), .tr_busy(), .tr_done(), .tr_level(),
+        .tr_apply(), .tr_apply_a(), .tr_apply_s(), .tr_apply_d()
+    );
+`else
+    assign apu_ack = 1'b0; assign apu_rdata = 32'd0;
+    assign apu_l = 16'sd0; assign apu_r = 16'sd0;
+`endif
 
     audio audio_0 (
         .clk(sys_clk), .rst(~rst_n),
         .rb_valid(rb_valid && rb_sel_audio), .rb_we(rb_we), .rb_addr(rb_addr[11:0]),
         .rb_wdata(rb_wdata), .rb_wstrb(rb_wstrb), .rb_ack(audio_ack), .rb_rdata(audio_rdata),
-        .audio_l(audio_l), .audio_r(audio_r), .audio_v(audio_v)
+        .audio_l(audio_l), .audio_r(audio_r), .audio_v(audio_v), .apu_l(apu_l), .apu_r(apu_r)
     );
 
     wire i2c_scl_low, i2c_sda_low;
@@ -255,7 +284,7 @@ module ulx3s_top(
     );
     board_io board_io_0 (
         .clk(sys_clk), .rst(~rst_n),
-        .rb_valid(rb_valid && !rb_sel_video && !rb_sel_audio && !rb_sel_sdh), .rb_we(rb_we), .rb_addr(rb_addr[15:0]),
+        .rb_valid(rb_valid && !rb_sel_win && !rb_sel_audio && !rb_sel_sdh), .rb_we(rb_we), .rb_addr(rb_addr[15:0]),
         .rb_wdata(rb_wdata), .rb_wstrb(rb_wstrb), .rb_ack(io_ack), .rb_rdata(io_rdata),
         .btn_i({btn_rest, BTN1, btn_pwr_n}), .sw_i(sw), .esp32_tx_i(wifi_txd),
         .scl_i(gpdi_scl), .sda_i(gpdi_sda), .scl_low(i2c_scl_low), .sda_low(i2c_sda_low),
@@ -265,12 +294,28 @@ module ulx3s_top(
 
     wire [9:0]  tmds_r, tmds_g, tmds_b;
     wire        pix_tog;
+    wire [9:0]  scan_hc, scan_vc;
+    wire        scan_on;
+    wire [7:0]  vdp_idx;
+`ifdef INCLUDE_VDP
+    vdp vdp_0 (
+        .clk(sys_clk), .rst(~rst_n),
+        .rb_valid(rb_valid && rb_sel_vdp), .rb_we(rb_we), .rb_addr(rb_addr), .rb_wdata(rb_wdata),
+        .rb_wstrb(rb_wstrb), .rb_ack(vdp_ack), .rb_rdata(vdp_rdata),
+        .pclk(pix_clk), .scan_hc(scan_hc), .scan_vc(scan_vc), .scan_on(scan_on), .idx(vdp_idx),
+        .r_start(), .r_line(), .r_done()
+    );
+`else
+    assign vdp_idx = 8'd0;
+    assign vdp_ack = 1'b0; assign vdp_rdata = 32'd0;
+`endif
     video_fb video (
         .clk(sys_clk), .rst(~rst_n),
         .rb_valid(rb_valid && rb_sel_video), .rb_we(rb_we), .rb_addr(rb_addr), .rb_wdata(rb_wdata),
         .rb_wstrb(rb_wstrb), .rb_ack(video_ack), .rb_rdata(video_rdata),
         .pclk(pix_clk), .tmds_r(tmds_r), .tmds_g(tmds_g), .tmds_b(tmds_b), .ptog(pix_tog),
-        .dbg_rgb(), .dbg_de(), .dbg_hs(), .dbg_vs()
+        .dbg_rgb(), .dbg_de(), .dbg_hs(), .dbg_vs(),
+        .scan_hc(scan_hc), .scan_vc(scan_vc), .scan_on(scan_on), .vdp_idx(vdp_idx)
     );
     dvi_ser dvi (
         .sclk(shift_clk), .ptog(pix_tog),

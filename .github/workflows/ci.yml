@@ -164,6 +164,30 @@ jobs:
           name: strict-${{ matrix.test }}-logs
           path: build/*.log
 
+  game2d:
+    # The game2d profile (profiles/game2d.mk): the VDP unit bench against sw/vdp/vdp_ref.c, then
+    # Lantern Drift (sw/game2d) for 40 frames on the strict sim of the game2d netlist, its DVI
+    # scan-out compared pixel for pixel with the host build's prediction.
+    needs: [setup, image]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    container:
+      image: ${{ needs.setup.outputs.image }}
+      credentials: { username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}" }
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - name: VDP unit bench (src/Vdp.v against the reference model)
+        run: sim/vdp_ut/run.sh
+      - run: make -j4 SOC=game2d SYS_PLL=50 ${{ needs.setup.outputs.makeflags }} build/game2d/verilog_all.v
+      - name: Lantern Drift frame check (40 frames, 640x480 compare)
+        run: sim/game2d/frame_check.sh build/game2d
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: game2d-logs
+          path: build/game2d/frame_check/
+
   bitstream:
     # The shipped configuration (50 MHz PLL, constraints/video_floorplan.py), not the 25 MHz
     # netlist the sims use: unfloorplanned, that one fills 84% of the LUTs and needs ~1.04M router1

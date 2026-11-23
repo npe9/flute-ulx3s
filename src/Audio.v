@@ -20,6 +20,9 @@
 //                    carries the PCM samples as played (before VOLUME; not the tone), one frame per
 //                    RATE + 1 clocks, so it keeps running, silent, while CTRL[0] is off.
 //
+// game2d (INCLUDE_APU): apu_l / apu_r, the APU1 stream (src/Apu.v), are added (saturating) after
+// the PCM and the tone, before VOLUME.  Without it the inputs are ignored.
+//
 // Each DAC is a first-order sigma-delta at the system clock: 16 bits in, the top 4 bits plus the
 // carry of the 12-bit error accumulator out, so the mean level is the sample's.  The top code is
 // saturated: inputs at or above 0xF000 (offset binary) clip to code 15.
@@ -45,6 +48,8 @@ module audio #(
     output reg  [3:0]  audio_l,
     output reg  [3:0]  audio_r,
     output reg  [3:0]  audio_v,
+    input  wire [15:0] apu_l,       // game2d: the APU1 stream, signed (ignored without INCLUDE_APU)
+    input  wire [15:0] apu_r,
     // trace port (always present; unconnected in the FPGA build; see the header)
     output wire        tr_push_valid,   // a FIFO write accepted: tr_push_data queued
     output wire [31:0] tr_push_data,
@@ -172,8 +177,13 @@ module audio #(
         else tone_cnt <= tone_cnt - 16'd1;
 
         // DACs
+`ifdef INCLUDE_APU
+        u_l <= scale (mix (mix (pcm_l, tone_s), apu_l), volume) ^ 16'h8000;
+        u_r <= scale (mix (mix (pcm_r, tone_s), apu_r), volume) ^ 16'h8000;
+`else
         u_l <= scale (mix (pcm_l, tone_s), volume) ^ 16'h8000;
         u_r <= scale (mix (pcm_r, tone_s), volume) ^ 16'h8000;
+`endif
         acc_l <= nx_l[11:0];
         acc_r <= nx_r[11:0];
         audio_l <= (u_l[15:12] == 4'hF) ? 4'hF : u_l[15:12] + {3'b0, nx_l[12]};

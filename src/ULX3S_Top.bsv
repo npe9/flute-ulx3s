@@ -48,11 +48,10 @@ import External_Control    :: *;
 interface ULX3S_Top_IFC;
    (* always_ready *)   method Bit #(1) serial_txd;
    (* always_enabled *) method Action  serial_rxd (Bit #(1) v);
-`ifdef INCLUDE_UART1
-   // ESP32 UART0 at 115200 (uart1): wifi_rxd is the FPGA's TX, wifi_txd its RX
+   // ESP32 UART0 at 115200 (uart1): wifi_rxd is the FPGA's TX, wifi_txd its RX.  Present in
+   // every profile (Top.v connects it); without INCLUDE_UART1 TX idles high and RX is ignored.
    (* always_ready *)   method Bit #(1) esp32_txd;
    (* always_enabled *) method Action  esp32_rxd (Bit #(1) v);
-`endif
 
    (* always_ready *) method Bit #(8) leds;
 
@@ -76,13 +75,12 @@ interface ULX3S_Top_IFC;
    (* always_ready *)   method Bit #(1) flash_cs_n;
    (* always_enabled *) method Action   flash_miso (Bit #(1) v);
 `endif
-`ifdef INCLUDE_SPI2
-   // on-board ADC (MAX11125): adc_sclk, adc_mosi, adc_csn, adc_miso
+   // on-board ADC (MAX11125): adc_sclk, adc_mosi, adc_csn, adc_miso.  Present in every profile
+   // (Top.v connects it); without INCLUDE_SPI2 the ADC stays deselected.
    (* always_ready *)   method Bit #(1) adc_sclk;
    (* always_ready *)   method Bit #(1) adc_mosi;
    (* always_ready *)   method Bit #(1) adc_cs_n;
    (* always_enabled *) method Action   adc_miso (Bit #(1) v);
-`endif
 
 `ifdef INCLUDE_VIDEO
    // Register bus to the Verilog devices in src/Top.v (src/Video_DVI.v); protocol in
@@ -246,6 +244,10 @@ module mkULX3S_Top (ULX3S_Top_IFC);
    method Action esp32_rxd (Bit #(1) v);
       uart_esp32.rxd (v);
    endmethod
+`else
+   method Bit #(1) esp32_txd = 1'b1;
+   method Action esp32_rxd (Bit #(1) v);
+   endmethod
 `endif
 
    method Action serial_rxd (Bit #(1) v);
@@ -291,6 +293,12 @@ module mkULX3S_Top (ULX3S_Top_IFC);
    method Bit #(1) adc_cs_n = soc_top.adc_cs_n;
    method Action adc_miso (Bit #(1) v);
       soc_top.adc_miso (v);
+   endmethod
+`else
+   method Bit #(1) adc_sclk = 1'b0;
+   method Bit #(1) adc_mosi = 1'b0;
+   method Bit #(1) adc_cs_n = 1'b1;
+   method Action adc_miso (Bit #(1) v);
    endmethod
 `endif
 

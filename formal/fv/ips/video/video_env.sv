@@ -14,6 +14,7 @@ module video_env (
         .rb_we(rb_we), .rb_addr(rb_addr), .rb_wdata(rb_wdata), .rb_wstrb(rb_wstrb), .rb_ack(),
         .rb_rdata(), .pclk(clk), .tmds_r(), .tmds_g(), .tmds_b(), .ptog(), .dbg_rgb(), .dbg_de(),
         .dbg_hs(), .dbg_vs(), .tr_fb_wr(), .tr_fb_word(), .tr_fb_data(), .tr_fb_strb(), .tr_pal_wr(),
-        .tr_pal_idx(), .tr_pal_data(), .tr_frame(), .tr_pix_de(), .tr_pix_x(), .tr_pix_y(), .tr_pix_rgb());
+        .tr_pal_idx(), .tr_pal_data(), .tr_frame(), .tr_pix_de(), .tr_pix_x(), .tr_pix_y(), .tr_pix_rgb(),
+        .scan_hc(), .scan_vc(), .scan_on(), .vdp_idx(8'd0));
 endmodule
 `default_nettype wire
