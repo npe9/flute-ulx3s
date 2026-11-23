@@ -1,0 +1,112 @@
+diff --git a/Makefile b/Makefile
+index ea6244a..75b9b07 100644
+--- a/Makefile
++++ b/Makefile
+@@ -150,7 +150,7 @@ export LEM_DIR
+ C_WARNINGS ?=
+ #-Wall -Wextra -Wno-unused-label -Wno-unused-parameter -Wno-unused-but-set-variable -Wno-unused-function
+ C_INCS = $(addprefix c_emulator/,riscv_prelude.h riscv_platform_impl.h riscv_platform.h riscv_softfloat.h)
+-C_SRCS = $(addprefix c_emulator/,riscv_prelude.c riscv_platform_impl.c riscv_platform.c riscv_softfloat.c riscv_sim.c)
++C_SRCS = $(addprefix c_emulator/,riscv_prelude.c riscv_platform_impl.c riscv_platform.c riscv_softfloat.c riscv_sim.c) $(SOCDEV)
+ 
+ SOFTFLOAT_DIR    = c_emulator/SoftFloat-3e
+ SOFTFLOAT_INCDIR = $(SOFTFLOAT_DIR)/source/include
+diff --git a/c_emulator/riscv_platform.h b/c_emulator/riscv_platform.h
+index 3cc6f02..9f16f97 100644
+--- a/c_emulator/riscv_platform.h
++++ b/c_emulator/riscv_platform.h
+@@ -39,6 +39,11 @@ unit cancel_reservation(unit);
+ void plat_insns_per_tick(sail_int *rop, unit);
+ 
+ unit plat_term_write(mach_bits);
++
++/* SoC device model (ulx3s formal/sw/sail/socdev.c) */
++mach_bits soc_read(mach_bits);
++unit soc_write(mach_bits, mach_bits);
++unit soc_trap(bool, mach_bits, mach_bits);
+ mach_bits plat_htif_tohost(unit);
+ 
+ unit memea(mach_bits, sail_int);
+diff --git a/c_emulator/riscv_sim.c b/c_emulator/riscv_sim.c
+index 3a9bfc0..f9f8e9f 100644
+--- a/c_emulator/riscv_sim.c
++++ b/c_emulator/riscv_sim.c
+@@ -464,8 +464,10 @@ uint64_t load_sail(char *f, bool main_file)
+   fprintf(stdout, "ELF Entry @ 0x%" PRIx64 "\n", entry);
+   /* locate htif ports */
+   if (lookup_sym(f, "tohost", &rv_htif_tohost) < 0) {
+-    fprintf(stderr, "Unable to locate htif tohost port.\n");
+-    exit(1);
++    /* ulx3s SoC model: programs without HTIF (formal/sw/sail/socdev.c ends the run); park the
++       port where no device or RAM is (an access there is outside the SoC map anyway) */
++    rv_htif_tohost = UINT64_C(0xBFFFFFF0);
++    fprintf(stderr, "no htif tohost: parked at 0xBFFFFFF0\n");
+   }
+   fprintf(stderr, "tohost located at 0x%0" PRIx64 "\n", rv_htif_tohost);
+   /* locate test-signature locations if any */
+diff --git a/model/riscv_platform.sail b/model/riscv_platform.sail
+index 19e3d30..9a92b65 100644
+--- a/model/riscv_platform.sail
++++ b/model/riscv_platform.sail
+@@ -384,16 +384,23 @@ function htif_tick() = {
+ }
+ 
+ /* Top-level MMIO dispatch */
++/* SoC device windows (ulx3s game2d: formal/sw/sail/socdev.c), word accesses only; the C side
++   checks the address is a real register and logs every write */
++val soc_read  = {c: "soc_read"}  : xlenbits -> bits(32)
++val soc_write = {c: "soc_write"} : (xlenbits, bits(32)) -> unit
++function within_soc forall 'n, 0 < 'n <= max_mem_access . (addr : xlenbits, width : int('n)) -> bool =
++  'n == 4 & addr >=_u 0xC0000000 & addr <_u 0xC2000000
++
+ $ifndef RVFI_DII
+ function within_mmio_readable forall 'n, 0 < 'n <= max_mem_access . (addr : xlenbits, width : int('n)) -> bool =
+-  within_clint(addr, width) | (within_htif_readable(addr, width) & 1 <= 'n)
++  within_clint(addr, width) | (within_htif_readable(addr, width) & 1 <= 'n) | within_soc(addr, width)
+ $else
+ function within_mmio_readable forall 'n, 0 < 'n <= max_mem_access . (addr : xlenbits, width : int('n)) -> bool = false
+ $endif
+ 
+ $ifndef RVFI_DII
+ function within_mmio_writable forall 'n, 0 < 'n <= max_mem_access . (addr : xlenbits, width : int('n)) -> bool =
+-  within_clint(addr, width) | (within_htif_writable(addr, width) & 'n <= 8)
++  within_clint(addr, width) | (within_htif_writable(addr, width) & 'n <= 8) | within_soc(addr, width)
+ $else
+ function within_mmio_writable forall 'n, 0 < 'n <= max_mem_access . (addr : xlenbits, width : int('n)) -> bool = false
+ $endif
+@@ -403,6 +410,8 @@ function mmio_read forall 'n, 0 < 'n <= max_mem_access . (t : AccessType(ext_acc
+   then clint_load(t, paddr, width)
+   else if within_htif_readable(paddr, width) & (1 <= 'n)
+   then htif_load(t, paddr, width)
++  else if within_soc(paddr, width) & ('n == 4) & t == Read(Data)
++  then MemValue(sail_zero_extend(soc_read(paddr), 32))
+   else match t {
+     Execute()  => MemException(E_Fetch_Access_Fault()),
+     Read(Data) => MemException(E_Load_Access_Fault()),
+@@ -414,6 +423,8 @@ function mmio_write forall 'n, 0 <'n <= max_mem_access . (paddr : xlenbits, widt
+   then clint_store(paddr, width, data)
+   else if within_htif_writable(paddr, width) & 'n <= 8
+   then htif_store(paddr, width, data)
++  else if within_soc(paddr, width) & ('n == 4)
++  then { soc_write(paddr, data[31..0]); MemValue(true) }
+   else MemException(E_SAMO_Access_Fault())
+ 
+ /* Platform initialization and ticking. */
+diff --git a/model/riscv_sys_control.sail b/model/riscv_sys_control.sail
+index 1baa337..69ef509 100644
+--- a/model/riscv_sys_control.sail
++++ b/model/riscv_sys_control.sail
+@@ -315,9 +315,13 @@ $endif
+ 
+ /* handle exceptional ctl flow by updating nextPC and operating privilege */
+ 
++/* every trap is reported to the SoC model (ulx3s formal/sw/sail/socdev.c) */
++val soc_trap = {c: "soc_trap"} : (bool, exc_code, xlenbits) -> unit
++
+ function trap_handler(del_priv : Privilege, intr : bool, c : exc_code, pc : xlenbits, info : option(xlenbits), ext : option(ext_exception))
+                      -> xlenbits = {
+   rvfi_trap();
++  soc_trap(intr, c, pc);
+   if   get_config_print_platform()
+   then print_platform("handling " ^ (if intr then "int#" else "exc#")
+                       ^ BitStr(c) ^ " at priv " ^ to_str(del_priv)

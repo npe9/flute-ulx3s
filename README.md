@@ -756,6 +756,18 @@ the whole SoC and compares the screen pixel for pixel, and every APU sample, wit
 (`sw/game2d/host.c`) of the same C code. `build/apu_render` (`sw/apu/render.c`) plays the host
 build's sound into a WAV.
 
+**The software is verified too** (`notes/sw-verification-plan.md`), after Anthropic's method of
+turning existing tests into specifications over every input and checking the compiled binary
+against a formal ISA model, the Sail RISC-V model here. Tier 1 (`formal/sw/fuzz.sh`, tested):
+the RISC-V binary runs on Sail with the SoC's devices as an environment
+(`formal/sw/sail/socdev.c`) under random button scripts, must touch only real device registers
+and never trap (S1), and must make exactly the host build's device writes (S2); 400,000 fuzzed
+frames pass. Tier 2 (`formal/sw/cbmc/run.sh`, proved): CBMC shows by induction that for every
+button sequence the C code never has undefined behaviour, writes only real registers, keys only
+configured APU voices and makes at most 75 writes a frame. It found two frame counters that
+overflowed after ~414 days, fixed. Each tier has planted bugs it must catch
+(`mutants.sh`). Tier 3, proofs about the binary in Rocq against Sail's generated model, is open.
+
 ## Milestone LEDs
 
 The GPIO slave at `0xC0002000` drives the LEDs. The boot loader uses them as

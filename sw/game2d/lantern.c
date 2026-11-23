@@ -153,7 +153,9 @@ enum { S_SCORE = 0, S_HEART = 6, S_BOAT = 9, S_LOG = 10, S_FLY = 22 };
 typedef struct { int x, y, vy, on; } obj;
 static obj logs [N_LOG], flies [N_FLY];
 static int bx, by;                 // boat position (screen pixels)
-static int score, lives, hurt, over, t, scroll_y, idle;
+static int score, lives, hurt, over, scroll_y, idle;
+static unsigned t;                 // frames since start: unsigned, so it wraps (after 2^32) defined
+#define SCORE_MAX 999990           // the six digits shown; the score stops there (no overflow)
 
 static void spr (int i, int x, int y, int tile_, int bank_, int flags) {
    hw_vdp_write (VDP_SPRITES + 8 * i, (uint32_t) (x & 511) | ((uint32_t) (y & 511) << 16));
@@ -252,7 +254,7 @@ int lantern_frame (uint32_t buttons) {
          flies [i].y += flies [i].vy;
          flies [i].x += ((t + 8 * i) & 32) ? 1 : -1;
          if (flies [i].y > 240) flies [i].on = 0;
-         else if (hit (bx, by, flies [i].x, flies [i].y, 2)) { flies [i].on = 0; score += 10; sound_fly (); }
+         else if (hit (bx, by, flies [i].x, flies [i].y, 2)) { flies [i].on = 0; if (score < SCORE_MAX) score += 10; sound_fly (); }
       }
       if (hurt) hurt--;
       scroll_y = (scroll_y - 1) & 255;

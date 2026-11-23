@@ -27,7 +27,8 @@ static const unsigned char drum [32] = {
    1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0 };
 
 enum { DRUM_LEN = 2048 };                    // bytes of wave RAM: the drum sample at offset 0
-static int frame, fly_t;
+static unsigned frame;                       // unsigned: wraps defined (an int would overflow)
+static int fly_t;
 
 void sound_init (void) {
    // the drum: a falling-pitch triangle under a falling level (integers only)
