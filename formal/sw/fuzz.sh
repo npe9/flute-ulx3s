@@ -7,6 +7,7 @@
 # counter's timing (SOC_CHAOS), which the trace must not depend on.  Tested, not proved.
 #   formal/sw/fuzz.sh [runs] [frames] [seed]       (defaults 20 2000 1)
 #   ROOT=<a copy of the tree> formal/sw/fuzz.sh ...  (formal/sw/mutants.sh: planted bugs)
+#   TITLE=proof formal/sw/fuzz.sh ...                (Proof Obligation instead of Lantern Drift)
 # Exit 0: every run passed.  1: a run failed (its files stay in build/swfv/fail-<run>/).
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -32,10 +33,13 @@ fi
 # the binary under test: the board's own lantern.elf (formal/sw/rocq proves about the same file),
 # stopped after FRAMES frames by socdev (SOC_FRAMES); and the host spec
 "$ROOT/sw/game2d/build.sh" > "$OUT/build.log" 2>&1 || { echo "fuzz: build failed ($OUT/build.log)"; exit 2; }
-ELF=$ROOT/sw/game2d/lantern.elf
+TITLE=${TITLE:-lantern}
+ELF=$ROOT/sw/game2d/$TITLE.elf
 echo "fuzz: $(md5 -q "$ELF") $ELF"
 export SOC_FRAMES=$FRAMES
-cc -O2 -Wall -o "$OUT/host_trace" "$ROOT/formal/sw/host_trace.c" "$ROOT/sw/game2d/lantern.c" "$ROOT/sw/game2d/sound.c" \
+if [ "$TITLE" = proof ]; then SRCS="-DTITLE_PROOF $ROOT/sw/game2d/proof.c $ROOT/sw/game2d/proof_boss.c $ROOT/sw/game2d/proof_sound.c"
+else SRCS="$ROOT/sw/game2d/lantern.c $ROOT/sw/game2d/sound.c"; fi
+cc -O2 -Wall -o "$OUT/host_trace" "$ROOT/formal/sw/host_trace.c" $SRCS \
    || { echo "fuzz: host build failed"; exit 2; }
 
 fail=0; r=0

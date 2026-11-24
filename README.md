@@ -736,7 +736,8 @@ new serializer equal, cycle for cycle and on both DDR bits of every lane, to the
 (`profiles/game2d.mk`, into `build/game2d/`): the linux core and SoC without SPI2 and UART1,
 plus two game blocks on the register bus. **Its timing is open:** with the VDP seed 7 routes at
 45.6 MHz. The registered BTB read (`make ... BTB_OUTREG=1`, E7) closes it (55.86 / 52.29 / 55.62
-MHz) but costs 23% of Dhrystone and 30% of CoreMark per clock, so it is not used
+MHz) but costs 23% of Dhrystone and 30% of CoreMark per clock, so it is not used; a 64-set BTB
+in LUT RAM read in the fetch cycle does not close it (44.5 / 49.1 MHz on seeds 3 / 5)
 (`notes/soc-family-plan.md`, game2d status); the APU is not yet placed and routed. It is not a
 flash image.
 
@@ -750,8 +751,20 @@ flash image.
   applied at the next sample tick, so a program's sound is exactly determined by its writes.
 
 Both are original designs of the 8/16-bit console class, not compatible with any existing chip.
-`sw/game2d` is an original title, Lantern Drift (`sw/game2d/build.sh`; `lantern.bin` runs on the
-board with `scripts/loader.py`). Checks: `sim/vdp_ut/run.sh` and `sim/apu_ut/run.sh` compare each
+`sw/game2d` has two original titles (`sw/game2d/build.sh`; each `.bin` runs on the board with
+`scripts/loader.py`): Lantern Drift (`lantern.bin`), and **Proof Obligation** (`proof.bin`,
+`notes/proof-obligation.md`), a formal methods platformer: you are the tombstone (the end-of-proof
+mark), throwing lemmas through seven stages whose bosses are John McCarthy, Edsger Dijkstra, Tony
+Hoare, Leslie Lamport, Andrew Appel, Robert Harper and Adam Chlipala, each attacking with their
+own published ideas as game mechanics (cons cells that split into car and cdr, mark-and-sweep
+that frees the unreachable floor, shortest-path seekers, P/V semaphore gates, quicksort run on
+the arena's pillars, logical clocks, the bakery, Paxos quorums, continuations, proof-carrying
+code, a generational nursery, unityped orbs, computational trinitarianism, parallelism is not
+concurrency, `crush`, Bedrock footprints, Ur/Web links; the table is in the notes). The bosses
+are original emblem figures, not likenesses. Both titles play themselves when idle (an attract
+demo), and `-DTITLE_PROOF` selects Proof Obligation in `board.c`, `host.c` and the verification
+harnesses (`TITLE=proof formal/sw/fuzz.sh`, `TITLE=proof sim/game2d/frame_check.sh`); Lantern
+Drift's binary is unchanged by it. Checks: `sim/vdp_ut/run.sh` and `sim/apu_ut/run.sh` compare each
 block with its C reference model (`sw/vdp/vdp_ref.c`, `sw/apu/apu_ref.c`; `mutants.sh` in each
 plants bugs the bench must catch); `formal/fv/ips/{vdp,apu}` prove the bus, the registers and
 each block's real-time deadline; `sim/game2d/frame_check.sh` runs the title on the strict sim of

@@ -4,7 +4,15 @@
 // trace is what the RISC-V binary must produce on Sail (formal/sw/sail/socdev.c).
 //   host_trace <frames> <buttons file> <trace out>
 #include "../../sw/game2d/hw.h"
+#ifdef TITLE_PROOF
+#include "../../sw/game2d/proof.h"
+#define TITLE_INIT  proof_init
+#define TITLE_FRAME proof_frame
+#else
 #include "../../sw/game2d/lantern.h"
+#define TITLE_INIT  lantern_init
+#define TITLE_FRAME lantern_frame
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -25,11 +33,11 @@ int main (int argc, char **argv) {
    FILE *b = fopen (argv [2], "r");
    if (!b || !(o = fopen (argv [3], "w"))) { perror ("host_trace"); return 1; }
    wr (0xC0009008u, 4);                        // board.c: AUD_VOLUME = 4
-   lantern_init ();
+   TITLE_INIT ();
    for (int f = 0; f < n; f++) {
       if (fscanf (b, "%x", &btn) != 1) btn = 0;
       fprintf (o, "F\n");                      // board.c reads the buttons once a frame
-      lantern_frame (hw_buttons ());
+      TITLE_FRAME (hw_buttons ());
    }
    fclose (o);
    return 0;

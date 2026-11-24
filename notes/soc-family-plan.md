@@ -68,8 +68,10 @@ build.
 
 Built: the VDP (src/Vdp.v, G2's first step: one 64x32 tile layer, 64 sprites / 16 a line, video
 MODE 4) and APU1 (src/Apu.v, G3: 8 voices -- pulse, triangle, noise, 8-bit sample -- with ADSR
-and stereo volume, 32 kHz, into the jack after Audio's VOLUME), and an original title, Lantern
-Drift (sw/game2d: graphics, music and effects).  Verification:
+and stereo volume, 32 kHz, into the jack after Audio's VOLUME), and two original titles in
+sw/game2d: Lantern Drift, and Proof Obligation (2026-11-23, notes/proof-obligation.md: the formal
+methods platformer, seven computer-scientist bosses; host 30,000 demo frames clean under
+ASan/UBSan, no sprite overflow; tier-1 fuzz 8 x 3,000 frames PASS; board not yet run).  Verification:
 - VDP: sim/vdp_ut against sw/vdp/vdp_ref.c (17 mutants); formal/fv/ips/vdp proves the bus, the
   registers and the render deadline (9 mutants); memories bounded; covers not completed.
 - APU: sim/apu_ut against sw/apu/apu_ref.c sample for sample (23 mutants, 2 equivalent);
@@ -104,7 +106,12 @@ loss is E7's alone: -23% / -30%.  At a fixed 50 MHz the extra fmax buys nothing,
 is rejected** (kept as a build option; not in profiles/game2d.mk).  A timing fix must keep the
 prediction in the fetch cycle -- e.g. a smaller BTB in LUT RAM read in the same cycle, or
 predicting a cycle ahead from the registered read -- or move the VDP's logic out of the CPU's
-region by architecture; being worked on (a game2d fix goes into profiles/game2d.mk with its
+region by architecture.  **Tried: a 64-set BTB in LUT RAM** (a RegFile read combinationally from
+rg_pc in the fetch cycle; game2d+VDP, no APU, 2026-11-23): 44.48 / 49.07 MHz post-route on seeds
+3/5 (shift_clk PASS), seed 7 still routing after 4 hours (congested) -- worse than the BRAM BTB.  Seed 3's path is icache rg_pc ->
+the RAM's read address -> imem_req_addr -> the RAM's write address: 4.0 ns logic, 18.5 ns
+routing.  The RAM is not the cost; the loop's spread across the die is.  Removed (the comment in
+Branch_Predictor.bsv keeps the numbers).  Being worked on (a game2d fix goes into profiles/game2d.mk with its
 gate; changing the promoted core stays the user's decision).  The APU (19 more block RAMs, ~3.1K LUT) is not yet placed and routed.
 
 ## Profiles

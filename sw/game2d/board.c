@@ -4,8 +4,17 @@
 //   GAME_FRAMES=0 (board): runs forever, printing the frame-time statistics every 10 s.
 //   GAME_FRAMES=n (sim, the frame check): stops after n frames, holds the picture for two more,
 //   prints the statistics, then "Hello from Flute" / "tick 00000000" (the strict sim's PASS).
+//   The title: Lantern Drift, or with -DTITLE_PROOF Proof Obligation (proof.c).
 #include "hw.h"
+#ifdef TITLE_PROOF
+#include "proof.h"
+#define TITLE_INIT  proof_init
+#define TITLE_FRAME proof_frame
+#else
 #include "lantern.h"
+#define TITLE_INIT  lantern_init
+#define TITLE_FRAME lantern_frame
+#endif
 #include "../vdp/vdp.h"
 #include "../apu/apu.h"
 #include <stdint.h>
@@ -42,12 +51,12 @@ int main (void) {
    if (VDP_REG (VDP_ID) != VDP_ID_VALUE) { bench_printf ("game2d: no VDP\n"); return 1; }
    if (REG (APU_ID) != APU_ID_VALUE) { bench_printf ("game2d: no APU\n"); return 1; }
    AUD_VOLUME = 4;                  // the jack: the APU goes through Audio's VOLUME (0 = mute)
-   lantern_init ();
+   TITLE_INIT ();
    for (uint32_t f = 0; GAME_FRAMES == 0 || f < GAME_FRAMES; f++) {
       uint32_t b = hw_buttons ();
       hw_wait_frame ();
       uint64_t c0 = bench_cycles ();
-      lantern_frame (b);
+      TITLE_FRAME (b);
       uint64_t d = bench_cycles () - c0;
       sum += d; n++; if (d > worst) worst = d;
       if (GAME_FRAMES == 0 && n % 600 == 0) stats ();

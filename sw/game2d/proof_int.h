@@ -1,0 +1,108 @@
+// sw/game2d/proof_int.h: the internals Proof Obligation's files share (proof.c: the engine, title,
+// stages, player; proof_boss.c: the seven bosses; proof_sound.c: music and effects).
+// Coordinates: world pixels (x right, y down); fixed point is 1/16 pixel (SUB) where noted.
+#ifndef SW_GAME2D_PROOF_INT_H
+#define SW_GAME2D_PROOF_INT_H
+#include <stdint.h>
+#include "hw.h"
+#include "../vdp/vdp.h"
+
+#define SUB   16
+#define ROWS  30            // tile rows on screen (240 / 8)
+#define WMAX  192           // world columns at most (a stage plus its 40-column arena)
+#define ACOLS 40            // the arena: the last 40 columns, one screen
+#define FLOOR 27            // the arena floor's top row
+
+// world tile kinds
+enum { K_AIR, K_GROUND, K_BRICK, K_NULL, K_GONE, K_PILLAR, K_PIVOT, K_GATE, K_ZONE,
+       K_RED, K_GREEN, K_BLUE, K_MARKED, K_DOOMED, K_NKIND };
+int  k_solid (int k);
+extern uint8_t kind [ROWS][WMAX];
+extern int wcols, arena_x;          // world width (columns); the arena's left edge (pixels)
+int  solid_px (int x, int y);       // is world pixel (x, y) in a solid tile (outside: no; below: no)
+void tile_set (int c, int r, int k);
+void arena_text (int row, const char *s);   // a line of text across the arena (BG), centred
+void arena_clear_text (int row);
+
+// palette banks
+enum { B_TERRAIN = 1, B_BRICK = 2, B_TEXT = 3, B_PLAYER = 4, B_ENEMY = 5, B_SHOT = 6, B_BUL = 7,
+       B_BUL2 = 8, B_BOSS = 9, B_PROP = 10, B_HUD = 11, B_SKY = 12, B_COLOR = 13 };
+
+// sprite tiles (proof.c makes them; each 16x16 sprite is 4 tiles)
+enum { T_SFONT = 200,              // sprite glyphs: SFONT_CHARS, 4 tiles each
+       T_PLAYER = 280, T_SHOT = 296, T_HEART = 300, T_ENEMY = 304,
+       T_ORB = 352, T_ORB_S = 356, T_ORB_M = 360, T_ORB_L = 364, T_CONS = 368, T_PAREN_L = 372,
+       T_PAREN_R = 376, T_NODE = 380, T_ARROW = 384, T_WAVE = 388, T_VEC = 392, T_DOT = 396,
+       T_LIGHT = 400, T_SWITCH = 404, T_CLOCK = 408, T_MINION = 412, T_BIGMIN = 416, T_DROP = 420,
+       T_SPARK = 424, T_PUFF = 428, T_GHOST = 432, T_CURSOR = 436,
+       T_BOSS = 448 };             // 32x32: 16 tiles (TL, TR, BL, BR sprites), 2 frames
+#define SFONT_CHARS "0123456789PVLTCN#!?"
+int sfont (char c);                 // the sprite tile for a glyph (blank if not in SFONT_CHARS)
+
+// the player (proof.c)
+extern int pl_x, pl_y;              // world pixels, the sprite's top left
+extern int pl_dead;
+void player_hurt (void);
+void player_bump_up (void);         // after the map changed under the player: stand on top
+void set_spawn (int x, int y);      // where a fall into a pit puts the player back
+extern int pl_certs;                // proof certificates held: the next lemmas thrown carry proofs
+extern int shot_proved;             // the shot being judged (in shot_hits / shot_other) carries one
+
+// bullets: the bosses' projectiles (any that touches the player hurts it)
+#define NBUL 24
+typedef struct { int on, x, y, vx, vy, kind, t, a, b, c, tile, bank, flags, harm; } bullet;
+extern bullet bul [NBUL];
+int  bullet_new (int kind, int x, int y, int vx, int vy, int tile, int bank);   // SUB units; -1: full
+int  bullet_solid (const bullet *b);    // its centre in a solid tile
+
+// props: the bosses' other sprites (no harm), world pixels; shown when on
+#define NPROP 10
+typedef struct { int on, x, y, tile, bank, flags; } prop;
+extern prop props [NPROP];
+
+// minions: walk on the ground, hurt on touch, die when shot (stage enemies and bosses' minions)
+#define NMIN 8
+typedef struct { int on, x, y, vx, vy, hp, kind, t, tile, bank, label; } minion;
+extern minion mins [NMIN];
+int  minion_new (int x, int y, int vx, int hp, int tile, int bank);
+
+// the boss
+typedef struct {
+   int x, y;                        // world pixels, top left of 32x32
+   int hp, flash, frame, on, hidden;
+   int timer, attack, cycle, phase, stun, shield;
+   int a [8];
+} boss_t;
+extern boss_t boss;
+#define BOSS_HP 32                     // the bar shows it in 20 cells
+typedef struct {
+   const char *name, *field, *emblem;   // shown on the title; emblem: a font glyph on the chest
+   uint32_t body, trim, sky;            // colours
+   void (*arena) (void);                // furnish the arena (called when the stage is built)
+   void (*update) (void);               // once a frame while the boss fight runs
+   int  (*shot_hits) (int x, int y);    // a player shot at (x, y) inside the boss box: 1 damages,
+                                        // 0 deflects
+   int  (*shot_other) (int x, int y);   // a player shot anywhere: 1 consumed by a boss object
+} boss_def;
+extern const boss_def bosses [7];
+extern int cur_boss;
+void boss_damage (int n);
+void boss_cue (const char *text);   // announce an attack (arena row 2)
+
+uint32_t rnd (void);
+extern unsigned t;                  // frames since start
+int iabs (int v);
+int isgn (int v);
+
+// sound (proof_sound.c)
+void psnd_init (void);
+void psnd_frame (void);
+void psnd_tune (int n);             // 0-6 the bosses, 7 the stages, 8 the title, 9 victory
+void psnd_jump (void);
+void psnd_shot (void);
+void psnd_hurt (void);
+void psnd_boss_hit (void);
+void psnd_tink (void);
+void psnd_cue (void);
+void psnd_boom (void);
+#endif
