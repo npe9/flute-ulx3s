@@ -918,7 +918,7 @@ int proof_frame (uint32_t buttons) {
             boss.x = arena_x + 8 * 30; boss.y = 8 * FLOOR - 32;
             arena_text (0, bosses [cur_boss].name);
 #ifdef PROOF_TEST
-            if (test_boss >= 0) boss.attack = test_move;
+            if (test_boss >= 0 && cur_boss == test_boss) boss.attack = test_move;   // only the tested fight
 #endif
             g_state = G_FIGHT; g_timer = 0;
             psnd_tune (cur_boss);
@@ -975,4 +975,24 @@ int proof_frame (uint32_t buttons) {
    if (g_state != G_TITLE) stream ();
    draw ();
    return score;
+}
+
+// ================================================================ the specification's view
+// (proof_spec.h): what notes/proof-obligation-spec.md's clauses are about.  Host builds check
+// them every frame (host.c, HOST_SPEC=1); the board build does not call this.
+#include "proof_spec.h"
+void proof_observe (spec_state *s) {
+   static const int moves [7] = { 3, 4, 3, 4, 3, 4, 4 };   // next_move (n) in each boss's update
+   s->state = g_state; s->demo = demo; s->cur_boss = cur_boss; s->defeated = defeated;
+   s->lives = pl_lives; s->dead = pl_dead; s->hurt = pl_hurt; s->certs = pl_certs;
+   s->x = pl_x; s->y = pl_y; s->cam = cam; s->arena_x = arena_x; s->wcols = wcols;
+   s->score = score; s->t = t;
+   s->boss_on = boss.on; s->hp = boss.hp; s->flash = boss.flash; s->stun = boss.stun;
+   s->shield = boss.shield; s->attack = boss.attack; s->nmoves = moves [cur_boss];
+   s->nshots = s->nbul = s->nprops = 0;
+   for (int i = 0; i < 3; i++) s->nshots += shots [i].on != 0;
+   for (int i = 0; i < NBUL; i++) s->nbul += bul [i].on != 0;
+   for (int i = 0; i < NPROP; i++) s->nprops += props [i].on != 0;
+   s->weapon = -1; s->owned = 1;                       // no tactics in the engine yet
+   for (int w = 0; w < SP_NWEAPON; w++) s->energy [w] = 0;
 }

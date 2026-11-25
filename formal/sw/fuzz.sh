@@ -37,7 +37,7 @@ TITLE=${TITLE:-lantern}
 ELF=$ROOT/sw/game2d/$TITLE.elf
 echo "fuzz: $(md5 -q "$ELF") $ELF"
 export SOC_FRAMES=$FRAMES
-if [ "$TITLE" = proof ]; then SRCS="-DTITLE_PROOF $ROOT/sw/game2d/proof.c $ROOT/sw/game2d/proof_boss.c $ROOT/sw/game2d/proof_sound.c $ROOT/sw/game2d/proof_portraits.c"
+if [ "$TITLE" = proof ]; then SRCS="-DTITLE_PROOF $ROOT/sw/game2d/proof.c $ROOT/sw/game2d/proof_boss.c $ROOT/sw/game2d/proof_sound.c $ROOT/sw/game2d/proof_portraits.c $ROOT/sw/game2d/proof_spec.c"
 else SRCS="$ROOT/sw/game2d/lantern.c $ROOT/sw/game2d/sound.c"; fi
 cc -O2 -Wall -o "$OUT/host_trace" "$ROOT/formal/sw/host_trace.c" $SRCS \
    || { echo "fuzz: host build failed"; exit 2; }
@@ -61,7 +61,7 @@ while len(out) < n:
 print("\n".join("%x" % v for v in out[:n]))
 EOF
    chaos=""; [ $((r % 2)) -eq 1 ] && chaos=$((SEED * 7919 + r))
-   "$OUT/host_trace" "$FRAMES" "$OUT/btn.txt" "$OUT/host.txt"
+   "$OUT/host_trace" "$FRAMES" "$OUT/btn.txt" "$OUT/host.txt" 2> "$OUT/spec.txt"
    set +e
    if [ -n "$chaos" ]; then
       SOC_CHAOS=$chaos SOC_TRACE="$OUT/sail.txt" SOC_BUTTONS="$OUT/btn.txt" "$SAIL" --no-trace --ram-size=32 "$ELF" > /dev/null 2> "$OUT/sail.err"
@@ -73,10 +73,11 @@ EOF
    what=""
    if [ $rc -ne 0 ]; then what="S1 ($(grep -a 'S1 VIOLATION' "$OUT/sail.err" | head -1 || echo "Sail rc $rc"))"
    elif ! cmp -s "$OUT/sail.txt" "$OUT/host.txt"; then what="S2 (trace differs: $(diff "$OUT/sail.txt" "$OUT/host.txt" | head -1))"
+   elif [ -s "$OUT/spec.txt" ]; then what="SPEC ($(head -1 "$OUT/spec.txt"))"   # Proof Obligation's spec clauses
    fi
    if [ -n "$what" ]; then
       echo "run $r${chaos:+ chaos}: FAIL $what"
-      mkdir -p "$OUT/fail-$r"; cp "$OUT/btn.txt" "$OUT/sail.txt" "$OUT/host.txt" "$OUT/sail.err" "$OUT/fail-$r/"
+      mkdir -p "$OUT/fail-$r"; cp "$OUT/btn.txt" "$OUT/sail.txt" "$OUT/host.txt" "$OUT/sail.err" "$OUT/spec.txt" "$OUT/fail-$r/"
       fail=1
       [ -n "$STOP_ON_FAIL" ] && break
    else

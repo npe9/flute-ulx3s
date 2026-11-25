@@ -5,6 +5,7 @@
 //   host_trace <frames> <buttons file> <trace out>
 #include "../../sw/game2d/hw.h"
 #ifdef TITLE_PROOF
+#include "../../sw/game2d/proof_spec.h"
 #include "../../sw/game2d/proof.h"
 #define TITLE_INIT  proof_init
 #define TITLE_FRAME proof_frame
@@ -34,10 +35,24 @@ int main (int argc, char **argv) {
    if (!b || !(o = fopen (argv [3], "w"))) { perror ("host_trace"); return 1; }
    wr (0xC0009008u, 4);                        // board.c: AUD_VOLUME = 4
    TITLE_INIT ();
+#ifdef TITLE_PROOF
+   // the game's specification (notes/proof-obligation-spec.md), checked on every frame of the
+   // fuzz script; a violation goes to stderr (fuzz.sh: SPEC)
+   spec_state pre, post;
+   proof_observe (&pre);
+   const char *e = spec_init (&pre); if (!e) e = spec_inv (&pre);
+   if (e) fprintf (stderr, "SPEC init: %s\n", e);
+#endif
    for (int f = 0; f < n; f++) {
       if (fscanf (b, "%x", &btn) != 1) btn = 0;
       fprintf (o, "F\n");                      // board.c reads the buttons once a frame
       TITLE_FRAME (hw_buttons ());
+#ifdef TITLE_PROOF
+      proof_observe (&post);
+      e = spec_inv (&post); if (!e) e = spec_step (&pre, hw_buttons (), &post);
+      if (e) fprintf (stderr, "SPEC frame %d: %s\n", f, e);
+      pre = post;
+#endif
    }
    fclose (o);
    return 0;

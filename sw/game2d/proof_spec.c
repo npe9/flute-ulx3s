@@ -1,0 +1,107 @@
+// sw/game2d/proof_spec.c: the clauses of notes/proof-obligation-spec.md as predicates.  The
+// clause names (I1, S3, ...) are the notes' numbering; keep the two in step.
+#include "proof_spec.h"
+
+#define REQUIRE(c, msg) do { if (!(c)) return msg; } while (0)
+static int play (int st) { return st == SP_PLAY || st == SP_ARENA || st == SP_FIGHT; }
+
+const char *spec_init (const spec_state *s) {
+   REQUIRE (s->state == SP_PLAY && s->demo, "N1: power-on starts the attract demo in a stage");
+   REQUIRE (s->lives == SP_LIVES && !s->dead && s->hurt == 0, "N2: with full hearts");
+   REQUIRE (s->score == 0 && s->defeated == 0 && s->t == 0, "N3: score 0, nothing discharged");
+   return 0;
+}
+
+const char *spec_inv (const spec_state *s) {
+   REQUIRE (s->state >= SP_TITLE && s->state <= SP_END, "I0: a known phase");
+   REQUIRE (s->lives >= 0 && s->lives <= SP_LIVES, "I1: 0..5 hearts");
+   REQUIRE ((s->lives == 0) == (s->dead != 0), "I1: no hearts is exactly game over");
+   REQUIRE (s->hurt >= 0 && s->hurt <= SP_HURT, "I2: invulnerability 0..90 frames");
+   REQUIRE (s->cur_boss >= 0 && s->cur_boss < SP_BOSSES, "I3: one of seven bosses");
+   REQUIRE ((s->defeated & ~0x7F) == 0, "I3: only seven bosses can be discharged");
+   if (s->state == SP_FIGHT) {
+      REQUIRE (s->boss_on && s->hp > 0 && s->hp <= SP_HP, "I4: a fight has a live boss, 1..32 hp");
+      REQUIRE (s->attack >= 0 && s->attack < s->nmoves, "I4: the boss runs one of its moves");
+      REQUIRE (s->cam == s->arena_x, "I4: the fight's screen is the arena");
+   }
+   REQUIRE (s->flash >= 0 && s->flash < SP_FLASH && s->stun >= 0, "I5: hit flash and stun in range");
+   if (play (s->state)) {
+      REQUIRE (s->cam >= 0 && s->cam <= s->arena_x, "I6: the camera stays in the world");
+      REQUIRE (s->x >= s->cam && s->x <= 8 * s->wcols - 16, "I6: the player is on screen, in the world");
+   }
+   REQUIRE (s->certs >= 0, "I7: certificates are counted");
+   REQUIRE (s->nshots <= SP_NSHOT && s->nbul <= SP_NBUL && s->nprops <= SP_NPROP, "I7: object tables");
+   REQUIRE (s->score >= 0, "I8: score is not negative");
+   if (s->weapon >= 0) {
+      REQUIRE (s->weapon < SP_NWEAPON && (s->owned & (1 << s->weapon)), "W1: the selected tactic is owned");
+      REQUIRE (s->owned & 1, "W1: the lemma is always owned");
+      for (int w = 0; w < SP_NWEAPON; w++) REQUIRE (s->energy [w] >= 0 && s->energy [w] <= SP_ENERGY, "W2: energy 0..28");
+   }
+   return 0;
+}
+
+// the phase graph: from -> to, outside the demo's exits (S1)
+static int edge (int a, int b, const spec_state *s, const spec_state *n) {
+   if (a == b) return 1;
+   switch (a) {
+   case SP_TITLE: return b == SP_PLAY;
+   case SP_PLAY:  return b == SP_ARENA || b == SP_OVER;
+   case SP_ARENA: return b == SP_FIGHT || b == SP_OVER;
+   case SP_FIGHT: return b == SP_WIN || b == SP_OVER;
+   case SP_WIN:   return b == SP_TITLE || (b == SP_END && !s->demo && n->defeated == 0x7F);
+   case SP_OVER:  return b == SP_TITLE;
+   case SP_END:   return b == SP_TITLE;
+   }
+   return 0;
+}
+
+const char *spec_step (const spec_state *s, uint32_t buttons, const spec_state *n) {
+   REQUIRE (n->t == s->t + 1, "S0: one frame passes");
+   // S1: phases change only along the graph; the demo may also be left for the title at any time
+   // (a button, or its time limit)
+   int demo_exit = s->demo && n->state == SP_TITLE;
+   REQUIRE (edge (s->state, n->state, s, n) || demo_exit, "S1: a phase change along the graph");
+   REQUIRE (!(s->demo && buttons) || !n->demo, "S1: a button ends the demo");
+   int entered = s->state == SP_TITLE && n->state == SP_PLAY;
+   // S2: hearts: a stage starts with five; otherwise at most one is lost a frame, only when not
+   // invulnerable, and losing one starts the invulnerable time
+   if (entered) REQUIRE (n->lives == SP_LIVES && !n->dead && n->hurt == 0 && n->certs == 0, "S2: a stage starts with five hearts");
+   else {
+      REQUIRE (n->lives == s->lives || n->lives == s->lives - 1, "S2: at most one heart a frame, never gained");
+      if (n->lives < s->lives)
+         REQUIRE (s->hurt <= 1 && n->hurt >= SP_HURT - 1, "S2: a heart is lost only when not invulnerable");
+      REQUIRE (n->hurt >= s->hurt - 1 || n->hurt >= SP_HURT - 1, "S2: invulnerability counts down one a frame");
+   }
+   // S3: the boss: full at the fight's start; then hit points only fall, by 1..4, when it is not
+   // flashing, and a hit starts the flash
+   if (s->state == SP_ARENA && n->state == SP_FIGHT) REQUIRE (n->hp == SP_HP && n->flash == 0, "S3: a fight starts at 32 hp");
+   if (s->state == SP_FIGHT && (n->state == SP_FIGHT || n->state == SP_WIN)) {
+      REQUIRE (n->hp <= s->hp, "S3: a boss never heals");
+      if (n->hp < s->hp)
+         REQUIRE (s->flash == 0 && s->hp - n->hp <= SP_MAXDMG && n->flash == SP_FLASH - 1, "S3: one hit of 1..4 when not flashing");
+      REQUIRE ((n->state == SP_WIN) == (n->hp <= 0), "S3: the fight is won exactly when the boss has no hp");
+   }
+   // S4: discharged bosses: only a real (not demo) win adds one, the ending's restart clears all
+   if (n->defeated != s->defeated) {
+      int won = s->state == SP_FIGHT && n->state == SP_WIN && !s->demo && n->defeated == (s->defeated | (1 << s->cur_boss));
+      int restart = s->state == SP_END && n->state == SP_TITLE && n->defeated == 0;
+      REQUIRE (won || restart, "S4: only a win discharges a boss");
+   }
+   if (s->state == SP_FIGHT && n->state == SP_WIN && !s->demo) REQUIRE (n->defeated & (1 << s->cur_boss), "S4: a win discharges its boss");
+   // S5: score only grows
+   REQUIRE (n->score >= s->score, "S5: the score never falls");
+   // S6: the camera: in a stage it follows the player, in the fight it is still
+   if (s->state == SP_PLAY && n->state == SP_PLAY) {
+      int want = n->x - SP_CAMLEAD;
+      want = want < 0 ? 0 : want > n->arena_x ? n->arena_x : want;
+      REQUIRE (n->cam == want, "S6: the camera follows the player");
+   }
+   if (s->state == SP_FIGHT && n->state == SP_FIGHT) REQUIRE (n->cam == s->cam, "S6: the arena does not scroll");
+   // W: tactics (checked once the engine reports them)
+   if (s->weapon >= 0 && n->weapon >= 0 && !entered) {
+      REQUIRE ((n->owned & s->owned) == s->owned, "W3: tactics are never lost");
+      if (n->owned != s->owned)
+         REQUIRE (s->state == SP_FIGHT && n->state == SP_WIN, "W3: a tactic is gained only by a win");
+   }
+   return 0;
+}

@@ -91,6 +91,9 @@ Verification for what is proved so far).
 
 ## Verification
 
+The game's rules are written as a specification in `notes/proof-obligation-spec.md` (and
+`sw/game2d/proof_spec.c`); that document says, clause by clause, what is proved and what is tested.
+
 What is proved and what is only tested, separately (notes/sw-verification-plan.md has the tiers).
 
 - **Tier 2, proved (CBMC, `formal/sw/cbmc/run_proof.sh`, harness `proof_algos.c`):** theorems

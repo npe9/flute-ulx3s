@@ -10,8 +10,10 @@
 //   HOST_OVERFLOW=1       render every frame and count those with a sprite overflow (2: print
 //                         each one's frame and first line)
 //   HOST_STATS=1          print the per-frame write counts (VDP, APU): mean and worst
+//   HOST_SPEC=1           (Proof Obligation) check proof_spec.c's clauses on every frame
 #include "hw.h"
 #ifdef TITLE_PROOF
+#include "proof_spec.h"
 #include "proof.h"
 #define TITLE_INIT  proof_init
 #define TITLE_FRAME proof_frame
@@ -73,12 +75,28 @@ int main (int argc, char **argv) {
    int count_over = getenv ("HOST_OVERFLOW") != NULL, stats = getenv ("HOST_STATS") != NULL, overs = 0;
    long wv_max = 0, wa_max = 0, wv_sum = 0;
    TITLE_INIT ();
+#ifdef TITLE_PROOF
+   // HOST_SPEC=1: check notes/proof-obligation-spec.md's clauses on every frame (proof_spec.c)
+   int spec = getenv ("HOST_SPEC") != NULL; long spec_bad = 0;
+   spec_state sp_pre, sp_post;
+   if (spec) { proof_observe (&sp_pre); const char *e = spec_init (&sp_pre); if (!e) e = spec_inv (&sp_pre);
+               if (e) { printf ("spec: init: %s\n", e); spec_bad++; } }
+#endif
    for (int f = 0; f < n; f++) {
       if (apu_log) fprintf (apu_log, "# frame %d\n", f);
       unsigned b = 0;
       if (btn && fscanf (btn, "%x", &b) != 1) b = 0;
       long v0 = nw_vdp, a0 = nw_apu;
       score = TITLE_FRAME (b);
+#ifdef TITLE_PROOF
+      if (spec) {
+         proof_observe (&sp_post);
+         const char *e = spec_inv (&sp_post);
+         if (!e) e = spec_step (&sp_pre, b, &sp_post);
+         if (e && spec_bad++ < 20) printf ("spec: frame %d: %s\n", f, e);
+         sp_pre = sp_post;
+      }
+#endif
       long dv = nw_vdp - v0, da = nw_apu - a0;
       if (f > 0) { wv_sum += dv; if (dv > wv_max) wv_max = dv; if (da > wa_max) wa_max = da; }
       if (count_over) { static uint8_t img [VDP_H][VDP_W]; int ov = vdp_ref_frame (&s, img); overs += ov != 0; if (ov && getenv ("HOST_OVERFLOW")[0] == '2')
@@ -93,6 +111,9 @@ int main (int argc, char **argv) {
    if (apu_log) fclose (apu_log);
    if (count_over) printf ("host: %d frames with a sprite overflow\n", overs);
    if (stats) printf ("host: writes a frame: VDP mean %ld, worst %ld; APU worst %ld\n", n > 1 ? wv_sum / (n - 1) : 0, wv_max, wa_max);
+#ifdef TITLE_PROOF
+   if (spec) printf ("host: spec: %ld frame%s violate a clause\n", spec_bad, spec_bad == 1 ? "" : "s");
+#endif
    printf ("host: %d frames, score %d, sprite overflow %d\n", n, score, over);
    return 0;
 }

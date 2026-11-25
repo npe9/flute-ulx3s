@@ -91,7 +91,9 @@ covers its boss algorithms, not its engine: `formal/sw/cbmc/run_proof.sh` proves
 on the game's own functions (compiler = evaluator, the K-state ring's deadlock freedom, closure
 and 24-move convergence, FIND's postcondition and 75-step termination, the Fiat limbs and Kami
 pipeline invariants as inductive steps), with five planted mutants
-(`run_proof_mutants.sh`); tier 3 does not cover it.  Results:
+(`run_proof_mutants.sh`); tier 3 does not cover it.  Its rules are a specification
+(notes/proof-obligation-spec.md, `sw/game2d/proof_spec.c`): host_trace checks every clause on
+every frame of every fuzz script and fuzz.sh fails a run with `SPEC` on a violation.  Results:
 - 40 frames, no buttons: Sail's trace = the host build's (4,585 writes).
 - Campaigns of 200 runs x 2,000 frames: PASS, ~116,750 writes a run (seed 7 on the source before
   tier 2's fixes, seed 11 after; half the runs with random UART / frame-counter timing).  Line
