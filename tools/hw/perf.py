@@ -119,9 +119,11 @@ def record_one(c, path, build=None, who=None):
                 mets.append({'name': 'util_' + short, 'value': u['used'], 'unit': 'cells', 'object': None})
                 mets.append({'name': 'util_%s_pct' % short, 'value': round(100.0 * u['used'] / u['available'], 1),
                              'unit': '%', 'object': None})
-        fails = [f['clock'] for f in st['fmax'] if f['verdict'] == 'FAIL'] if complete else []
-        status = 'fail' if fails else 'ok'
-        summary = ' '.join('%s %.2f' % (f['clock'], f['mhz']) for f in st['fmax']) if complete else 'not routed'
+        # the import is the answer (status ok); each clock's verdict is a check, so a failing old seed
+        # does not show up in `hw state failures` as if the recording had failed
+        status = 'ok'
+        summary = (' '.join('%s %.2f%s' % (f['clock'], f['mhz'], '' if f['verdict'] == 'PASS' else ' FAIL')
+                            for f in st['fmax']) if complete else 'not routed (placement estimate only)')
         tool, ver = 'nextpnr-ecp5', rec.get('version')
         checks = [{'name': 'fmax ' + f['clock'], 'status': 'pass' if f['verdict'] == 'PASS' else 'fail',
                    'expected': '>= %g MHz' % f['target_mhz'], 'observed': '%.2f MHz' % f['mhz']}
@@ -129,22 +131,19 @@ def record_one(c, path, build=None, who=None):
         answer = {'status': status, 'lines': [summary], 'complete': complete, 'cmd': 'perf record'}
     else:
         mets, checks, clock = bench_metrics(path)
-        status = 'fail' if any(k['status'] == 'fail' for k in checks) else 'ok'
+        status = 'ok'
         complete = bool(mets)
         summary = ' '.join('%s %g' % (m['name'], m['value']) for m in mets
                            if m['name'] in ('coremark_per_mhz', 'dmips_per_mhz', 'dhrystone_cycles'))
         tool, ver = variant, None
         answer = {'status': status, 'lines': [summary], 'complete': complete, 'cmd': 'perf record'}
-    kw = {}
-    sig = inspect.signature(hwstate.record).parameters
-    if 'git_rev' in sig:
-        kw = {'git_rev': None, 'dirty': None}
+    if 'git_rev' not in inspect.signature(hwstate.record).parameters:
+        raise HwError('HW-E-NO-BACKEND', 'hwstate.record() has no git_rev override',
+                      'update ~/src/hwsh/lib/hwstate.py (seeded runs must not claim the current commit)')
     answer['lines'] = ['%s %s: %s' % (b, variant, summary)]
     rid = hwstate.record(project(), 'perf', 'record', ['record', path], answer, inputs=[path], tool=tool,
                          tool_version=ver, metrics=mets, checks=checks, assumptions=SEEDED, who=who,
-                         started=started, experiment=(b, variant), **kw)
-    if not kw:     # record() stamped today's HEAD; this artifact predates it (see SEEDED)
-        c.execute('update runs set git_rev = null, dirty = null where run_id = ?', (rid,))
+                         started=started, experiment=(b, variant), git_rev=None, dirty=None)
     return {'file': timing.label(path), 'build': b, 'variant': variant, 'kind': kind, 'run': rid, 'cached': False,
             'status': status, 'complete': complete, 'summary': summary}
 
@@ -167,7 +166,7 @@ def cmd_record(a, files=None):
     finally:
         c.close()
     new = [r for r in out if not r['cached']]
-    shown, more = bounded(out, a.limit, a.all)
+    shown, more = timing.page(out, a)
     lines = ['recorded %d new, %d already in %s' % (len(new), len(out) - len(new),
                                                      os.path.join(project(), '.hw/state.db'))]
     lines += ['  %s %s %s%s' % (r['build'], r['variant'], 'already recorded' if r['cached'] else r['summary'],
@@ -250,7 +249,7 @@ def cmd_show(a):
     key = {'when': lambda r: -r['when'], 'fmax': lambda r: -(r['fmax']['mean'] if r['fmax'] else 0),
            'name': lambda r: r['build']}[a.sort]
     rows.sort(key=key)
-    shown, more = bounded(rows, a.limit, a.all)
+    shown, more = timing.page(rows, a)
     lines = ['%d builds (%s; fmax min/mean/max over routed seeds, MHz)' % (len(rows), 'newest first' if a.sort == 'when'
                                                                           else 'by ' + a.sort)]
     lines += [fmt_row(r, a.clock) for r in shown]
@@ -307,7 +306,7 @@ def cmd_history(a):
         raise HwError('HW-E-NOT-FOUND', 'no values for metric `%s`%s' % (a.metric, ' / ' + a.object if a.object else ''),
                       'metrics: fmax (--object clock:sys_clk), util_LUT4_pct, coremark_per_mhz, dmips_per_mhz, dhrystone_cycles')
     pts = [{'build': b, 'variant': v, 'value': x, 'unit': u, 'when': t, 'run': r} for b, v, x, u, t, r in rows]
-    shown, more = bounded(pts[::-1], a.limit, a.all)
+    shown, more = timing.page(pts[::-1], a)
     lines = ['%s%s: %d values, newest first' % (a.metric, ' ' + a.object if a.object else '', len(pts))]
     lines += ['  %s %-10s %-10s %g %s' % (time.strftime('%Y-%m-%d', time.localtime(p['when'])), p['build'], p['variant'],
                                           p['value'], p['unit'] or '') for p in shown]
@@ -322,6 +321,7 @@ def parse(argv):
     def lim(sp, n=20):
         sp.add_argument('--limit', type=int, default=n)
         sp.add_argument('--all', action='store_true')
+        sp.add_argument('--from', dest='start', type=int, default=0, help='first item (the `next` cursor)')
         sp.add_argument('--json', action='store_true')
     s = sub.add_parser('record'); s.add_argument('files', nargs='+'); s.add_argument('--build'); lim(s)
     s.set_defaults(fn=cmd_record)

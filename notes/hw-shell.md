@@ -2,8 +2,9 @@
 
 hwsh (`~/src/hwsh`, CONTRACT.md) is a shared command shell for agents: a question about the
 hardware is answered by a query returning a few structured lines (or `--json`), not by reading
-constraint files, maps or serial logs.  This repo owns two areas, `board` and `lab`
-(`tools/hw/board.py`, `tools/hw/lab.py`); `~/src/hwsh/hw board ...` routes to them.
+constraint files, maps or serial logs.  This repo owns six areas: `board` and `lab`
+(`tools/hw/board.py`, `tools/hw/lab.py`), and `timing`, `place`, `fw`, `perf` (below);
+`~/src/hwsh/hw <area> ...` routes to them.
 
 ## hw board (read-only)
 
@@ -70,10 +71,15 @@ under 5% margin is marked `THIN`.  Parsed logs and placement tables are cached b
 `hw perf seed` (2026-11-25) recorded every pnr and bench log on disk: 203 runs, 58 builds; seeded
 runs carry the artifact's sha256 and mtime and no commit (git_rev NULL).
 
-Tests: `python3 -I tools/hw/tests/run_fpga_tests.py`: 48 checks on fixtures in `tests/data`
+Every bounded answer's `next` is `--from N` on the same verb.  `fw csr` values are hex (0x optional).
+`fw addr` handles inlined frames (innermost first, `inlined_into` the callers).  `perf record`
+answers `ok` for a successful import; each clock's PASS/FAIL is a check on that run.
+
+Tests: `python3 -I tools/hw/tests/run_fpga_tests.py`: 59 checks on fixtures in `tests/data`
 (a tiny design routed by this nextpnr, its report JSON and placement, two bench logs), each area
-with planted input changes as negative controls, plus 4 code mutants (placement estimate taken
-as Fmax, ld warnings as errors, perf dedupe by content only, misa letters off by one), all caught.
+with planted input changes as negative controls (incl. following every kind of `next` cursor),
+plus 6 code mutants (placement estimate taken as Fmax, ld warnings as errors, perf dedupe by
+content only, misa letters off by one, `--from` ignored, bare CSR values read as decimal), all caught.
 
 One real question ("lx49c: routed sys_clk Fmax per seed, and the worst seed's critical path"):
 reading the three logs is 358,190 bytes (~90,000 tokens); a careful grep + sed of the fmax lines and

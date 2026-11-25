@@ -36,6 +36,9 @@ def make_inputs(tmp):
     # planted: killed before routing finished
     cut = ok[:ok.index('Info: Routing complete.')]
     open(os.path.join(d, 'tiny', 'pnr-s2.log'), 'w').write(cut)
+    lines[idx[-1]] = re.sub(r"[\d.]+ MHz \((PASS|FAIL) at 100.00 MHz\)", '103.00 MHz (PASS at 100.00 MHz)', lines[idx[-1]])
+    os.makedirs(os.path.join(d, 'thin'))
+    open(os.path.join(d, 'thin', 'pnr-s1.log'), 'w').write('\n'.join(lines))     # planted: 3% margin
     shutil.copy(os.path.join(DATA, 'pnr-fail.log'), os.path.join(d, 'fail.log'))
     shutil.copy(os.path.join(DATA, 'report.json'), os.path.join(d, 'report.json'))
     shutil.copy(os.path.join(DATA, 'placed.json'), os.path.join(d, 'placed.json'))
@@ -56,6 +59,9 @@ def make_inputs(tmp):
                                              'void _start(void){ f(); }\n')
     shutil.copy(os.path.join(DATA, 't1-coremark.log'), os.path.join(d, 'bench', 't3-coremark.log'))  # same bytes, other build
     open(os.path.join(d, 'ldwarn.log'), 'w').write('/x/bin/ld: warning: cannot find entry symbol _start; defaulting to 00010094\n')
+    open(os.path.join(d, 'inl.c'), 'w').write('static inline int sq(int x){ return x * x * 3 + 1; }\n'
+                                             'int __attribute__((noinline)) user(int y){ return sq(y) + 7; }\n'
+                                             'void _start(void){ for(;;) user(5); }\n')
     open(os.path.join(d, 'syn.c'), 'w').write('int h(void){ return y }\n')
     return d
 
@@ -90,6 +96,9 @@ def run_checks(hw, d, env):
     rc, j = q('timing', 'summary', 'tiny/pnr-s2.log')
     check('timing: an unrouted log is complete:false, exit 5, no failing verdict', rc == 5 and j.get('complete') is False
           and j['files'][0]['stage'] == 'placed' and j['status'] == 'ok', j)
+    check('timing: 15% margin is not THIN', clk(q('timing', 'summary', 'tiny/pnr-s1.log')[1])['thin'] is False, None)
+    rc, j = q('timing', 'summary', 'thin/pnr-s1.log')
+    check('  control: a planted 103 MHz PASS at 100 is THIN (rule 7)', rc == 0 and clk(j)['thin'] is True, j)
     rc, j = q('timing', 'summary', 'fail.log')
     check('timing: 115 MHz against 400 is fail (exit 1), margin -71.2%', rc == 1 and clk(j)['margin_pct'] == -71.2, j)
     rc, j = q('timing', 'summary', 'report.json')
@@ -113,6 +122,8 @@ def run_checks(hw, d, env):
           and j['path']['raw_ref'].startswith('pnrlog:'), j)
     rc, k = q('timing', 'expand', pid, '--limit', '3')
     check('timing expand: bounded hops with a cursor', rc == 0 and len(k['hops']) == 3 and k['truncated'], k)
+    follow(q, 'timing', ['expand', pid], 'hops', check)
+    follow(q, 'timing', ['worst', 'tiny/pnr-s1.log'], 'paths', check, limit=1)
     rc, r = q('timing', 'raw', j['path']['raw_ref'] if rc == 0 else 'pnrlog:x:L1-2')
     check('timing raw: the slice starts at the path header', rc == 0 and 'Critical path report' in r['text'][0], r)
     rc, j = q('timing', 'compare', 'tiny/pnr-s1.log', 'tinyb/pnr-s1.log')
@@ -132,6 +143,7 @@ def run_checks(hw, d, env):
     rc, k = q('place', 'location', 'placed-moved.json', 'acc')
     check('  control: planted +20 x moves the acc centroid by 20', rc == 0 and j.get('centroid') and
           round(k['centroid'][0] - j['centroid'][0], 1) == 20.0, k)
+    follow(q, 'place', ['location', 'placed.json', 'acc'], 'cells', check)
     rc, j = q('place', 'compare', 'placed.json', 'placed-moved.json', '--depth', '1')
     check('place compare: the moved block is listed first', rc == 0 and j['modules'][0]['shift'] and
           j['modules'][0]['shift'] > 5, j)
@@ -160,6 +172,16 @@ def run_checks(hw, d, env):
         check('fw symbols: sq is a func with a size', rc == 0 and j['symbols'][0]['kind'] == 'func' and j['symbols'][0]['size'], j)
         rc, k = q('fw', 'disasm', 'ok.elf', 'sq')
         check('fw disasm sq: has a mul', rc == 0 and any(' mul ' in l for l in k['insns']), k)
+        follow(q, 'fw', ['symbols', 'ok.elf'], 'symbols', check, limit=1)
+        follow(q, 'fw', ['disasm', 'ok.elf', 'sq'], 'insns', check, limit=1)
+        rc, _ = q('fw', 'build', '--', *[c.replace('-O1', '-O2') for c in cc], 'inl.c', '-o', 'inl.elf')
+        rc, j = q('fw', 'symbols', 'inl.elf', '--grep', '^(user|_start)$')
+        addrs = {x['name']: x['addr'] for x in j.get('symbols', [])}
+        rc, k = q('fw', 'addr', 'inl.elf', hex(addrs.get('user', 0)), hex(addrs.get('_start', 0)))
+        p = k.get('pcs', [{}, {}])
+        check('fw addr: an inlined frame (sq in user) does not shift the next PC: _start is inl.c:3', rc == 0 and
+              p[0].get('function') == 'sq' and p[0]['inlined_into'] and p[1].get('symbol') == '_start' and
+              p[1].get('line') == 3, k)
         addr = j['symbols'][0]['addr'] if rc == 0 else 0
         rc, k = q('fw', 'addr', 'ok.elf', hex(addr + 2))
         check('fw addr: pc inside sq -> sq+0x2, ok.c:1', rc == 0 and k['pcs'][0]['symbol'] == 'sq' and k['pcs'][0]['offset'] == 2
@@ -176,6 +198,10 @@ def run_checks(hw, d, env):
     check('fw csr: misa 0x4014112f = RV32ABCDFIMSU (the promoted core)', rc == 0 and j['summary'] == 'RV32ABCDFIMSU', j)
     rc, j = q('fw', 'csr', 'misa', '0x4014110f')
     check('  control: misa without bit 5 drops F', rc == 0 and j['summary'] == 'RV32ABCDIMSU', j)
+    rc, j = q('fw', 'csr', 'mstatus', '00001880')
+    check('fw csr: a bare value is hex (00001880 = MPP=M, MPIE)', rc == 0 and j['value'] == 0x1880, j)
+    rc, j = q('fw', 'csr', 'mstatus', '1880')
+    check('  control: 1880 is 0x1880, not decimal 1880 (0x758)', rc == 0 and j['value'] == 0x1880, j)
     rc, j = q('fw', 'csr', 'mcause', '0x8000000b')
     check('fw csr: mcause 0x8000000b = machine external interrupt', rc == 0 and 'machine external' in j['summary'], j)
     rc, j = q('fw', 'csr', 'mcause', '0xd')
@@ -194,6 +220,7 @@ def run_checks(hw, d, env):
     check('perf record: a file already recorded is not recorded again (cached)', rc == 0 and j['new'] == 0 and j['cached'], j)
     rc, j = q('perf', 'record', 'bench/t3-coremark.log')
     check('perf record: identical bytes under another build name are that build\'s run too', rc == 0 and j['new'] == 1, j)
+    follow(q, 'perf', ['show', '--sort', 'name'], 'builds', check, limit=1)
     rc, j = q('perf', 'show', '--clock', 'clk', '--sort', 'name')
     rows = {r['build']: r for r in j.get('builds', [])}
     check('perf show: tiny band has the routed seed only, s2 listed unrouted', rc == 0 and rows.get('tiny', {}).get('fmax', {})
@@ -220,6 +247,15 @@ def run_checks(hw, d, env):
     return fails
 
 
+def follow(q, tool, args, key, check, limit=2):
+    """Rule 1: a truncated answer's `next` must be a flag the same verb takes, and must resume at the cut."""
+    rc, a = q(tool, *args, '--limit', str(limit))
+    rc2, b = q(tool, *args, '--limit', str(limit), *(a.get('next') or '').split())
+    allv = q(tool, *args, '--all')[1].get(key, [])
+    check('%s %s: next (%s) resumes at item %d' % (tool, args[0], a.get('next'), limit),
+          a.get('truncated') and rc2 in (0, 1, 5) and b.get(key) and allv[limit:limit + 1] == b[key][:1], b)
+
+
 MUTANTS = [
     ('pnr.py', "stage, rec['routed'] = 'routed', True", "rec['routed'] = True",
      'takes the placement estimate as the Fmax'),
@@ -229,6 +265,9 @@ MUTANTS = [
      'dedupes perf records by content only'),
     ('csrs.py', "letters = ''.join(chr(65 + i) for i in range(26) if v >> i & 1)",
      "letters = ''.join(chr(65 + i) for i in range(25) if v >> i + 1 & 1)", 'misa letters off by one'),
+    ('timing.py', "return bounded(list(items)[start:],", "return bounded(list(items),", '`--from` cursor ignored'),
+    ('fw.py', "v = int(a.value, 16)", "v = int(a.value, 0) if a.value.startswith('0x') else int(a.value)",
+     'a bare CSR value read as decimal'),
 ]
 
 

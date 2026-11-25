@@ -101,7 +101,7 @@ def cmd_summary(a):
     xs = [c[2] for c in t['cells']]
     ys = [c[3] for c in t['cells']]
     top = sorted(((k, stats(v)) for k, v in groups(t, 2, None).items()), key=lambda kv: -kv[1]['n'])
-    shown, more = bounded(top, a.limit, a.all)
+    shown, more = timing.page(top, a)
     lines = ['%s: %d placed cells, grid x %d..%d y %d..%d; %s' % (
         timing.label(a.file), len(t['cells']), min(xs), max(xs), min(ys), max(ys),
         ', '.join('%s %d' % kv for kv in sorted(by.items(), key=lambda kv: -kv[1])[:8]))]
@@ -116,7 +116,7 @@ def cmd_modules(a):
     rows = sorted(((k, stats(v)) for k, v in groups(t, a.depth, a.under).items()), key=lambda kv: -kv[1]['n'])
     if not rows:
         raise HwError('HW-E-NOT-FOUND', 'no logic cells under `%s`' % a.under, 'hw place summary FILE lists the blocks')
-    shown, more = bounded(rows, a.limit, a.all)
+    shown, more = timing.page(rows, a)
     return dict(cmd='place modules', file=timing.label(a.file), depth=a.depth, under=a.under,
                 modules=[dict(prefix=k, **s) for k, s in shown], cached=cached,
                 lines=[fmt_stat(k, s) for k, s in shown], **more)
@@ -134,7 +134,7 @@ def cmd_location(a):
     for c in under:
         kinds[c[1]] = kinds.get(c[1], 0) + 1
     cells = [{'cell': c[0], 'type': c[1], 'x': c[2], 'y': c[3], 'bel': c[4]} for c in under]
-    shown, more = bounded(cells, a.limit, a.all)
+    shown, more = timing.page(cells, a)
     lines = [fmt_stat(a.name + (' (signal)' if exact else ' (prefix)'), s),
              '  types: ' + ', '.join('%s %d' % kv for kv in sorted(kinds.items(), key=lambda kv: -kv[1]))]
     lines += ['  %s %s X%d/Y%d/%s' % (pnr.collapse(c['cell']), c['type'], c['x'], c['y'], c['bel']) for c in shown[:5]]
@@ -155,7 +155,7 @@ def cmd_compare(a):
         rows.append({'prefix': k, 'a': sa, 'b': sb, 'shift': shift,
                      'delta_n': (sb['n'] if sb else 0) - (sa['n'] if sa else 0)})
     rows.sort(key=lambda r: (r['shift'] is None, -(r['shift'] or 0), -abs(r['delta_n'])))
-    shown, more = bounded(rows, a.limit, a.all)
+    shown, more = timing.page(rows, a)
     lines = ['%s -> %s (depth %d%s), biggest centroid moves first' % (
         timing.label(a.a), timing.label(a.b), a.depth, ', under ' + a.under if a.under else '')]
     for r in shown:
@@ -185,6 +185,7 @@ def parse(argv):
     def lim(sp, n=20):
         sp.add_argument('--limit', type=int, default=n)
         sp.add_argument('--all', action='store_true')
+        sp.add_argument('--from', dest='start', type=int, default=0, help='first item (the `next` cursor)')
         sp.add_argument('--json', action='store_true')
     s = sub.add_parser('summary'); s.add_argument('file'); lim(s, 10); s.set_defaults(fn=cmd_summary)
     s = sub.add_parser('modules'); s.add_argument('file'); s.add_argument('--depth', type=int, default=4)

@@ -61,6 +61,12 @@ def util_short(rec):
     return out
 
 
+def page(items, a):
+    """Rule 1: bounded, and `next` is a flag this same verb accepts (`--from N`)."""
+    start = getattr(a, 'start', 0) or 0
+    return bounded(list(items)[start:], a.limit, a.all, cursor=lambda i: '--from %d' % (start + i))
+
+
 def file_summary(path):
     rec, cached = open_file(path)
     stage, st, complete = pnr.final_stage(rec)
@@ -98,7 +104,7 @@ def cmd_summary(a):
         if s['complete']:
             for c in s['clocks']:
                 metrics.append({'name': 'fmax', 'value': c['mhz'], 'unit': 'MHz', 'object': 'clock:' + c['clock']})
-    shown, more = bounded(rows, a.limit, a.all, cursor=lambda i: '--from %d' % i)
+    shown, more = page(rows, a)
     lines = []
     for s in shown:
         head = '%s %s' % (s['file'], s['stage'] if s['complete'] else 'NOT ROUTED (placement estimate only)')
@@ -240,7 +246,7 @@ def cmd_worst(a):
             raise HwError('HW-E-NOT-FOUND', 'no critical path for clock matching `%s`' % a.clock,
                           'clocks here: %s' % ', '.join(sorted({p['from_clk'] for p in st['paths']})))
     recs.sort(key=lambda r: (r.get('slack_ns') is None, r.get('slack_ns', 0), -r['ns']))
-    shown, more = bounded(recs, a.limit, a.all, cursor=lambda i: '--from %d' % i)
+    shown, more = page(recs, a)
     lines = [] if complete else ['NOT ROUTED: placement-estimate paths (%s)' % label(a.file)]
     for r in shown:
         lines += fmt_path(r, wires=False)
@@ -292,8 +298,7 @@ def cmd_expand(a):
         if real:
             x['src'] = real
         hops.append(x)
-    hops = hops[a.start:]
-    shown, more = bounded(hops, a.limit, a.all, cursor=lambda i: '--from %d' % (a.start + i))
+    shown, more = page(hops, a)
     lines = ['%s in %s (%d hops)' % (a.id, pre or '(top)', len(p['hops']))]
     for h in shown:
         lines.append('  %-8s %5.2f %6.2f %s%s%s' % (h['type'], h['ns'], h['total'], h['name'],
@@ -378,6 +383,7 @@ def parse(argv):
     def lim(sp, n=20):
         sp.add_argument('--limit', type=int, default=n)
         sp.add_argument('--all', action='store_true')
+        sp.add_argument('--from', dest='start', type=int, default=0, help='first item (the `next` cursor)')
         sp.add_argument('--json', action='store_true')
     s = sub.add_parser('summary'); s.add_argument('files', nargs='+'); lim(s); s.set_defaults(fn=cmd_summary)
     s = sub.add_parser('worst'); s.add_argument('file'); s.add_argument('--clock')
@@ -385,7 +391,7 @@ def parse(argv):
     for v in ('path', 'explain'):
         s = sub.add_parser(v); s.add_argument('id'); s.add_argument('--hops', type=int, default=3); lim(s)
         s.set_defaults(fn=cmd_path)
-    s = sub.add_parser('expand'); s.add_argument('id'); s.add_argument('--from', dest='start', type=int, default=0)
+    s = sub.add_parser('expand'); s.add_argument('id')
     s.add_argument('--depth', type=int); s.add_argument('--raw-names', action='store_true'); lim(s, 30)
     s.set_defaults(fn=cmd_expand)
     s = sub.add_parser('raw'); s.add_argument('ref'); s.add_argument('--width', type=int, default=160); lim(s, 40)

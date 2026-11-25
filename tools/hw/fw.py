@@ -8,7 +8,7 @@
   hw fw symbols ELF [--grep RE] [--sort size|addr]   functions/objects: address, size, kind
   hw fw disasm ELF FUNC|ADDR [--source] [--limit N]  one function (bounded, cursor)
   hw fw addr ELF PC...                   function + file:line for a PC (mepc, a trap dump, a trace)
-  hw fw csr NAME [VALUE]                 a CSR's address and fields; with VALUE, each field decoded
+  hw fw csr NAME [VALUE]                 a CSR's address and fields; with VALUE (hex, 0x optional) each field decoded
   hw raw fwlog:SHA12:LA-B                a slice of a saved build output
 
 Tools: $HW_RISCV_PREFIX (default riscv64-unknown-elf-) binutils.  ELF answers are cached by the
@@ -158,7 +158,7 @@ def diag_answer(cmd, text, rc_build, extra):
     ds = parse_diags(text, ref)
     errs = [d for d in ds if d['severity'] == 'error']
     warns = [d for d in ds if d['severity'] == 'warning']
-    shown, more = bounded(ds, extra.pop('limit'), extra.pop('all'))
+    shown, more = timing.page(ds, extra.pop('page'))
     failed = bool(errs) or (rc_build not in (None, 0))
     head = '%s: %s, %d error(s), %d warning(s)%s; full output %s' % (
         cmd, 'FAILED' if failed else 'ok', len(errs), len(warns),
@@ -187,15 +187,13 @@ def cmd_build(a):
         raise HwError('HW-E-NOT-FOUND', 'no such command: %s' % argv[0])
     except subprocess.TimeoutExpired:
         raise HwError('HW-E-TIMEOUT', 'build timed out after %ds' % a.timeout, '--timeout SECONDS')
-    return diag_answer('fw build', r.stdout + r.stderr, r.returncode, {'limit': a.limit, 'all': a.all,
-                                                                      'argv': argv})
+    return diag_answer('fw build', r.stdout + r.stderr, r.returncode, {'page': a, 'argv': argv})
 
 
 def cmd_diags(a):
     if not os.path.exists(a.log):
         raise HwError('HW-E-NOT-FOUND', 'no such file: %s' % a.log)
-    return diag_answer('fw diags', open(a.log, errors='replace').read(), None, {'limit': a.limit, 'all': a.all,
-                                                                                '_inputs': [a.log]})
+    return diag_answer('fw diags', open(a.log, errors='replace').read(), None, {'page': a, '_inputs': [a.log]})
 
 
 def cmd_raw(a):
@@ -230,7 +228,7 @@ def cmd_sections(a):
     text = sum(s['size'] for s in alloc if 'X' in s['flags'])
     bss = sum(s['size'] for s in alloc if s['type'] == 'NOBITS')
     data = sum(s['size'] for s in alloc) - text - bss
-    shown, more = bounded(alloc, a.limit, a.all)
+    shown, more = timing.page(alloc, a)
     lines = ['%s: text %d, data %d, bss %d bytes; loaded %#x..%#x' % (
         timing.label(a.elf), text, data, bss, min((s['addr'] for s in alloc), default=0),
         max((s['addr'] + s['size'] for s in alloc), default=0))]
@@ -261,7 +259,7 @@ def cmd_symbols(a):
         syms = [s for s in syms if rx.search(s['name'])]
     if a.sort == 'size':
         syms = sorted(syms, key=lambda s: -(s['size'] or 0))
-    shown, more = bounded(syms, a.limit, a.all, cursor=lambda i: '--from %d' % i)
+    shown, more = timing.page(syms, a)
     lines = ['  %#010x %7s %-6s %s' % (s['addr'], s['size'] if s['size'] is not None else '-',
                                        KIND.get(s['kind'], s['kind']), s['name']) for s in shown]
     if not syms:
@@ -307,7 +305,7 @@ def cmd_disasm(a):
     body = [l for l in out.split('\n') if re.match(r'\s*[0-9a-f]+:\t', l) or (a.source and l and not
             l.startswith(('Disassembly', a.elf)) and 'file format' not in l)]
     body = [re.sub(r'\s+', ' ', l.strip()) for l in body]
-    shown, more = bounded(body[a.start:], a.limit, a.all, cursor=lambda i: '--from %d' % (a.start + i))
+    shown, more = timing.page(body, a)
     lines = ['%s %s @ %#x, %s bytes, %d lines%s' % (timing.label(a.elf), sym['name'], start,
              sym['size'] if sym['size'] else '? (no size: first 512)', len(body),
              '' if pc == start else '; %#x is +%#x' % (pc, pc - start))] + shown
@@ -317,23 +315,43 @@ def cmd_disasm(a):
 
 def cmd_addr(a):
     elf(a.elf)
-    out = run_tool([tool('addr2line'), '-f', '-i', '-C', '-e', a.elf] + ['%#x' % int(p, 16) for p in a.pcs])
-    # without -a, each pc gives function/file:line pairs (several when inlined); split by our own lookup
-    raw = out.strip().split('\n')
-    recs, lines = [], []
+    try:
+        pcs = [int(p, 16) for p in a.pcs]
+    except ValueError:
+        raise HwError('HW-E-BADREQ', 'PCs are hex: %s' % ' '.join(a.pcs), 'hw fw addr X.elf 0x80000100')
+    out = run_tool([tool('addr2line'), '-a', '-f', '-i', '-C', '-e', a.elf] + ['%#x' % p for p in pcs])
+    # -a prints each address first; after it come (function, file:line) pairs, innermost inlined frame first
+    frames, cur = [], None
+    lines_ = out.strip().split('\n')
     k = 0
-    for p in a.pcs:
-        pc, sym = lookup(a.elf, p if p.lower().startswith('0x') else '0x' + p)
-        fn, loc = (raw[k], raw[k + 1]) if k + 1 < len(raw) else ('??', '??:0')
+    while k < len(lines_):
+        l = lines_[k]
+        if re.match(r'^0x[0-9a-f]+$', l):
+            cur = []
+            frames.append(cur)
+            k += 1
+            continue
+        if cur is not None and k + 1 < len(lines_):
+            cur.append((l, lines_[k + 1]))
         k += 2
-        m = re.match(r'(.*):(\?|\d+)', loc)
-        r = {'pc': pc, 'symbol': sym and sym['name'], 'offset': pc - sym['addr'] if sym else None,
-             'function': None if fn == '??' else fn,
-             'file': None if not m or m.group(1) == '??' else m.group(1),
-             'line': int(m.group(2)) if m and m.group(2).isdigit() else None}
+    if len(frames) != len(pcs):
+        raise HwError('HW-E-FW-TOOL', 'addr2line gave %d answers for %d PCs' % (len(frames), len(pcs)))
+    recs, lines = [], []
+    for pc, fr in zip(pcs, frames):
+        _, sym = lookup(a.elf, '%#x' % pc)
+        def loc(x):
+            m = re.match(r'(.*):(\?|\d+)', x[1])
+            return {'function': None if x[0] == '??' else x[0],
+                    'file': None if not m or m.group(1) == '??' else m.group(1),
+                    'line': int(m.group(2)) if m and m.group(2).isdigit() else None}
+        inner = loc(fr[0]) if fr else {'function': None, 'file': None, 'line': None}
+        r = dict(inner, pc=pc, symbol=sym and sym['name'], offset=pc - sym['addr'] if sym else None,
+                 inlined_into=[loc(x) for x in fr[1:]])
         recs.append(r)
-        lines.append('%#010x %s+%s %s' % (pc, r['symbol'] or '?', hex(r['offset']) if r['offset'] is not None else '?',
-                                         '%s:%s' % (r['file'], r['line']) if r['file'] else '(no line info: built without -g)'))
+        where = '%s:%s' % (r['file'], r['line']) if r['file'] else '(no line info: built without -g)'
+        lines.append('%#010x %s+%s %s%s' % (pc, r['symbol'] or '?', hex(r['offset']) if r['offset'] is not None else '?',
+                                           where, ''.join(' (inlined %s into %s:%s)' % (r['function'], x['file'], x['line'])
+                                                          for x in r['inlined_into'][:1])))
     return dict(cmd='fw addr', pcs=recs, lines=lines, cached=False)
 
 
@@ -355,9 +373,9 @@ def cmd_csr(a):
         return dict(cmd='fw csr', csr=key, addr=c['addr'], desc=c['desc'], fields=c.get('fields', []), lines=lines,
                     cached=True)
     try:
-        v = int(a.value, 0) if a.value.lower().startswith('0x') or a.value.isdigit() else int(a.value, 16)
+        v = int(a.value, 16)          # always hex, 0x optional: the way trap dumps and GDB print CSRs
     except ValueError:
-        raise HwError('HW-E-BADREQ', 'bad value `%s`' % a.value, 'hex like 0x4014112f')
+        raise HwError('HW-E-BADREQ', 'bad value `%s` (CSR values are hex)' % a.value, 'hex like 0x4014112f or 00001880')
     fields, summary = csr_decode(key, v)
     lines = ['%s = %#010x: %s' % (key, v, summary)]
     lines += ['  %-10s [%s] = %s%s' % (f['name'], f['bits'], f['value'], ' (%s)' % f['meaning'] if f.get('meaning') else '')
@@ -374,6 +392,7 @@ def parse(argv):
     def lim(sp, n=20):
         sp.add_argument('--limit', type=int, default=n)
         sp.add_argument('--all', action='store_true')
+        sp.add_argument('--from', dest='start', type=int, default=0, help='first item (the `next` cursor)')
         sp.add_argument('--json', action='store_true')
     s = sub.add_parser('build'); s.add_argument('--cwd'); s.add_argument('--timeout', type=int, default=1800)
     lim(s); s.add_argument('command', nargs='...'); s.set_defaults(fn=cmd_build)
@@ -382,7 +401,7 @@ def parse(argv):
     s = sub.add_parser('symbols'); s.add_argument('elf'); s.add_argument('--grep'); s.add_argument(
         '--sort', choices=('addr', 'size'), default='addr'); lim(s); s.set_defaults(fn=cmd_symbols)
     s = sub.add_parser('disasm'); s.add_argument('elf'); s.add_argument('what'); s.add_argument('--source', action='store_true')
-    s.add_argument('--from', dest='start', type=int, default=0); lim(s, 40); s.set_defaults(fn=cmd_disasm)
+    lim(s, 40); s.set_defaults(fn=cmd_disasm)
     s = sub.add_parser('addr'); s.add_argument('elf'); s.add_argument('pcs', nargs='+'); lim(s); s.set_defaults(fn=cmd_addr)
     s = sub.add_parser('csr'); s.add_argument('name'); s.add_argument('value', nargs='?'); lim(s); s.set_defaults(fn=cmd_csr)
     s = sub.add_parser('raw'); s.add_argument('ref'); lim(s, 40); s.set_defaults(fn=cmd_raw)
