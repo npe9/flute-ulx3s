@@ -6,7 +6,7 @@
 # frame loop: 40-character text lines), title_screen's by their sizes (ROWS, WMAX, 64); the unwinding
 # assertions must hold, so the bounds are proved enough.
 cd "$(dirname "$0")"
-OUT=../../../build/swfv/rules; mkdir -p $OUT
+OUT=${RULES_OUT:-../../../build/swfv/rules}; mkdir -p $OUT   # RULES_OUT: one dir per concurrent run
 # GAME_SRC: another copy of sw/game2d (the mutants); the census and the stubs read it too
 [ -n "$GAME_SRC" ] && { GAME_SRC=$(cd "$GAME_SRC" && pwd); export CENSUS_SRC=$GAME_SRC; }
 python3 ../census.py --check ../census.allow || exit 1
@@ -14,8 +14,8 @@ CHECKS="--bounds-check --pointer-check --pointer-overflow-check --signed-overflo
         --undefined-shift-check --div-by-zero-check --unwinding-assertions"
 SRC=${GAME_SRC:-../../../sw/game2d}; INC="-I $SRC -I ../../../sw/vdp -I $OUT"
 rc=0
-for th in ${@:-BD_NOOP S3_FRAME}; do
-   fam=${th%%_*}; [ $th = BD_NOOP ] && fam=S3
+for th in ${@:-BD_NOOP S3_FRAME HURT_NOOP S2_FRAME}; do
+   fam=${th%%_*}; [ $th = BD_NOOP ] && fam=S3; [ $th = HURT_NOOP ] && fam=S2
    python3 gen_stubs.py $OUT/stubs.h $fam > $OUT/$th.gen.log || { echo "$th: stub generation failed"; rc=1; continue; }
    for v in "" VACUITY; do
       g=$OUT/$th${v:+.vac}.gb

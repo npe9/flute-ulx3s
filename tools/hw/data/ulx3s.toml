@@ -1,0 +1,28 @@
+# Board facts for `hw board` / `hw lab` (tools/hw) that are not derivable from the sources:
+# what is on the board, and which actions are refused.  Pins, clocks and the memory map are read
+# from constraints/, the Makefile and SoC_Map.bsv instead.  No machine-specific facts here (this
+# repo is public): the serial device and lock directory come from the environment (HW_SERIAL,
+# HW_LOCK_DIR) or tools/hw/local.toml (untracked).
+
+[board]
+name = "ULX3S"
+fpga = "Lattice ECP5 LFE5U-85F, CABGA381"
+lpf = "constraints/ulx3s_85f.lpf"
+crystal_hz = 25000000
+sdram = "W9825G6KH, 32 MB"
+loader = "openFPGALoader -b ulx3s"
+
+[flash]
+# Writing flash (and promotion) is the user's decision; hw lab never does it.
+slot0 = "promoted lx49c (seed 3), since 2026-11-23; autoboots native-SD Linux, a UART byte stops it"
+backup = "build/flash_backup"
+
+[restart]
+# The USB hub port does not cut the board's power: a "power cycle" cannot be done from here.
+# A restart is a JTAG refresh (openFPGALoader -r, about 0.2 s), which reloads from flash.
+method = "jtag-refresh"
+
+[readonly]
+# Devices that must never be written, and the test images that would write them.
+devices = ["SD card", "ESP32"]
+images = ["sd_test_w.bin", "sdh_test_w.bin"]

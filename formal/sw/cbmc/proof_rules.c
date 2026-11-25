@@ -8,6 +8,12 @@
 //             and flash, one frame (any buttons) satisfies spec_S3 and keeps I4 and I5 for
 //             them: the fight starts at 32, the boss never heals, loses 1..4 only when not
 //             flashing, a hit starts the flash, and the fight is won exactly at 0 hp
+//   S2_FRAME  from any state of the engine with I1 and I2 (0..5 hearts, none exactly when dead,
+//             0..90 frames of invulnerability), one frame satisfies spec_S2 and keeps I1 and I2:
+//             a stage starts with five hearts, hearts come back only from pickups (one each, up
+//             to five), at most one is lost a frame and only when not invulnerable
+//   HURT_NOOP while invulnerable, player_hurt changes no heart variable (why a stub needs at most
+//             one effective call a frame: nothing a stub reaches counts the invulnerability down)
 //   BD_NOOP   while the boss flashes, boss_damage changes neither hit points nor flash (why a
 //             stub needs at most one call to it a frame: the first effective hit sets the flash,
 //             which proof_frame counts down only after every callee has run)
@@ -52,6 +58,44 @@ int main (void) {
    proof_observe (&post);
    __CPROVER_assert (spec_S3 (&pre, b, &post) == 0, "S3 holds for this frame");
    __CPROVER_assert (i45 (), "I4 and I5 (hit points, flash) hold again");
+   DONE ();
+   return 0;
+}
+#endif
+#if defined S2_FRAME || defined HURT_NOOP
+static int i12 (void) {                          // I1 and I2
+   if (pl_lives < 0 || pl_lives > 5 || (pl_lives == 0) != (pl_dead != 0)) return 0;
+   return pl_hurt >= 0 && pl_hurt <= 90;
+}
+#endif
+#ifdef S2_FRAME
+int main (void) {
+   havoc_nonrule ();
+   __CPROVER_havoc_object (&boss); __CPROVER_havoc_object (&pl_energy);
+   g_state = nd (G_TITLE, G_END); demo = nondet_int (); cur_boss = nd (0, 6); defeated = nondet_int ();
+   pl_lives = nondet_int (); pl_dead = nondet_int (); pl_hurt = nondet_int (); pl_certs = nondet_int ();
+   score = nondet_int (); pl_weapon = nd (0, NWEAPON - 1); pl_owned = nondet_int (); t = nondet_int ();
+   got_hearts = nondet_int (); got_energy = nondet_int ();
+   __CPROVER_assume (i12 ());
+   spec_state pre, post;
+   proof_observe (&pre);
+   uint32_t b = (uint32_t) nondet_int ();
+   proof_frame (b);
+   proof_observe (&post);
+   __CPROVER_assert (spec_S2 (&pre, b, &post) == 0, "S2 holds for this frame");
+   __CPROVER_assert (i12 (), "I1 and I2 (hearts, invulnerability) hold again");
+   DONE ();
+   return 0;
+}
+#endif
+#ifdef HURT_NOOP
+int main (void) {
+   havoc_nonrule ();
+   g_state = nondet_int (); pl_lives = nondet_int (); pl_dead = nondet_int (); pl_hurt = nondet_int ();
+   __CPROVER_assume (i12 () && pl_hurt != 0);
+   int l = pl_lives, d = pl_dead, h = pl_hurt;
+   player_hurt ();
+   __CPROVER_assert (pl_lives == l && pl_dead == d && pl_hurt == h, "player_hurt does nothing while invulnerable");
    DONE ();
    return 0;
 }

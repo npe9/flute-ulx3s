@@ -103,6 +103,7 @@ McCarthy .. Chlipala), with energy costs 0, 1, 2, 4, 7, 2, 1, 3.
 | Clauses | Checked by | Status |
 |---|---|---|
 | N, I, S, W1-W5 | the host oracle: every frame of every host run with `HOST_SPEC=1` (30,000 demo frames; every boss, move (the last lemmas included) and tactic via `PROOF_TEST`, plus the pinch and last-lemma HP pins and the poke, parry and clean-proof hooks: 334 runs of 2,400 frames; random button scripts), and every frame of every fuzz script (`formal/sw/host_trace.c`, fuzz.sh reports `SPEC`) | **tested**: all inputs tried pass; eleven planted engine bugs (one or more per clause family) are each caught (`formal/sw/spec_mutants.sh`) |
+| S2, and I1/I2 (hearts, invulnerability) | `run_rules.sh` S2_FRAME, HURT_NOOP, as for S3 below; three planted bugs (no invulnerability guard, a hit costing two hearts, a heart pickup past five) each fail it | **proved** for one frame under the same assumptions as S3, and that `bullets_update` takes at most one pickup per bullet slot a frame (read from the code) |
 | S3, and I4/I5 for the boss's hit points and flash | `formal/sw/cbmc/run_rules.sh` S3_FRAME: the real `proof_frame` from any engine state where the slice of I4/I5 holds (every global arbitrary except the phase, boss and tactic indexes, which are in range), any buttons, with its callees replaced by stubs generated from the writer census (below); BD_NOOP: `boss_damage` does nothing to a flashing boss; three planted bugs (no flash guard, no fight guard, a win at hp < 0) each fail it (`run_rules_mutants.sh`) | **proved** for one frame, assuming (1) the census is complete (a syntactic analysis of the AST, itself checked against an allow-list), and (2) the frame has no undefined behaviour: CBMC models a signed overflow as wrapping and does not model an out-of-bounds write landing on the boss, and from arbitrary states its checks fail on 19 signed overflows (counters and positions near INT_MAX), 5 bodyless sound calls and `moves[cur_boss]` in the observation; that the real ranges avoid them is tested (`formal/sw/ubsan.sh`: the demo, the button scripts and the 123-run fight matrix under UBSan and ASan, 130 runs clean), not proved.  Loop bounds are proved enough (unwinding assertions) |
 | V1 | `HOST_OVERFLOW=2` on the same runs (the VDP reference model's per-line count) | **tested** |
 | V2 | the host oracle: the flush counts its writes by kind, and host.c checks that every VDP write of the frame is one of them | **tested**; a planted write outside the flush is caught |
@@ -141,19 +142,33 @@ and W3 holds after every frame.
      `spec_W45`), so a proof can assert a single clause in the spec's own words.
    - Each family is then proved on the real `proof_frame` (`formal/sw/cbmc/proof_rules.c`,
      `run_rules.sh`).  `gen_stubs.py` replaces each callee with a stub that havocs every global
-     that is not a rule variable, sets each rule variable it may write to anything (or, when all
+     that is not a rule variable and that the callee may write (the census records the writers of
+     every file-scope variable; one whose address escapes, by `&` or as an array passed as a
+     pointer, is havocked by every stub; any field of `boss` the callee may write lets it change
+     all the boss's non-rule fields), sets each rule variable it may write to anything (or, when all
      its writers store constants, to one of those constants), leaves the family's variables to
      the real writer (a stub that may reach `boss_damage` calls it once with 1..4: BD_NOOP shows
      a second call in the frame would do nothing, since the flash it sets is counted down only
      after every callee), and returns any value.  A few callees stay real because a stub would
      lose a correlation the family needs (`next_demo` and `title_screen` clear the boss only
      together with going to the title); their own callees are stubbed in turn.
-   - **S3 is proved this way** (about four minutes of CBMC).  The first attempts found two
+   - **S3 is proved this way** (about two minutes of CBMC).  The first attempts found two
      things a stub may do that the real code never does: a shot hits the boss only in a fight,
      and the title clears the boss only with the state.  The first is now `boss_damage`'s own
      precondition (it returns unless the fight's boss is live and not flashing, which every
      caller already ensured; device-write traces are byte-identical before and after on the demo
      and on random button scripts), so the proof does not depend on the shot code's context.
-   - Next: S2 (hearts: `player_hurt`, the pickups, start_stage) and W4/W5 (energy), the same way.
+   - **S2 is proved the same way** (about ten minutes), with I1 and I2 (hearts 0..5, none exactly
+     when dead, invulnerability 0..90).  Its writers are `player_hurt`, `pickup_update`,
+     `player_update` (the countdown) and `start_stage`; the last two stay real.  A stub that may
+     hurt calls `player_hurt` once (HURT_NOOP: while invulnerable it does nothing, and only the
+     real `player_update` counts invulnerability down); the stub of `bullets_update` takes a
+     pickup or a hurt per bullet slot, in any order (that the real loop calls `pickup_update`
+     at most once per slot is read from the code, not checked).  The first attempt failed on a
+     stub artifact: stubs then havocked every non-rule global, so after a button had interrupted
+     the demo and `title_screen` had reset the timer, the stubs of `owned_update` and `pilot`
+     could set it past 20 and start a stage in the same frame.  Stubs now havoc only what the
+     census says their callee writes.
+   - Next: W4/W5 (energy), the same way.
 2. **The binary**: B2 makes the binary's behaviour equal the host build's on every fuzzed script;
    a proof needs tier 3 (the binary against Sail) for the whole frame, or a verified compiler.

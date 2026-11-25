@@ -150,6 +150,13 @@ python3 scripts/loader.py sw/hello.bin -p /dev/cu.usbserial-XXXX -t 10
 `scripts/loader.py` waits for the bootloader banner, sends the kernel address and
 byte count, streams the file, then relays anything the loaded program prints.
 
+For agents, `tools/hw/` answers board questions and drives the board with short, structured
+results (the `board` and `lab` areas of the hwsh shell; `notes/hw-shell.md`):
+`board.py pins NAME`, `clock`, `map ADDR`, `state` read the constraints, Makefile and SoC map;
+`lab.py restart` (JTAG refresh), `load BIT` (SRAM only), `serial --until RE` and `lock` act on
+the board under the machine's shared ULX3S lease lock.  `lab.py` never writes flash and cannot
+power-cycle the board; it refuses both with an error record saying what to do instead.
+
 ## TempleOS HolyC monitor
 
 The `templeos/` directory builds a tiny bare-metal monitor from HolyC using the
@@ -819,9 +826,9 @@ its engine is tested, not proved. The game itself is written down as a specifica
 power-on, invariants, and what one frame may change -- hearts, the boss's hit points, the phase
 graph, discharged bosses, score, camera, tactics); every host run with `HOST_SPEC=1` and every fuzz
 script checks it on every frame, and `formal/sw/spec_mutants.sh` plants eleven engine bugs it must
-catch (one makes a VDP write outside the vertical-blank flush). The boss's hit-point clause (S3) is proved for one
+catch (one makes a VDP write outside the vertical-blank flush). The hearts clause (S2) and the boss's hit-point clause (S3) are proved for one
 frame of the real engine from any state (`formal/sw/cbmc/run_rules.sh`, CBMC, with callees stubbed
-from a writer census of the AST, `formal/sw/census.py`), and three planted bugs fail that proof; it assumes the frame has no undefined behaviour, which is tested, not proved. Each tier has planted bugs it must catch
+from a writer census of the AST, `formal/sw/census.py`), and six planted bugs (three each) fail those proofs; it assumes the frame has no undefined behaviour, which is tested, not proved. Each tier has planted bugs it must catch
 (`mutants.sh`). Tier 3 (`formal/sw/rocq/build.sh`, proved) checks the binary itself in Rocq against Sail's RV32
 model generated as Rocq: so far, that the compiled `hw_palette` writes exactly one word at
 `0xC0010400 + 4·index` for every index, in any machine state, without a trap (with the data and

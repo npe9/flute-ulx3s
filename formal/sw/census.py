@@ -46,6 +46,17 @@ def base_name(e):
             return n if n in VARS else None
         return None
 
+# every file-scope variable: the functions that write it (ALLW), and the ones whose address
+# escapes (ESC: taken with &, or an array passed as a pointer), which a pointer may write anywhere
+GLOBAL_IDS, ALLW, ESC = {}, {}, set()
+def root_global(e):
+    while True:
+        e = strip(e); k = e.get('kind')
+        if k in ('ArraySubscriptExpr', 'MemberExpr'):
+            if k == 'MemberExpr' and e.get('isArrow'): return None     # through a pointer: see ESC
+            e = e['inner'][0]; continue
+        if k == 'DeclRefExpr' and e['referencedDecl'].get('id') in GLOBAL_IDS: return GLOBAL_IDS[e['referencedDecl']['id']]
+        return None
 CONSTW = {}                               # (variable, function) -> the constants written, or None
 CALLS, ADDR_FN, ARGS = {}, set(), {}      # caller -> callees; functions whose address is taken
 RECID = {}
@@ -103,6 +114,15 @@ def walk(node, fn, found):
         v = base_name(node['inner'][0])
         if v: found.setdefault(v, set()).add((fn or '<file scope>') + '(&)')
     if lhs is not None:
+        g = root_global(lhs)
+        if g: ALLW.setdefault(g, set()).add(fn or '<file scope>')
+    if k == 'UnaryOperator' and node.get('opcode') == '&':
+        g = root_global(node['inner'][0])
+        if g: ESC.add(g)
+    if k == 'ImplicitCastExpr' and node.get('castKind') == 'ArrayToPointerDecay' and not node.get('_subscript'):
+        g = root_global(node['inner'][0])
+        if g: ESC.add(g)
+    if lhs is not None:
         v = base_name(lhs)
         if v and v != 'boss':                           # what is written: a constant (a literal, an
             rhs = strip(node['inner'][1]) if k == 'BinaryOperator' and node['opcode'] == '=' else None
@@ -128,7 +148,11 @@ def walk(node, fn, found):
         if isinstance(c, dict): walk(c, fn, found)
 
 found = {}
-for f in FILES: walk(ast(f), None, found)
+for f in FILES:
+    tu = ast(f)
+    for n in tu.get('inner', []):
+        if n.get('kind') == 'VarDecl': GLOBAL_IDS[n['id']] = n['name']
+    walk(tu, None, found)
 lines = ['%s: %s' % (v, ' '.join(sorted(found.get(v, ())))) for v in VARS + ['boss.' + f for f in BOSS_FIELDS]]
 # the call graph: a function may write v if it writes v or may call one that does; an indirect
 # call may reach any function whose address is taken

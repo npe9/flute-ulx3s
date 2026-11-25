@@ -16,5 +16,8 @@ open(p,'w').write(s.replace(a, os.environ['TO']))" || { echo "$1: ANCHOR MISSING
 m flash_guard S3_FRAME "|| !boss.on || boss.flash) return;" "|| !boss.on) return;"
 m fight_guard S3_FRAME "if (g_state != G_FIGHT || !boss.on || boss.flash) return;" "if (!boss.on || boss.flash) return;"
 m win_late    S3_FRAME "      if (boss.hp <= 0) {" "      if (boss.hp < 0) {"
+m hurt_guard  S2_FRAME "if (pl_hurt || pl_dead || g_state == G_WIN) return;" "if (pl_dead || g_state == G_WIN) return;"
+m double_hurt S2_FRAME "pl_lives--; pl_hurt = 90;" "pl_lives -= 2; if (pl_lives < 0) pl_lives = 0; pl_hurt = 90;"
+m heart_cap   S2_FRAME "if (pl_lives < 5) pl_lives++;" "pl_lives++;"
 echo "rule mutants: $caught of $n caught"
 [ $caught = $n ]
