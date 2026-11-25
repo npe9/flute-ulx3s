@@ -764,7 +764,23 @@ invariant, a CSP rendezvous that deadlocks; a TLC-style breadth-first state sear
 liveness, logical clocks, Paxos; proof-carrying code, step-indexed models, VST's no use after
 free; progress and preservation, LF derivations, "well-typed programs do not go wrong",
 computational trinitarianism; `crush`, Bedrock footprints, Fiat-style carry limbs mod 99999, a
-Kami pipeline replaying its spec (the table is in the notes). Six bosses are 32x32 caricatures
+Kami pipeline replaying its spec (the table is in the notes). A fight borrows the shape of
+bullet-hell and run-and-gun bosses, mechanics only:
+
+- the boss bar fills during the intro;
+- at half HP a pinch speeds the boss up;
+- at a quarter HP each boss plays a last lemma: McCarthy's eval/apply, Dijkstra's dining
+  philosophers, a Hoare monitor, Lamport's Byzantine generals OM(1), Appel's trampolined tail
+  calls, Harper's polarity shifts, or Chlipala's proof by reflection;
+- big attacks are telegraphed;
+- a move survived without a hit is a "CLEAN PROOF" (+500);
+- BLUE shots hurt only if you move (safety) and ORANGE shots only if you stand still (liveness);
+- PINK shots are proved and can be parried for a proof certificate.
+
+Lamport's Paxos is the real single-decree protocol (`px_*`: ballots, prepare/promise/accept/accepted
+over three acceptors, two proposers).  Your lemmas drop its messages or crash acceptors.  Its
+agreement holds in 1,000,000 random schedules (`sw/game2d/proof_paxos_test.sh`, tested, not yet
+proved).  Six bosses are 32x32 caricatures
 drawn from Wikimedia Commons photographs (`sw/game2d/portraits.py`; each sprite carries its
 photo's licence, listed in `proof_portraits.c` and the notes); Adam Chlipala, with no free photo,
 stays an original emblem figure. A defeat is "Q.E.D.". Both titles play themselves when idle (an attract

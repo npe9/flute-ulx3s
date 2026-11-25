@@ -290,6 +290,65 @@ static const char *const cursor_img [16] = {
 
 static void put_rows (int n, const char *const rows [16]) { g16_rows (rows); g16_put (n); }
 
+// ---- the boss framework's sprites, tiles 768-831 (T_BLOCK ... in proof_int.h) and their banks
+// 14-15: blue bullets are a pause sign (stand still), orange ones a play sign (keep moving), pink
+// ones a diamond drawn in nibbles 4-6 of bank 15 (parry it)
+static void make_mode_sprites (void) {
+   g16_clear ();                                   // T_BLOCK: a rounded square, a pause sign
+   for (int r = 2; r < 14; r++) for (int c = 2; c < 14; c++)
+      if (!((r == 2 || r == 13) && (c == 2 || c == 13))) g16 [r][c] = (uint8_t) (r == 2 || r == 13 || c == 2 || c == 13 ? 1 : 2);
+   for (int r = 5; r < 11; r++) { g16 [r][6] = g16 [r][9] = 3; }
+   g16_put (T_BLOCK);
+   g16_clear ();                                   // T_CHEV: a play sign (points right)
+   for (int r = 2; r < 14; r++) {
+      int w = r < 8 ? r - 2 : 13 - r;
+      for (int c = 3; c <= 3 + 2 * w && c < 15; c++) g16 [r][c] = (uint8_t) (c == 3 || c == 3 + 2 * w || r == 2 || r == 13 ? 1 : (r == 7 || r == 8) && c < 2 + 2 * w ? 3 : 2);
+   }
+   g16_put (T_CHEV);
+   g16_clear ();                                   // T_PINK: a diamond, nibbles 4-6
+   for (int r = 0; r < 16; r++) for (int c = 0; c < 16; c++) {
+      int d = iabs (2 * r + 1 - 16) + iabs (2 * c + 1 - 16);
+      if (d <= 13) g16 [r][c] = (uint8_t) (d > 10 ? 4 : d < 4 ? 6 : 5);
+   }
+   g16_put (T_PINK);
+   g16_clear ();                                   // T_RING: a dashed warning ring with a !
+   for (int r = 0; r < 16; r++) for (int c = 0; c < 16; c++) {
+      int dx = 2 * c + 1 - 16, dy = 2 * r + 1 - 16, d = dx * dx + dy * dy;
+      if (d >= 4 * 36 && d <= 4 * 56 && ((r + c) & 2)) g16 [r][c] = 3;
+   }
+   for (int r = 4; r < 12; r++) if (r != 9) g16 [r][7] = g16 [r][8] = 3;
+   g16_put (T_RING);
+   g16_clear ();                                   // T_FORK
+   for (int r = 1; r < 15; r++) { g16 [r][7] = 2; g16 [r][8] = 1; }
+   for (int c = 4; c < 12; c++) g16 [6][c] = 1;
+   for (int r = 1; r < 6; r++) { g16 [r][4] = 2; g16 [r][11] = 2; }
+   g16_put (T_FORK);
+   g16_clear (); g16_disc (16, 16, 7, 1, 2, 0);   // T_PHIL: a philosopher, thinking
+   g16 [6][5] = g16 [6][10] = 1; for (int c = 6; c < 10; c++) g16 [10][c] = 1;
+   g16 [3][7] = g16 [3][8] = 3;
+   g16_put (T_PHIL);
+   g16_clear ();                                   // T_MIRROR: a tall glass
+   for (int r = 0; r < 16; r++) { g16 [r][5] = 1; g16 [r][6] = 3; g16 [r][7] = 2; g16 [r][8] = 2; g16 [r][9] = 3; g16 [r][10] = 1; }
+   for (int r = 2; r < 14; r += 4) g16 [r][7] = 3;
+   g16_put (T_MIRROR);
+   g16_clear ();                                   // T_TRAMP: a trampoline
+   for (int c = 0; c < 16; c++) { g16 [9][c] = 1; g16 [10][c] = 3; g16 [11][c] = 1; }
+   for (int r = 12; r < 16; r++) { g16 [r][2] = 2; g16 [r][13] = 2; }
+   g16_put (T_TRAMP);
+   for (int k = 0; k < 2; k++) {                   // T_POS, T_NEG: polarized orbs
+      g16_clear (); g16_disc (16, 16, 6, 1, 2, 0);
+      for (int c = 5; c < 11; c++) g16 [7][c] = g16 [8][c] = 3;
+      if (k == 0) for (int r = 5; r < 11; r++) g16 [r][7] = g16 [r][8] = 3;
+      g16_put (k ? T_NEG : T_POS);
+   }
+   g16_clear (); g16_put (T_BLANK);                // T_BLANK: nothing (a blinking warning's off phase)
+}
+static void mode_palettes (void) {
+   static const uint32_t blue [] = { 0x10106A, 0x2848FF, 0xF0F4FF };
+   static const uint32_t mode [] = { 0x803000, 0xFF8418, 0xFFE860, 0x80104A, 0xFF5CC8, 0xFFFFFF };
+   bank_set (B_BLUE, blue, 3); bank_set (B_MODE, mode, 6);
+}
+
 static void make_sprites (void) {
    for (int f = 0; f < 4; f++) {
       g16_rows (player_img);
@@ -332,6 +391,7 @@ static void make_sprites (void) {
    g16_clear (); for (int k = 0; k < 8; k++) { uint32_t r = rnd (); g16_disc ((int) (r % 20) + 6, (int) ((r >> 8) % 20) + 6, 3, 1, 2, 0); } g16_put (T_PUFF);
    put_rows (T_GHOST, ghost_img);
    put_rows (T_CURSOR, cursor_img);
+   make_mode_sprites ();
 }
 
 // ---- the bosses: a robed figure with the boss's emblem on the chest (not a likeness)
@@ -488,7 +548,7 @@ int bullet_new (int k, int x, int y, int vx, int vy, int tile, int bnk) {
       if (!bul [i].on) {
          bullet *b = &bul [i];
          b->on = 1; b->x = x; b->y = y; b->vx = vx; b->vy = vy; b->kind = k; b->t = 0;
-         b->a = b->b = b->c = 0; b->tile = tile; b->bank = bnk; b->flags = 0; b->harm = 4;
+         b->a = b->b = b->c = 0; b->tile = tile; b->bank = bnk; b->flags = 0; b->harm = 4; b->mode = M_NORMAL;
          return i;
       }
    return -1;
@@ -523,13 +583,15 @@ static int g_timer;
 // host test hook (never in the board build): PROOF_TEST=<boss>,<move> starts the demo pilot at
 // that boss's arena, invulnerable, with the fight opening on that move
 #include <stdlib.h>
-static int test_boss = -1, test_move;
+static int test_boss = -1, test_move, test_hp, test_clean, test_parry;
 #endif
+static int move_hit;                  // the player was hit during this boss move (no clean proof)
 void player_hurt (void) {
 #ifdef PROOF_TEST
-   if (test_boss >= 0) return;
+   if (test_boss >= 0) { if (!test_clean) move_hit = 1; return; }
 #endif
    if (pl_hurt || pl_dead || g_state == G_WIN) return;
+   move_hit = 1;
    pl_lives--; pl_hurt = 90; psnd_hurt ();
    if (pl_lives <= 0) pl_dead = 1;
 }
@@ -615,6 +677,10 @@ static void shots_update (void) {
    }
 }
 
+// the player's motion this frame (G_FIGHT sets them around player_update): moved, and the parry
+// window (frames left after UP was newly pressed in the air)
+static int pl_moved, pl_parry;
+void player_bounce (int vy) { pl_vy = vy; pl_ground = 0; }
 static void bullets_update (void) {
    for (int i = 0; i < NBUL; i++) {
       bullet *b = &bul [i];
@@ -623,10 +689,22 @@ static void bullets_update (void) {
       if (b->kind == 0) { b->x += b->vx; b->y += b->vy; if (bullet_solid (b) && b->t > 4) b->on = 0; }
       else if (b->kind == 1) { b->vy += 4; b->x += b->vx; b->y += b->vy; if (bullet_solid (b)) b->on = 0; }
       else if (b->kind == 2) { if (b->t > 16) b->on = 0; }
+      else if (b->kind == 3) { b->harm = 0; b->tile = (b->t & 4) ? T_RING : T_BLANK; if (b->t > b->a) b->on = 0; }
+      else if (b->kind == 4) { b->x += b->vx; b->y += b->vy; }
       int x = b->x >> 4, y = b->y >> 4;
       if (x < cam - 48 || x > cam + 360 || y > 8 * ROWS + 16 || y < -96) { b->on = 0; continue; }
-      if (b->harm && !pl_dead && overlap (pl_x + 3, pl_y + 2, 10, 14, x + 8 - b->harm, y + 8 - b->harm, 2 * b->harm, 2 * b->harm))
-         player_hurt ();
+      if (!b->harm || pl_dead || !overlap (pl_x + 3, pl_y + 2, 10, 14, x + 8 - b->harm, y + 8 - b->harm, 2 * b->harm, 2 * b->harm)) continue;
+      if (b->mode == M_BLUE && !pl_moved) continue;          // still: nothing bad happens
+      if (b->mode == M_ORANGE && pl_moved) continue;         // moving: progress is made
+      if (b->mode == M_PINK && pl_parry) {                   // parried: a proof certificate
+         b->kind = 2; b->t = 0; b->harm = 0; b->mode = M_NORMAL; b->tile = T_SPARK; b->bank = B_MODE;
+         pl_parry = 0; pl_certs++; score += 50; player_bounce (-70); psnd_cue ();
+#ifdef PROOF_TEST
+         printf ("parry: frame %u certs %d\n", t, pl_certs);
+#endif
+         continue;
+      }
+      player_hurt ();
    }
 }
 static void minions_update (void) {
@@ -652,15 +730,29 @@ static void minions_update (void) {
 // ================================================================ the boss's framework
 void boss_damage (int n) {
    if (boss.flash) return;
+#ifdef PROOF_TEST
+   if (test_hp > 0 && boss.hp - n < test_hp) n = boss.hp - test_hp;    // PROOF_HP pins the phase
+#endif
    boss.hp -= n; boss.flash = 14; score += 10 * n;
    psnd_boss_hit ();
 }
 void boss_cue (const char *s) { arena_text (3, s); psnd_cue (); }
+static int fight_rest, fight_pinch, fight_banner;
+void boss_banner (const char *s) { arena_text (2, s); fight_banner = 150; psnd_cue (); }
+// a boss move ended: if it did not hit the player, that was a clean proof (+500, a short rest)
+void boss_move_end (void) {
+#ifdef PROOF_TEST
+   printf ("move end: frame %u boss %d move %d hp %d clean %d certs %d\n", t, cur_boss, boss.attack, boss.hp, !move_hit, pl_certs);
+#endif
+   if (!move_hit && boss.hp > 0) { score += 500; arena_text (7, "CLEAN PROOF +500"); fight_rest = 50; }
+   move_hit = 0;
+}
 static void boss_bar (void) {
    int a = arena_x >> 3;
    text_c0 = a;
    text_rows [1] = 1;
    int cells = (boss.hp * 20 + BOSS_HP - 1) / BOSS_HP;
+   if (g_state == G_FIGHT && g_timer <= 60 && cells > g_timer / 3) cells = g_timer / 3;   // the intro fills it
    for (int i = 0; i < 20; i++)
       plane_set (a + 10 + i, 1, vdp_map_entry (i < cells ? BT_BAR : BT_BAREMPTY, B_HUD, 0, 0));
 }
@@ -785,6 +877,7 @@ void proof_init (void) {
    bank_set (B_ENEMY, enemy, 4); bank_set (B_SHOT, shot, 3); bank_set (B_BUL, b1, 3);
    bank_set (B_BUL2, b2, 3); bank_set (B_PROP, prop, 5); bank_set (B_SKY, sky, 2);
    bank_set (B_COLOR, col, 5);
+   mode_palettes ();
    psnd_init ();
    hw_vdp_write (VDP_BACKDROP, 1);
    for (int i = 0; i < 128; i++) { spr_sh [i] = 0; spr_hw [i] = 0xFFFFFFFFu; }
@@ -794,6 +887,9 @@ void proof_init (void) {
 #ifdef PROOF_TEST
    if (getenv ("PROOF_TEST")) {
       sscanf (getenv ("PROOF_TEST"), "%d,%d", &test_boss, &test_move);
+      if (getenv ("PROOF_HP")) test_hp = atoi (getenv ("PROOF_HP"));       // start (and stay) at this HP
+      test_clean = getenv ("PROOF_CLEAN") != NULL;          // test hits do not spoil a clean proof
+      test_parry = getenv ("PROOF_PARRY") != NULL;          // parry every pink shot that comes near
       demo_boss = test_boss;
       start_stage (test_boss);
       pl_x = spawn_x = arena_x - 16; pl_fx = pl_x << 4; pl_fy = pl_y << 4; player_bump_up ();
@@ -915,21 +1011,41 @@ int proof_frame (uint32_t buttons) {
             boss.on = 1; boss.hp = BOSS_HP; boss.flash = 0; boss.frame = 0; boss.hidden = 0;
             boss.timer = 0; boss.attack = 0; boss.cycle = 0; boss.phase = 0; boss.stun = 0; boss.shield = 0;
             for (int i = 0; i < 8; i++) boss.a [i] = 0;
+            boss.resume = 0; move_hit = 0; fight_rest = 0; fight_pinch = 0; fight_banner = 0; pl_parry = 0;
             boss.x = arena_x + 8 * 30; boss.y = 8 * FLOOR - 32;
             arena_text (0, bosses [cur_boss].name);
 #ifdef PROOF_TEST
             if (test_boss >= 0) boss.attack = test_move;
+            if (test_hp > 0) boss.hp = test_hp;
 #endif
             g_state = G_FIGHT; g_timer = 0;
             psnd_tune (cur_boss);
          }
       }
       break;
-   case G_FIGHT:
+   case G_FIGHT: {
+      int x0 = pl_x, y0 = pl_y, air = !pl_ground, up = (buttons & BTN_UP) && !(pl_prev & BTN_UP);
       player_update (buttons);
-      if (g_timer > 60) bosses [cur_boss].update ();
+      pl_moved = pl_x != x0 || pl_y != y0;                  // for the blue and orange bullets
+      if (pl_parry) pl_parry--;
+      if (up && air) pl_parry = 8;                           // UP newly pressed in the air
+#ifdef PROOF_TEST
+      if (test_parry)                                        // host only: parry every pink shot
+         for (int i = 0; i < NBUL; i++)
+            if (bul [i].on && bul [i].mode == M_PINK && iabs ((bul [i].x >> 4) - pl_x) < 14 && iabs ((bul [i].y >> 4) - pl_y) < 14) pl_parry = 1;
+#endif
+      if (g_timer > 60) {
+         if (fight_rest) { if (--fight_rest == 0) arena_clear_text (7); }   // after a clean proof
+         else {
+            bosses [cur_boss].update ();
+            if (boss.hp > 0 && boss.hp <= BOSS_HP / 2 && (g_timer & 3) == 0 && !fight_rest) bosses [cur_boss].update ();   // the pinch: 5 a 4 frames
+         }
+         if (!fight_pinch && boss.hp > 0 && boss.hp <= BOSS_HP / 2) { fight_pinch = 1; boss_banner (boss_pinch [cur_boss]); }
+         if (fight_banner && --fight_banner == 0) arena_clear_text (2);
+      }
       else if (g_timer == 2) arena_text (3, bosses [cur_boss].field);
       else if (g_timer == 60) arena_clear_text (3);
+      else if (g_timer % 6 == 0) psnd_tink ();               // the bar fills
       shots_update (); minions_update (); bullets_update ();
       if (boss.flash) boss.flash--;
       if (boss.on && !boss.hidden && !pl_dead && overlap (pl_x + 3, pl_y + 2, 10, 14, boss.x + 6, boss.y + 4, 20, 28)) player_hurt ();
@@ -945,6 +1061,7 @@ int proof_frame (uint32_t buttons) {
          if (!demo) defeated |= 1 << cur_boss;
       }
       break;
+   }
    case G_WIN:
       player_update (buttons & ~BTN_FIRE2);
       if (g_timer > 240) {

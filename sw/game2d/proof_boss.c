@@ -79,10 +79,28 @@ static void floor_restore (void) { for (int r = FLOOR; r < ROWS; r++) abrick (1,
 static void cue (const char *s) { boss_cue (s); boss.frame = 1; }
 static void say (const char *s) { arena_text (5, s); }
 static void note (const char *s) { arena_text (7, s); }
+// a boss has n regular moves (0 .. n-1) and a desperation move, number n: at HP <= BOSS_HP / 4
+// it alternates with the others (it is entered at a move boundary, so no move is cut short)
 static void next_move (int n) {
-   boss.attack = (boss.attack + 1) % n; boss.timer = -1; boss.phase = 0; boss.frame = 0; boss.shield = 0;
-   arena_clear_text (3); arena_clear_text (5); arena_clear_text (7);
+   arena_clear_text (3); arena_clear_text (5); arena_clear_text (6); arena_clear_text (7);
+   boss_move_end ();                                        // the clean-proof bonus (proof.c)
+   int nx = boss.attack >= n ? boss.resume % n : (boss.attack + 1) % n;
+   if (boss.hp <= BOSS_HP / 4 && boss.attack < n) { boss.resume = nx; nx = n; boss_banner ("THE LAST LEMMA"); }
+   boss.attack = nx; boss.timer = -1; boss.phase = 0; boss.frame = 0; boss.shield = 0; boss.stun = 0;
    for (int i = 0; i < NPROP; i++) props [i].on = 0;
+   for (int i = 0; i < NBUL; i++)                           // the move's own bullets end with it
+      if (bul [i].on && bul [i].kind >= 5) { bul [i].kind = 2; bul [i].t = 0; bul [i].harm = 0; bul [i].mode = M_NORMAL; bul [i].tile = T_PUFF; bul [i].bank = B_BUL2; }
+}
+// bullet modes: blue (hurts only if you move), orange (only if you stand still), pink (parry it)
+static int mode_set (int k, int m) {
+   if (k < 0) return k;
+   bul [k].mode = m; bul [k].bank = m == M_BLUE ? B_BLUE : B_MODE;
+   if (m == M_PINK) bul [k].tile = T_PINK;
+   return k;
+}
+static void warn_at (int x, int y, int frames) {             // a telegraph: a blinking ring at (x, y)
+   int k = bullet_new (3, (x - 8) * SUB, (y - 8) * SUB, 0, 0, T_RING, B_MODE);
+   if (k >= 0) { bul [k].a = frames; bul [k].harm = 0; }
 }
 static void tick (void) {
    boss.timer++;
@@ -92,7 +110,9 @@ static void tick (void) {
 }
 static int all_hit (int x, int y) { (void) x; (void) y; return 1; }
 static int no_other (int x, int y) { (void) x; (void) y; return 0; }
-static int open_hits (int x, int y) { (void) x; (void) y; return !boss.shield || boss.stun; }
+// a shield stops plain lemmas; a stunned boss, or a lemma carrying a proof certificate (a parried
+// pink shot, or one of Appel's), gets through: a proof is checked, not argued with
+static int open_hits (int x, int y) { (void) x; (void) y; return !boss.shield || boss.stun || shot_proved; }
 
 // a floor roller: rolls along the ground, falls off edges (kind 31)
 static void rollers (void) {
@@ -151,6 +171,17 @@ static void mc_show_stack (void) {
       if (i < mc_sp) prop_set (2 + i, AX (19), AY (13) - 16 * i, digit (mc_st [i]), B_TEXT);
    }
 }
+// the trace of (FACT n) through McCarthy's eval and apply: pass k goes from EVAL (0) or APPLY (1)
+// to the other, at call depth ea_lane [k], carrying ea_lab [k] (the argument, or a value)
+static int ea_n, ea_from [16], ea_lane [16], ea_lab [16];
+static void ea_pass (int from, int depth, int lab) { if (ea_n < 16) { ea_from [ea_n] = from; ea_lane [ea_n] = depth; ea_lab [ea_n] = lab; ea_n++; } }
+static void ea_trace (int n) {
+   ea_n = 0;
+   for (int d = 0; d <= n; d++) { ea_pass (0, d, n - d); ea_pass (1, d, n - d); }   // apply FACT, eval its body
+   int r = 1;                                                // at depth n, (= N 0): the value 1
+   for (int d = n - 1; d >= 0; d--) { ea_pass (0, d, n - d); r *= n - d; ea_pass (1, d, r); }   // apply *, return
+}
+static int ea_y (int depth) { return AY (FLOOR) - 16 - 30 * (3 - depth); }   // the deepest call skims the floor
 static void mc_update (void) {
    int tt = boss.timer;
    if (boss.a [7] == 0) { boss.a [7] = 1; boss.a [6] = 2; boss.x = AX (mc_spot [2][0]); boss.y = AY (mc_spot [2][1]) - 32; }
@@ -179,6 +210,7 @@ static void mc_update (void) {
          }
          mc_step (); mc_show_stack ();
       }
+      if (tt == 230) { warn_at (bcx (), boss.y - 10, 30); boss.frame = 1; }   // the telegraph
       if (tt == 260) {                                         // the machine's answer is the meaning
          static char line [40] = "RUN = EVAL = ";
          char *p = num (line + 13, mc_st [0]); *p = 0;
@@ -188,6 +220,7 @@ static void mc_update (void) {
             int a = 24 + (k * 16) / (v > 1 ? v - 1 : 1);
             int j = bullet_new (0, (bcx () - 8) << 4, (bcy () - 8 - 2 * k) << 4, cosv (a) * 40 >> 6, -(sinv (a) * 40 >> 6), T_ORB, B_BUL);
             if (j >= 0) bul [j].harm = 5;
+            if (k == v / 2) mode_set (j, M_PINK);             // the answer, proved: parry it
          }
       }
       if (tt > 330) next_move (3);
@@ -222,7 +255,7 @@ static void mc_update (void) {
       if (tt > 380) next_move (3);
       break;
    }
-   default: {                                                 // amb: two candidates, the angel chooses
+   case 2: {                                                  // amb: two candidates, the angel chooses
       if (tt == 0) {
          int s = boss.a [6], c1 = (s + 1) % 3, c2 = (s + 2) % 3;
          boss.a [1] = c1; boss.a [2] = c2;
@@ -242,7 +275,42 @@ static void mc_update (void) {
       }
       if (tt > 70) next_move (3);
       break;
-   } }
+   }
+   case 3: {                                                  // the last lemma: eval and apply
+      // McCarthy's LISP evaluator is two functions that call each other: eval of a combination
+      // applies its operator, and applying a defined function evaluates its body.  The trace of
+      // (FACT 3): each call is a pass between EVAL (left) and APPLY (right); deeper calls fly
+      // lower, returns carry the values back up, the last one the answer.
+      if (tt == 0) {
+         cue ("EVAL AND APPLY: (FACT 3)");
+         say ("EVAL CALLS APPLY CALLS EVAL, EVER LOWER");
+         arena_text (6, " EVAL                            APPLY  ");
+         ea_trace (3);
+      }
+      int k = (tt - 40) / 34, at = (tt - 40) % 34;
+      if (tt >= 16 && (tt - 16) % 34 == 0 && (tt - 16) / 34 < ea_n) {   // the telegraph and the station
+         int e = (tt - 16) / 34, y = ea_y (ea_lane [e]);
+         warn_at (ea_from [e] ? AX (37) + 8 : AX (1) + 8, y + 8, 24);
+         prop_set (ea_from [e], ea_from [e] ? AX (37) : AX (1), y, ea_from [e] ? T_PAREN_R : T_PAREN_L, B_TEXT);
+      }
+      if (tt >= 40 && at == 0 && k < ea_n) {                   // the pass
+         int f = ea_from [k], j = bullet_new (4, (f ? AX (37) : AX (1)) * SUB, ea_y (ea_lane [k]) * SUB, f ? -72 : 72, 0, digit (ea_lab [k]), f ? B_BUL2 : B_BUL);
+         if (j >= 0) bul [j].harm = 6;
+         if (k == ea_n - 1) mode_set (j, M_PINK);              // the answer comes home: parry it
+         static char line [40] = "DEPTH 0: APPLY FACT TO 0";
+         line [6] = (char) ('0' + ea_lane [k]);
+         const char *w = k < 8 ? (f ? "EVAL THE BODY, N =" : "APPLY FACT TO") : (f ? "RETURN" : "APPLY * TO");
+         char *p = line + 9; while (*w) *p++ = *w++;
+         *p++ = ' '; p = num (p, ea_lab [k]); *p = 0;
+         note (line);
+      }
+      if (tt % 90 == 45) fire_at_player (bcx (), bcy (), 30, T_ORB, B_BUL);
+      if (tt == 40 + 34 * ea_n + 40) note ("(FACT 3) = 6: EVAL AND APPLY AGREE");
+      if (tt > 40 + 34 * ea_n + 110) next_move (3);
+      break;
+   }
+   default: next_move (3); break;
+   }
    tick ();
 }
 
@@ -264,6 +332,37 @@ void ss_move (int i) { if (i == 0) ss_x [0] = (ss_x [0] + 1) % SS_K; else ss_x [
 static const int ss_pos [SS_N][2] = { { 3, 16 }, { 9, 9 }, { 30, 9 }, { 36, 16 }, { 19, 22 } };
 static void ss_show (void) {
    for (int i = 0; i < SS_N; i++) prop_set (i, AX (ss_pos [i][0]), AY (ss_pos [i][1]), digit (ss_x [i]), ss_priv (i) ? B_SHOT : B_TEXT);
+}
+// the dining philosophers (Dijkstra, EWD310, 1971): five philosophers round a table and a fork
+// between each two; philosopher i takes fork i (the left), then fork i+1 (the right), eats and puts
+// both down.  If every one holds a left fork, every one waits for a right: a circular wait, deadlock.
+#define DP_N 5
+enum { DP_THINK, DP_HUNGRY, DP_LEFT, DP_EAT };
+static int dp_st [DP_N], dp_fork [DP_N], dp_w [DP_N];  // state; each fork's holder (-1: on the table); a delay
+static void dp_step (int i) {
+   int l = i, r = (i + 1) % DP_N;
+   switch (dp_st [i]) {
+   case DP_THINK: if (rnd () % 6 == 0) dp_st [i] = DP_HUNGRY; break;
+   case DP_HUNGRY: if (dp_fork [l] < 0) { dp_fork [l] = i; dp_st [i] = DP_LEFT; dp_w [i] = 1; } break;
+   case DP_LEFT:
+      if (dp_w [i] > 0) dp_w [i]--;
+      else if (dp_fork [r] < 0) { dp_fork [r] = i; dp_st [i] = DP_EAT; dp_w [i] = 3; warn_at (AX (ss_pos [i][0]) + 8, AY (ss_pos [i][1]) + 8, 30); }
+      break;
+   default:                                                   // eating: then a volley, then both forks back
+      if (--dp_w [i] == 1)
+         for (int k = -1; k <= 1; k++) { int j = fire_at_player (AX (ss_pos [i][0]) + 8, AY (ss_pos [i][1]) + 8, 32, T_ORB, B_BUL); if (j >= 0) bul [j].vx += 10 * k; }
+      if (dp_w [i] <= 0) { dp_fork [l] = dp_fork [r] = -1; dp_st [i] = DP_THINK; }
+   }
+}
+static void dp_show (void) {
+   static const int bk [4] = { B_PROP, B_ENEMY, B_MODE, B_SHOT };
+   for (int i = 0; i < DP_N; i++) {
+      int j = (i + DP_N - 1) % DP_N, h = dp_fork [i];        // fork i lies between philosophers i-1 and i
+      int x = (AX (ss_pos [i][0]) + AX (ss_pos [j][0])) / 2, y = (AY (ss_pos [i][1]) + AY (ss_pos [j][1])) / 2;
+      if (h >= 0) { x = (x + AX (ss_pos [h][0])) / 2; y = (y + AY (ss_pos [h][1])) / 2; }   // in a hand
+      prop_set (i, AX (ss_pos [i][0]), AY (ss_pos [i][1]), T_PHIL, bk [dp_st [i]]);
+      prop_set (DP_N + i, x, y, T_FORK, h >= 0 ? B_SHOT : B_PROP);
+   }
 }
 static void dj_update (void) {
    int tt = boss.timer;
@@ -363,10 +462,42 @@ static void dj_update (void) {
       if (tt % 30 == 16) note (boss.shield ? "PRIVILEGES: MORE THAN ONE" : "STABLE: ONE PRIVILEGE CIRCULATES");
       if (tt > 720) next_move (4);
       break;
-   } }
+   }
+   case 4: {                                                  // the last lemma: dining philosophers
+      if (tt == 0) {
+         cue ("THE DINING PHILOSOPHERS");
+         say ("ALL HOLD THE LEFT FORK: DEADLOCK");
+         note ("SHOOT ONE: HUNGRY NOW, OR WAIT LONGER");
+         for (int i = 0; i < DP_N; i++) { dp_st [i] = DP_THINK; dp_fork [i] = -1; dp_w [i] = 0; }
+         boss.shield = 1;
+      }
+      if (!boss.phase && tt >= 30 && tt % 24 == 0) {         // a round: each philosopher steps once
+         int s0 = (int) (rnd () % DP_N), all = 1;
+         for (int k = 0; k < DP_N; k++) dp_step ((s0 + k) % DP_N);
+         for (int i = 0; i < DP_N; i++) all &= dp_st [i] == DP_LEFT;
+         if (all) {                                           // the circular wait
+            boss.phase = tt; boss.shield = 0; boss.stun = 260;
+            note ("DEADLOCK: EACH HOLDS ONE, ALL WAIT");
+         }
+      }
+      dp_show ();
+      if (tt % 80 == 40 && !boss.phase) fire_at_player (bcx (), bcy (), 30, T_ORB, B_BUL);
+      if (!boss.phase && tt > 1100) { note ("NO DEADLOCK: SOMEBODY ALWAYS ATE"); boss.phase = tt - 200; }
+      if (boss.phase && tt > boss.phase + 280) next_move (4);
+      break;
+   }
+   default: next_move (4); break;
+   }
    tick ();
 }
 static int dj_other (int x, int y) {
+   if (boss.attack == 4 && !boss.phase)
+      for (int i = 0; i < DP_N; i++)
+         if (shot_near (x, y, props [i].x + 8, props [i].y + 8, 10)) {   // you schedule them
+            if (dp_st [i] == DP_THINK) { dp_st [i] = DP_HUNGRY; note ("SCHEDULED: HUNGRY NOW"); }
+            else if (dp_st [i] == DP_LEFT) { dp_w [i] = 3; note ("PREEMPTED: IT WAITS LONGER"); }
+            fx (x, y, T_SPARK); return 1;
+         }
    if (boss.attack == 2 && props [0].on && shot_near (x, y, props [0].x + 8, props [0].y + 7, 9)) {
       if (boss.a [0] > 1) boss.a [0]--;                       // progress: the variant falls
       fx (x, y, T_SPARK); return 1;
@@ -410,6 +541,30 @@ static void ho_draw (int i) {
 }
 static void ho_show_all (void) { for (int i = 0; i < 8; i++) ho_draw (i); player_bump_up (); }
 static void ho_home (void) { boss.x = AX (34); boss.y = AY (14) - 32; }
+// a monitor (Hoare, "Monitors: an operating system structuring concept", CACM 1974) guarding his
+// own example, the bounded buffer: the producer (the boss) and the consumer (a turret) enter one at
+// a time; append waits on NONFULL when the buffer is full, remove on NONEMPTY when it is empty, and
+// a signal hands the monitor straight to the waiting process (Hoare's semantics)
+#define HM_N 4
+static int hm_buf [HM_N], hm_head, hm_count, hm_in, hm_who, hm_pwait, hm_cwait, hm_cbusy;
+static void hm_remove (void);
+static void hm_append (void) {
+   hm_in = 12; hm_who = 'P';                                 // the producer is inside
+   if (hm_count == HM_N) { hm_pwait = 1; hm_in = 0; note ("FULL: WAIT(NONFULL), THE PRODUCER SLEEPS"); return; }
+   hm_buf [(hm_head + hm_count) % HM_N] = 1 + (int) (rnd () % 9); hm_count++;
+   fire_at_player (bcx () - 8, bcy (), 30, T_ORB, B_BUL);
+   if (hm_cwait) { hm_cwait = 0; note ("SIGNAL(NONEMPTY): THE CONSUMER RUNS"); hm_remove (); }
+}
+static void hm_remove (void) {
+   hm_in = 12; hm_who = 'C';                                 // the consumer is inside
+   if (hm_count == 0) { hm_cwait = 1; hm_in = 0; note ("EMPTY: WAIT(NONEMPTY)"); return; }
+   int v = hm_buf [hm_head]; hm_head = (hm_head + 1) % HM_N; hm_count--;
+   for (int k = -1; k <= 1; k++) {                           // the item, used: a volley
+      int j = fire_at_player (props [4].x + 8, props [4].y + 4, 26 + v, T_ORB, B_BUL2);
+      if (j >= 0) bul [j].vy += 12 * k;
+   }
+   if (hm_pwait) { hm_pwait = 0; boss.stun = 0; note ("SIGNAL(NONFULL): THE PRODUCER RUNS"); hm_append (); }
+}
 static void ho_update (void) {
    int tt = boss.timer;
    if (boss.a [7] == 0) { boss.a [7] = 1; ho_home (); }
@@ -428,7 +583,8 @@ static void ho_update (void) {
          b->x += vx; b->y += vy;
          if (shot_near ((b->x >> 4) + 8, (b->y >> 4) + 8, bcx (), bcy (), 12)) { b->on = 0; boss_damage (1); }
       }
-      if (tt % 45 == 20) fire_at_player (bcx () - 8, bcy (), 28, T_ORB, B_BUL);
+      if (tt % 45 == 20) { int j = fire_at_player (bcx () - 8, bcy (), 28, T_ORB, B_BUL); if (tt % 135 == 20) mode_set (j, M_PINK); }
+      if (tt % 135 == 20) note ("A PINK SHOT IS PROVED: PARRY IT");
       if (tt == 480) abrick (boss.a [0], boss.a [0] + 4, FLOOR, K_GROUND);
       if (tt > 500) next_move (3);
       break;
@@ -499,11 +655,44 @@ static void ho_update (void) {
       if (boss.phase && tt == boss.phase + 240) { ho_home (); fx (bcx (), bcy (), T_PUFF); }
       if ((boss.phase && tt > boss.phase + 260) || tt > 900) { ho_home (); next_move (3); }
       break;
-   } }
+   }
+   case 3: {                                                  // the last lemma: a monitor
+      if (tt == 0) {
+         cue ("MONITORS: ONE PROCESS AT A TIME");
+         say ("FULL: THE PRODUCER WAITS (NONFULL)");
+         hm_head = hm_count = hm_in = hm_pwait = hm_cwait = hm_cbusy = 0;
+         prop_set (4, AX (7), AY (21) - 16, T_SWITCH, B_PROP);   // the consumer
+      }
+      if (hm_in) hm_in--;                                      // the monitor frees after 12 frames
+      if (hm_cbusy) hm_cbusy--;
+      if (tt >= 30 && tt < 900) {
+         if (!hm_pwait && tt % 40 == 0) {                      // the producer (the boss) calls append
+            if (hm_in) note ("THE PRODUCER QUEUES AT THE ENTRY"); else hm_append ();
+         }
+         if (!hm_cwait && !hm_cbusy && tt % 64 == 32) {        // the consumer calls remove
+            if (hm_in) note ("THE CONSUMER QUEUES AT THE ENTRY"); else hm_remove ();
+         }
+      }
+      if (hm_pwait) boss.stun = 2;                             // waiting: open, double damage
+      for (int i = 0; i < HM_N; i++) {
+         int k = (hm_head + i) % HM_N;
+         if (i < hm_count) prop_set (k, AX (14 + 3 * k), AY (8), digit (hm_buf [k]), B_SHOT);
+         else prop_set (k, AX (14 + 3 * k), AY (8), T_DOT, B_PROP);
+      }
+      props [4].bank = hm_cbusy ? B_ENEMY : hm_cwait ? B_TEXT : B_PROP;
+      if (hm_in) prop_set (5, AX (11), AY (8), sfont ((char) hm_who), B_TEXT); else props [5].on = 0;
+      if (tt > 930) { hm_pwait = 0; boss.stun = 0; next_move (3); }
+      break;
+   }
+   default: next_move (3); break;
+   }
    boss.frame = boss.stun ? (t >> 3) & 1 : boss.frame;
    tick ();
 }
 static int ho_other (int x, int y) {
+   if (boss.attack == 3 && shot_near (x, y, props [4].x + 8, props [4].y + 8, 10)) {
+      hm_cbusy = 160; note ("THE CONSUMER IS INTERRUPTED"); fx (x, y, T_SPARK); return 1;
+   }
    if (boss.attack == 0 && boss.timer < 480 && feet_kind () == K_ZONE && iabs (y - pcy ()) < 12) {
       int k = bullet_new (30, (x - 8) << 4, (y - 8) << 4, 0, 0, T_SHOT, B_SHOT);   // proved: it reaches Q
       if (k >= 0) { bul [k].harm = 0; bul [k].bank = B_BUL2; }
@@ -551,6 +740,164 @@ static int la_max (void) { int m = 0; for (int i = 0; i < 4; i++) if (la_c [i] >
 static void la_label (int i) {
    prop_set (4 + i, AX (la_pos [i][0]) + (la_pos [i][0] < 20 ? 16 : -10), AY (la_pos [i][1]) + 4, digit (la_c [i]), B_TEXT);
 }
+// ---- single-decree Paxos (Lamport, "The Part-Time Parliament", TOCS 1998; "Paxos Made Simple",
+// 2001), the real protocol: two proposers, three acceptors, any two of them a quorum.  The px_*
+// state and steps are global so formal/sw/cbmc can check them.  Each step is one message
+// delivered, with its fields as arguments; a step whose message is not enabled changes nothing
+// and returns 0.  The network is the game's: messages are bullets, the player's lemmas drop
+// them, and a crashed acceptor gets nothing (its state survives, as on stable storage).
+// Proposer p owns the ballots b = 2r + 1 + p (b < PX_B), so no ballot has two proposers.
+// Agreement (expected to hold, for any order, loss and duplication of messages): if px_chosen (v)
+// and px_chosen (w) then v == w; and px_learned != 0 implies px_chosen (px_learned).
+#define PX_A 3                                   // acceptors
+#define PX_B 9                                   // ballots 1..8; 0 is "none"
+int px_prom [PX_A];                              // the highest ballot each acceptor promised
+int px_abal [PX_A], px_aval [PX_A];              // its highest accepted ballot and value (0: none)
+int px_vote [PX_A][PX_B];                        // the votes: the value a accepted in ballot b (0: none)
+int px_own [2];                                  // each proposer's own value (1 or 2)
+int px_pbal [2], px_pval [2], px_pph [2];        // its ballot, the value it proposes, phase (0 idle,
+int px_pset [2], px_phb [2];                     //   1 preparing, 2 accepting); the promises heard
+                                                 //   (a bit an acceptor); the highest vote reported
+int px_lbal [PX_A], px_lval [PX_A], px_learned;  // the learner: each acceptor's latest Accepted; the value
+void px_init (int v0, int v1) {
+   for (int a = 0; a < PX_A; a++) { px_prom [a] = px_abal [a] = px_aval [a] = px_lbal [a] = px_lval [a] = 0; for (int b = 0; b < PX_B; b++) px_vote [a][b] = 0; }
+   for (int p = 0; p < 2; p++) { px_pbal [p] = px_pval [p] = px_pph [p] = px_pset [p] = px_phb [p] = 0; }
+   px_own [0] = v0; px_own [1] = v1; px_learned = 0;
+}
+// proposer p starts ballot b (phase 1a: it will send Prepare(b) to every acceptor)
+int px_start (int p, int b) {
+   if (p < 0 || p > 1 || b < 1 || b >= PX_B || (b - 1) % 2 != p || b <= px_pbal [p]) return 0;
+   px_pbal [p] = b; px_pph [p] = 1; px_pset [p] = 0; px_phb [p] = 0; px_pval [p] = px_own [p];
+   return 1;
+}
+// acceptor a receives Prepare(b) (1b): it promises if b is above every ballot it promised, and
+// answers Promise(b, *pb, *pv) with its highest vote
+int px_prepare (int a, int b, int *pb, int *pv) {
+   if (a < 0 || a >= PX_A || b < 1 || b >= PX_B || b <= px_prom [a]) return 0;
+   px_prom [a] = b; *pb = px_abal [a]; *pv = px_aval [a];
+   return 1;
+}
+// proposer p receives Promise(b, pb, pv) from acceptor a (2a): with promises from a quorum it
+// proposes the value of the highest vote reported, or its own if none; 1 = send Accept(b, px_pval [p])
+int px_promise (int p, int a, int b, int pb, int pv) {
+   if (p < 0 || p > 1 || a < 0 || a >= PX_A || px_pph [p] != 1 || b != px_pbal [p] || (px_pset [p] >> a) & 1) return 0;
+   if (pb < 0 || pb >= b || (pb > 0 && pv < 1)) return 0;   // not a message an acceptor sends
+   px_pset [p] |= 1 << a;
+   if (pb > px_phb [p]) { px_phb [p] = pb; px_pval [p] = pv; }
+   int n = (px_pset [p] & 1) + ((px_pset [p] >> 1) & 1) + ((px_pset [p] >> 2) & 1);
+   if (n < 2) return 0;
+   px_pph [p] = 2;
+   return 1;
+}
+// acceptor a receives Accept(b, v) (2b): it votes unless it promised a higher ballot; 1 = send
+// Accepted(b, v) to the learner
+int px_accept (int a, int b, int v) {
+   if (a < 0 || a >= PX_A || b < 1 || b >= PX_B || v < 1 || b < px_prom [a]) return 0;
+   px_prom [a] = b; px_abal [a] = b; px_aval [a] = v; px_vote [a][b] = v;
+   return 1;
+}
+// the learner receives Accepted(b, v) from acceptor a: a value is learned when two acceptors'
+// latest Accepted are of one ballot (a quorum voted in it); returns the learned value or 0
+int px_accepted (int a, int b, int v) {
+   if (a < 0 || a >= PX_A || b < 1 || b >= PX_B) return px_learned;
+   if (b > px_lbal [a]) { px_lbal [a] = b; px_lval [a] = v; }
+   for (int i = 0; i < PX_A; i++)
+      for (int j = i + 1; j < PX_A; j++)
+         if (px_lbal [i] > 0 && px_lbal [i] == px_lbal [j] && !px_learned) px_learned = px_lval [i];
+   return px_learned;
+}
+// v is chosen: in some ballot a quorum (two acceptors) voted for v
+int px_chosen (int v) {
+   for (int b = 1; b < PX_B; b++) {
+      int n = 0;
+      for (int a = 0; a < PX_A; a++) n += v > 0 && px_vote [a][b] == v;
+      if (n >= 2) return 1;
+   }
+   return 0;
+}
+// ---- the game around it: messages are bullets of kind 70 (a: the type; b: the receiver; c: the
+// fields, ballot | value << 4 | voted ballot << 8 | voted value << 12 | sender << 16)
+enum { PXM_PREPARE = 1, PXM_PROMISE, PXM_ACCEPT, PXM_ACCEPTED };
+static int px_down [PX_A], px_tmo [2], px_round [2];   // a crashed acceptor's frames left; retry timers
+static int px_ax (int a) { return AX (7 + 11 * a); }
+static int px_ay (void) { return AY (10); }
+static int px_where_x (int p) { return p ? AX (8) + 8 : bcx (); }      // proposer 1 is the ghost
+static int px_where_y (int p) { return p ? AY (20) - 8 : bcy (); }
+static void px_send (int type, int x, int y, int to, int fields) {
+   int lab = type <= PXM_PROMISE ? (fields & 15) : (fields >> 4) & 15;   // a ballot, or a value
+   int k = bullet_new (70, (x - 8) * SUB, (y - 8) * SUB, 0, 0, digit (lab), type <= PXM_PROMISE ? B_BUL2 : B_BUL);
+   if (k >= 0) { bul [k].a = type; bul [k].b = to; bul [k].c = fields; bul [k].harm = 4; }
+}
+static void px_go (int p) {                      // a new ballot: Prepare to every acceptor
+   int b = 2 * px_round [p] + 1 + p;
+   if (!px_start (p, b)) return;
+   px_round [p]++; px_tmo [p] = 0;
+   for (int a = 0; a < PX_A; a++) px_send (PXM_PREPARE, px_where_x (p), px_where_y (p), a, b | p << 16);
+   static char line [40] = "P0: PREPARE BALLOT 0";
+   line [1] = (char) ('0' + p); line [19] = (char) ('0' + b); note (line);
+}
+static void px_attack (int v) {                  // the chosen value is the attack
+   if (v == 1) for (int k = 0; k < 7; k++) { int j = bullet_new (1, (AX (3 + 5 * k) - 8) * SUB, (AY (2) - 6 * k) * SUB, 0, 0, T_DROP, B_BUL); if (j >= 0) bul [j].harm = 5; }
+   else for (int k = 0; k < 7; k++) {
+      int a = 20 + 4 * k, j = bullet_new (0, (bcx () - 8) * SUB, (bcy () - 8) * SUB, -(cosv (a) * 36 >> 6), -(sinv (a) * 36 >> 6), T_ORB, B_BUL);
+      if (j >= 0) bul [j].harm = 5;
+   }
+}
+static void px_deliver (bullet *m) {
+   int f = m->c, b = f & 15, v = (f >> 4) & 15, src = f >> 16, to = m->b, pb, pv;
+   if (m->a == PXM_PREPARE && !px_down [to] && px_prepare (to, b, &pb, &pv))
+      px_send (PXM_PROMISE, px_ax (to) + 8, px_ay () + 8, src, b | pb << 8 | pv << 12 | to << 16);
+   if (m->a == PXM_PROMISE && px_promise (to, src, b, (f >> 8) & 15, (f >> 12) & 15)) {
+      static char own [44] = "BALLOT 0: A QUORUM, PROPOSES VALUE 0", adopt [44] = "BALLOT 0: A QUORUM, ADOPTS VOTED VALUE 0";
+      char *line = px_pval [to] != px_own [to] ? adopt : own;   // P2c: the highest vote reported wins
+      int n = 0; while (line [n]) n++;
+      line [7] = (char) ('0' + b); line [n - 1] = (char) ('0' + px_pval [to]);
+      note (line);
+      for (int a = 0; a < PX_A; a++) px_send (PXM_ACCEPT, px_where_x (to), px_where_y (to), a, b | px_pval [to] << 4 | to << 16);
+   }
+   if (m->a == PXM_ACCEPT && !px_down [to] && px_accept (to, b, v))
+      px_send (PXM_ACCEPTED, px_ax (to) + 8, px_ay () + 8, 0, b | v << 4 | to << 16);
+   if (m->a == PXM_ACCEPTED && !boss.phase && px_accepted (src, b, v)) {
+      static char line [40] = "CHOSEN: VALUE 0, ALL LEARNERS AGREE";
+      line [14] = (char) ('0' + px_learned); note (line);
+      boss.phase = boss.timer; boss.a [0] = px_learned;
+      warn_at (bcx (), boss.y - 10, 30);
+   }
+}
+static void px_target (const bullet *m, int *x, int *y) {
+   if (m->a == PXM_PREPARE || m->a == PXM_ACCEPT) { *x = px_ax (m->b) + 8; *y = px_ay () + 8; }
+   else if (m->a == PXM_PROMISE) { *x = px_where_x (m->b); *y = px_where_y (m->b); }
+   else { *x = bcx (); *y = bcy (); }             // the learner is the boss
+}
+static void px_show (void) {
+   for (int a = 0; a < PX_A; a++) {
+      int x = px_ax (a), y = px_ay ();
+      prop_set (a, x, y, T_LIGHT, px_down [a] ? B_ENEMY : px_aval [a] ? B_SHOT : B_PROP);
+      if (px_down [a] && (t & 8)) props [a].on = 0;
+      if (px_prom [a]) prop_set (3 + a, x, y - 16, digit (px_prom [a]), B_BUL2); else props [3 + a].on = 0;
+      if (px_aval [a]) prop_set (6 + a, x, y + 16, digit (px_aval [a]), B_BUL); else props [6 + a].on = 0;
+   }
+   prop_set (9, AX (8), AY (20) - 16, T_GHOST, B_TEXT);       // proposer 1
+}
+// ---- the Byzantine generals (Lamport, Shostak and Pease, "The Byzantine Generals Problem", TOPLAS
+// 1982), the oral-messages algorithm OM(1): the commander (the boss) orders LEFT (0) or RIGHT (1);
+// each of three lieutenants relays what it heard to the other two, one of them a traitor who relays
+// the opposite; each decides by majority, so the loyal ones agree on the order (n = 4 >= 3m + 1 for
+// m = 1).  Then all attack: the traitor's arrows point the way the loyal go and fly the other way.
+static int om_tr, om_out, om_ord, om_recv [3], om_rel [3][3];   // om_rel [j][i]: what j heard from i
+static int om_x (int i) { return AX (4 + 15 * i); }
+static int om_y (void) { return AY (9); }
+static int om_decide (int j) { int n = om_recv [j]; for (int k = 0; k < 3; k++) if (k != j) n += om_rel [j][k]; return n >= 2; }
+static void om_send (int x, int y, int to, int v, int src) {   // kind 71: an order (src 3) or a relay
+   int k = bullet_new (71, (x - 8) * SUB, (y - 8) * SUB, 0, 0, T_ARROW, B_BUL2);
+   if (k >= 0) { bul [k].b = to; bul [k].c = v | src << 4; bul [k].harm = 4; bul [k].flags = v ? 0 : VDP_SPR_HFLIP; }
+}
+static void la_column (int x, int vx, int tile, int mode) {   // a wall of 7 from the floor up (kind 4)
+   for (int k = 0; k < 7; k++) {
+      int j = bullet_new (4, x * SUB, (AY (FLOOR) - 16 - 16 * k) * SUB, vx, 0, tile, B_BUL);
+      if (j >= 0) { bul [j].harm = 5; mode_set (j, mode); if (vx < 0) bul [j].flags = VDP_SPR_HFLIP; }
+   }
+}
 static void la_update (void) {
    int tt = boss.timer;
    if (boss.a [7] == 0) { boss.a [7] = 1; boss.x = AX (32); boss.y = AY (FLOOR) - 32; }
@@ -582,28 +929,24 @@ static void la_update (void) {
       if (boss.phase && tt > boss.phase + 90) next_move (4);
       break;
    case 1: {                                                  // safety and liveness
-      if (tt == 0) { cue ("SAFETY AND LIVENESS"); say ("SAFETY: THE RED NEVER HOLDS YOU"); }
-      if (tt < 240) {                                          // safety: nothing bad happens
-         int rt = tt % 80;
-         if (rt == 0) {
-            int m = 0, n = 0;
-            while (n < 3) { int c = (int) (rnd () % 8); if (!(m & (1 << c))) { m |= 1 << c; n++; } }
-            boss.a [2] = m;
-         }
-         for (int c = 0; c < 8; c++) {
-            int c0 = 1 + 5 * c, c1 = c == 7 ? 38 : c0 + 4;
-            if (!(boss.a [2] & (1 << c))) continue;
-            if (rt < 30 && (rt & 7) == 0) abrick (c0, c1, FLOOR, (rt & 8) ? K_DOOMED : K_GROUND);
-            if (rt == 30) abrick (c0, c1, FLOOR, K_HOT);
-            if (rt == 70) abrick (c0, c1, FLOOR, K_GROUND);
-         }
-      } else if (tt == 240) {
-         floor_restore (); say ("LIVENESS: REACH EACH ! IN TIME"); boss.a [3] = 0; boss.phase = 0;
-      } else if (boss.a [3] < 3) {                            // liveness: something good happens
+      // safety ("nothing bad happens") is BLUE: a blue wall hurts only a player who moves, so
+      // standing still is always safe.  Liveness ("something good happens") is ORANGE: an orange
+      // sweep hurts only a player who stands still, and the ! tokens must be reached in time.
+      if (tt == 0) { cue ("SAFETY AND LIVENESS"); say ("SAFETY IS BLUE: STAND STILL, NO HARM"); boss.phase = 0; boss.a [3] = 0; }
+      if (tt < 300) {                                          // safety: three blue walls
+         int rt = tt % 100, s = (tt / 100) & 1;
+         if (rt == 10) for (int k = 0; k < 3; k++) warn_at (s ? AX (37) + 8 : AX (2), AY (FLOOR) - 24 - 40 * k, 30);
+         if (rt == 40) la_column (s ? AX (37) : AX (1), s ? -28 : 28, T_BLOCK, M_BLUE);
+      } else if (tt == 300) {
+         say ("LIVENESS IS ORANGE: MOVE, REACH EACH !"); boss.a [3] = 0; boss.phase = 0;
+      } else if (boss.a [3] < 3) {                            // liveness: tokens and orange sweeps
+         int rt = (tt - 300) % 110, s = ((tt - 300) / 110) & 1;
+         if (rt == 50) for (int k = 0; k < 3; k++) warn_at (s ? AX (37) + 8 : AX (2), AY (FLOOR) - 24 - 40 * k, 30);
+         if (rt == 80) la_column (s ? AX (37) : AX (1), s ? -40 : 40, T_CHEV, M_ORANGE);
          if (!boss.phase) {
-            const int *s = la_spot [rnd () % 4];
-            int c = s [0] + (int) (rnd () % (uint32_t) (s [1] - s [0] + 1));
-            prop_set (0, AX (c), AY (s [2]) - 16, sfont ('!'), B_SHOT);
+            const int *sp = la_spot [rnd () % 4];
+            int c = sp [0] + (int) (rnd () % (uint32_t) (sp [1] - sp [0] + 1));
+            prop_set (0, AX (c), AY (sp [2]) - 16, sfont ('!'), B_SHOT);
             boss.phase = tt; boss.a [4] = 9;
          }
          prop_set (1, props [0].x, props [0].y - 16, digit (boss.a [4]), B_TEXT);
@@ -615,7 +958,7 @@ static void la_update (void) {
          }
          if (boss.a [3] >= 3) { props [0].on = props [1].on = 0; boss.a [5] = tt; }
       } else if (tt > boss.a [5] + 60) next_move (4);
-      if (tt % 60 == 30) fire_at_player (bcx (), bcy (), 26, T_ORB, B_BUL);
+      if (tt % 90 == 30) fire_at_player (bcx (), bcy (), 26, T_ORB, B_BUL);
       break;
    }
    case 2:                                                    // logical clocks
@@ -638,30 +981,85 @@ static void la_update (void) {
       }
       if (boss.phase >= 12 && tt % 36 == 30) next_move (4);
       break;
-   case 3: {                                                  // Paxos
+   case 3: {                                                  // Paxos, the real protocol
       if (tt == 0) {
-         static char line [] = "PAXOS: BALLOT 0, QUORUM 2 OF 3";
-         line [14] = (char) ('1' + boss.cycle % 9);
-         cue (line);
-         for (int i = 0; i < 3; i++) { prop_set (i, AX (8 + 10 * i), AY (FLOOR) - 16, T_LIGHT, B_PROP); boss.a [i] = 0; }
-         boss.phase = 0; boss.a [3] = 0;
-         say ("SHOOT ACCEPTORS TO DENY THE QUORUM");
+         cue ("PAXOS: 2 PROPOSERS, A QUORUM IS 2 OF 3");
+         say ("VALUE 1 RAINS, 2 FANS: ONE IS CHOSEN");
+         px_init (1, 2);
+         for (int p = 0; p < 2; p++) { px_round [p] = 0; px_tmo [p] = 0; }
+         for (int a = 0; a < PX_A; a++) px_down [a] = 0;
+         boss.a [0] = 0; boss.a [1] = 90 + (int) (rnd () % 60);   // the ghost's first ballot
       }
-      int acc = 0, rej = 0;
-      for (int i = 0; i < 3; i++) { acc += boss.a [i] == 1; rej += boss.a [i] == 2; props [i].bank = boss.a [i] == 1 ? B_SHOT : boss.a [i] == 2 ? B_ENEMY : B_PROP; }
-      if (!boss.phase) {
-         if (tt > 40 && tt % 70 == 0)
-            for (int i = 0; i < 3; i++) if (boss.a [i] == 0) { boss.a [i] = 1; break; }
-         if (acc >= 2) { boss.phase = tt; say ("CHOSEN: THE VALUE IS DECIDED"); }
-         else if (rej >= 2) { boss.phase = tt; boss.stun = 180; say ("NO QUORUM: THE BALLOT FAILS"); }
-         else if (acc + rej == 3) { boss.phase = tt; say ("NO QUORUM: THE BALLOT FAILS"); boss.stun = 120; }
-      } else if (acc >= 2 && tt < boss.phase + 80 && tt % 6 == 0) {
-         int x = AX (2 + (int) (rnd () % 36));
-         bullet_new (1, (x - 8) << 4, AY (0) << 4, 0, 0, T_ORB, B_BUL);
+      if (tt == 30) px_go (0);
+      if (tt == boss.a [1]) px_go (1);
+      for (int a = 0; a < PX_A; a++) if (px_down [a] && --px_down [a] == 0) note ("AN ACCEPTOR RECOVERS, STATE INTACT");
+      for (int p = 0; p < 2; p++) if (!boss.phase && px_pph [p] && ++px_tmo [p] > 240) px_go (p);   // stuck: a higher ballot
+      for (int i = 0; i < NBUL; i++) {                         // the network
+         bullet *m = &bul [i];
+         if (!m->on || m->kind != 70) continue;
+         int x, y, vx, vy; px_target (m, &x, &y);
+         toward ((m->x >> 4) + 8, (m->y >> 4) + 8, x, y, 40, &vx, &vy);
+         m->x += vx; m->y += vy;
+         if (shot_near ((m->x >> 4) + 8, (m->y >> 4) + 8, x, y, 6)) { bullet mm = *m; m->on = 0; px_deliver (&mm); }
       }
-      if (boss.phase && tt > boss.phase + 200) { boss.cycle++; next_move (4); }
+      px_show ();
+      if (boss.phase && boss.a [0] && (tt == boss.phase + 30 || (boss.a [0] == 1 && tt == boss.phase + 70))) px_attack (boss.a [0]);
+      if (!boss.phase && tt > 1300) { boss.phase = tt; boss.a [0] = 0; boss.stun = 200; note ("NOTHING CHOSEN: SAFE, BUT NOT LIVE"); }
+      if (boss.phase && tt > boss.phase + 220) { boss.cycle++; next_move (4); }
       break;
-   } }
+   }
+   case 4: {                                                  // the last lemma: Byzantine generals
+      if (tt == 0) {
+         cue ("THE BYZANTINE GENERALS: OM(1)");
+         say ("ONE LIEUTENANT LIES: TRUST THE MAJORITY");
+         om_tr = (int) (rnd () % 3); om_out = -1;
+      }
+      int rt = (tt - 20) % 300, rd = (tt - 20) / 300;
+      if (tt >= 20 && rd < 3) {
+         if (rt == 0) {                                        // the commander's order (LEFT 0, RIGHT 1)
+            om_ord = (int) (rnd () & 1);
+            for (int i = 0; i < 3; i++) { om_recv [i] = om_ord; for (int j = 0; j < 3; j++) om_rel [i][j] = om_ord; }
+            for (int i = 0; i < 3; i++) om_send (bcx (), bcy (), i, om_ord, 3);
+            note (om_ord ? "THE ORDER: ATTACK RIGHT" : "THE ORDER: ATTACK LEFT");
+         }
+         if (rt == 100)                                        // OM(1): each relays what it heard
+            for (int i = 0; i < 3; i++)
+               for (int j = 0; j < 3; j++)
+                  if (i != j) om_send (om_x (i) + 8, om_y () + 8, j, i == om_tr ? !om_recv [i] : om_recv [i], i);
+         if (rt == 200) {                                      // each decides by majority, then attacks
+            int d = 0;
+            for (int j = 0; j < 3; j++) if (j != om_tr) d = om_decide (j);
+            for (int j = 0; j < 3; j++) {
+               int claim = j == om_tr ? d : om_decide (j), go = j == om_tr ? !d : claim;   // the traitor lies
+               for (int k = 0; k < 2; k++) {
+                  int b = bullet_new (72, om_x (j) * SUB, (AY (FLOOR) - 16 - 16 * k) * SUB, go ? 36 : -36, 0, T_ARROW, B_BUL);
+                  if (b >= 0) { bul [b].harm = 5; bul [b].flags = claim ? 0 : VDP_SPR_HFLIP; }
+               }
+            }
+            note (d ? "THE LOYAL AGREE: ATTACK RIGHT" : "THE LOYAL AGREE: ATTACK LEFT");
+         }
+      }
+      for (int i = 0; i < NBUL; i++) {
+         bullet *b = &bul [i];
+         if (!b->on) continue;
+         if (b->kind == 72 && b->t > 30) b->x += b->vx;     // the arrows wait, then fly
+         if (b->kind != 71) continue;
+         int to = b->b, x = om_x (to) + 8, y = om_y () + 8, vx, vy;
+         toward ((b->x >> 4) + 8, (b->y >> 4) + 8, x, y, 48, &vx, &vy);
+         b->x += vx; b->y += vy;
+         if (shot_near ((b->x >> 4) + 8, (b->y >> 4) + 8, x, y, 6)) {   // delivered
+            int v = b->c & 1, src = b->c >> 4;
+            if (src == 3) om_recv [to] = v; else om_rel [to][src] = v;
+            b->on = 0;
+         }
+      }
+      for (int i = 0; i < 3; i++) prop_set (i, om_x (i), om_y (), T_LIGHT, i == om_out ? B_ENEMY : B_PROP);
+      if (tt % 75 == 40) fire_at_player (bcx (), bcy (), 28, T_ORB, B_BUL);
+      if (tt > 20 + 900 + 40) next_move (4);
+      break;
+   }
+   default: next_move (4); break;
+   }
    boss.frame = boss.stun ? (t >> 3) & 1 : boss.frame;
    tick ();
 }
@@ -669,9 +1067,23 @@ static int la_other (int x, int y) {
    if (boss.attack == 2 && props [0].on)
       for (int i = 0; i < 4; i++)
          if (shot_near (x, y, props [i].x + 8, props [i].y + 7, 9)) { la_c [i] = la_max () + 1; la_label (i); fx (x, y, T_SPARK); return 1; }
-   if (boss.attack == 3 && !boss.phase)
+   if (boss.attack == 3) {
+      for (int i = 0; i < NBUL; i++)                           // a message, dropped
+         if (bul [i].on && bul [i].kind == 70 && shot_near (x, y, (bul [i].x >> 4) + 8, (bul [i].y >> 4) + 8, 9)) {
+            bul [i].on = 0; fx (x, y, T_SPARK); note ("A MESSAGE IS LOST"); return 1;
+         }
+      for (int a = 0; a < PX_A; a++)                           // an acceptor, crashed
+         if (!px_down [a] && shot_near (x, y, px_ax (a) + 8, px_ay () + 6, 9)) {
+            px_down [a] = 300; fx (x, y, T_PUFF); note ("AN ACCEPTOR CRASHES"); return 1;
+         }
+   }
+   if (boss.attack == 4)
       for (int i = 0; i < 3; i++)
-         if (props [i].on && boss.a [i] == 0 && shot_near (x, y, props [i].x + 8, props [i].y + 6, 9)) { boss.a [i] = 2; fx (x, y, T_SPARK); return 1; }
+         if (shot_near (x, y, om_x (i) + 8, om_y () + 8, 10)) {
+            if (i == om_tr) { om_out = i; om_tr = -1; boss_damage (3); boss.stun = 150; note ("THE TRAITOR, UNMASKED: N >= 3M+1"); }
+            else if (i != om_out) note ("LOYAL: THE MAJORITY HOLDS");
+            fx (x, y, T_SPARK); return 1;
+         }
    return 0;
 }
 
@@ -694,7 +1106,8 @@ static void ap_update (void) {
          if (!c->on && tt % 150 == 20 + 40 * k) prop_set (k, AX (ap_cert [k][0]), AY (ap_cert [k][1]) - 16, sfont ('#'), B_BUL2);
          if (c->on && iabs (c->x - pl_x) < 12 && iabs (c->y - pl_y) < 14) { c->on = 0; pl_certs += 3; psnd_cue (); }
       }
-      if (tt % 40 == 10) fire_at_player (bcx (), bcy (), 34, T_ORB, B_BUL);
+      if (tt % 40 == 10) { int j = fire_at_player (bcx (), bcy (), 34, T_ORB, B_BUL); if (tt % 120 == 50) mode_set (j, M_PINK); }
+      if (tt == 50) note ("A PINK SHOT IS A PROOF: PARRY IT");
       if (tt > 70 && tt % 90 == 0) {
          int k = bullet_new (1, (bcx () - 8) << 4, boss.y << 4, -24 - (int) (rnd () % 24), -64, T_ORB_M, B_BUL);
          if (k >= 0) bul [k].harm = 5;
@@ -769,7 +1182,54 @@ static void ap_update (void) {
       }
       if (tt > 600) next_move (3);
       break;
-   } }
+   }
+   case 3: {                                                  // the last lemma: a trampoline
+      // a tail call compiled through a trampoline returns to one loop instead of growing the stack:
+      // EVEN?(N) calls ODD?(N-1) calls EVEN?(N-2) ... each call a bounce on the trampoline, the
+      // stack one frame deep throughout.  At 0 the answer bursts: TRUE is proved (pink), FALSE not.
+      if (tt == 0) {
+         cue ("TAIL CALLS ON A TRAMPOLINE");
+         say ("EVERY CALL RETURNS TO THE LOOP: STACK 1");
+         fx (bcx (), bcy (), T_PUFF); boss.x = AX (30); boss.y = AY (15); fx (bcx (), bcy (), T_PUFF);
+      }
+      prop_set (0, AX (17), AY (FLOOR) - 16, T_TRAMP, B_PROP); prop_set (1, AX (17) + 16, AY (FLOOR) - 16, T_TRAMP, B_PROP);
+      if (pcx () >= AX (17) && pcx () < AX (21) && pl_y + 16 >= AY (FLOOR) - 1) player_bounce (-140);   // it throws you too
+      if (tt == 40 || tt == 200 || tt == 360) {                // a call: EVEN? n, thrown onto the loop
+         int n = 5 + (int) (rnd () % 3), x = bcx () - 8, y = bcy () - 8, vy = -40, f = 0;
+         for (int yy = y * SUB; yy < (AY (FLOOR) - 20) * SUB && f < 200; f++) { yy += vy; vy += 4; }
+         vy = -40;
+         int k = bullet_new (73, x * SUB, y * SUB, f ? (AX (19) - 8 - x) * SUB / f : 0, vy, digit (n), B_BUL2);
+         if (k >= 0) { bul [k].a = n; bul [k].b = 0; bul [k].harm = 5; }
+      }
+      for (int i = 0; i < NBUL; i++) {
+         bullet *b = &bul [i];
+         if (!b->on || b->kind != 73) continue;
+         b->vy += 4; b->x += b->vx; b->y += b->vy;
+         if (b->vy > 0 && (b->y >> 4) + 16 >= AY (FLOOR) - 4) {   // a bounce: the loop calls the next
+            b->y = (AY (FLOOR) - 20) * SUB;
+            if (b->a == 0) {                                    // the answer
+               int yes = b->b == 0;
+               note (yes ? "EVEN? 0 = TRUE: PROVED, PARRY IT" : "ODD? 0 = FALSE");
+               for (int d = 0; d < 6; d++) {
+                  int j = bullet_new (0, b->x, b->y - 4 * SUB, cosv (8 + 8 * d) * 30 >> 6, -(sinv (8 + 8 * d) * 30 >> 6), T_ORB, B_BUL);
+                  if (j >= 0) { bul [j].harm = 5; if (yes) mode_set (j, M_PINK); }
+               }
+               b->on = 0; continue;
+            }
+            b->a--; b->b ^= 1; b->tile = digit (b->a); b->bank = b->b ? B_BUL : B_BUL2;
+            b->vy = -72; b->vx = (AX (19) - 8 - (b->x >> 4)) * SUB / 36 + (int) (rnd () % 17) - 8;
+            static char line [40] = "EVEN? 0, STACK DEPTH 1";
+            const char *w = b->b ? " ODD?" : "EVEN?";
+            for (int c = 0; c < 5; c++) line [c] = w [c];
+            line [6] = (char) ('0' + b->a); note (line);
+         }
+      }
+      if (tt % 70 == 35) fire_at_player (bcx (), bcy (), 30, T_ORB, B_BUL);
+      if (tt > 700) { boss.x = AX (33); boss.y = AY (FLOOR) - 32; next_move (3); }
+      break;
+   }
+   default: next_move (3); break;
+   }
    tick ();
 }
 static int ap_hits (int x, int y) {
@@ -898,7 +1358,42 @@ static void ha_update (void) {
       }
       if (boss.phase && tt > boss.phase + 220) next_move (4);
       break;
-   } }
+   }
+   case 4: {                                                  // the last lemma: focusing, polarity
+      // in a focused (polarized) calculus every type is positive (values, eager) or negative
+      // (computations, lazy), and a shift moves between them.  Here positive orbs fall, negative
+      // ones rise, and a shift flips every polarity on the screen at once.
+      if (tt == 0) { cue ("FOCUSING: A SHIFT FLIPS POLARITY"); say ("POSITIVE (+) FALLS, NEGATIVE (-) RISES"); }
+      int n = 0;
+      for (int i = 0; i < NBUL; i++) n += bul [i].on && bul [i].kind == 74;
+      if (tt < 600 && tt % 30 == 10 && n < 8) {
+         int pol = (tt / 30) & 1 ? -1 : 1, vx = (pcx () - bcx ()) * SUB / 80;
+         if (vx > 40) vx = 40; if (vx < -40) vx = -40;
+         int k = bullet_new (74, (bcx () - 8) * SUB, (boss.y - 8) * SUB, vx, -30 * pol, pol > 0 ? T_POS : T_NEG, pol > 0 ? B_BUL : B_BUL2);
+         if (k >= 0) { bul [k].a = pol; bul [k].harm = 5; }
+      }
+      int sh = tt > 0 && tt % 150 == 0, warn = tt % 150 >= 120;
+      if (tt % 150 == 120) note ("A SHIFT IS COMING");
+      if (sh) note ("SHIFT: EVERY POLARITY FLIPS");
+      for (int i = 0; i < NBUL; i++) {
+         bullet *b = &bul [i];
+         if (!b->on || b->kind != 74) continue;
+         if (sh) b->a = -b->a;
+         int pos = b->a > 0;
+         b->tile = (warn && (tt & 4)) ? (pos ? T_NEG : T_POS) : (pos ? T_POS : T_NEG);   // the telegraph
+         b->bank = pos ? B_BUL : B_BUL2;
+         b->vy += 3 * b->a; if (b->vy > 64) b->vy = 64; if (b->vy < -64) b->vy = -64;
+         b->x += b->vx; b->y += b->vy;
+         if ((b->y >> 4) + 16 > AY (FLOOR)) { b->y = (AY (FLOOR) - 16) * SUB; b->vy = -b->vy * 3 / 4; }
+         if ((b->y >> 4) < AY (3)) { b->y = AY (3) * SUB; b->vy = -b->vy * 3 / 4; }
+         if ((b->x >> 4) < AX (1) || (b->x >> 4) > AX (37)) b->vx = -b->vx;
+         if (b->t > 420) { b->kind = 2; b->t = 0; b->harm = 0; b->tile = T_PUFF; }
+      }
+      if (tt > 660) next_move (4);
+      break;
+   }
+   default: next_move (4); break;
+   }
    boss.frame = boss.stun ? (t >> 3) & 1 : boss.frame;
    tick ();
 }
@@ -1046,8 +1541,35 @@ static void ch_update (void) {
       for (int s = 0; s < 3; s++) prop_set (s, AX (3 + 3 * s), AY (12) - 8, digit (s + 1), km_v [s] ? B_SHOT : B_TEXT);
       if (tt > 560) next_move (4);
       break;
-   } }
+   }
+   case 4: {                                                  // the last lemma: proof by reflection
+      // reflection proves a goal by computation: the goal is reified as data, a verified decision
+      // procedure runs on it, and the answer is reflected back.  The mirror sends a plain lemma
+      // back (pink: parry it for a certificate); a lemma carrying a proof is checked and passes.
+      if (tt == 0) { cue ("PROOF BY REFLECTION"); say ("REIFY, COMPUTE, REFLECT: IT COMES BACK"); }
+      int ct = tt % 270, up = ct < 200;
+      boss.a [0] = up;
+      if (ct == 180) note ("THE TACTIC RUNS: THE MIRROR DROPS");
+      if (ct == 0 && tt) note ("THE MIRROR IS BACK");
+      if (up && !(ct >= 180 && (tt & 4))) {                    // blinks before it drops (the telegraph)
+         prop_set (0, boss.x - 18, boss.y, T_MIRROR, B_BUL2); prop_set (1, boss.x - 18, boss.y + 16, T_MIRROR, B_BUL2);
+      } else props [0].on = props [1].on = 0;
+      if (tt % 80 == 40)                                       // the decision procedure answers
+         for (int k = -1; k <= 1; k++) { int j = fire_at_player (bcx (), bcy (), 32, T_ORB, B_BUL); if (j >= 0) bul [j].vy += 12 * k; }
+      if (tt > 760) next_move (4);
+      break;
+   }
+   default: next_move (4); break;
+   }
    tick ();
+}
+static int ch_other (int x, int y) {
+   if (boss.attack != 4 || !boss.a [0] || x < boss.x - 18 || x >= boss.x - 2 || y < boss.y || y >= boss.y + 32) return 0;
+   if (shot_proved) { note ("A PROOF TERM IS CHECKED, NOT REFLECTED"); return 0; }
+   int k = bullet_new (4, (x - 12) * SUB, (y - 8) * SUB, -40, 0, T_PINK, B_MODE);
+   if (k >= 0) { bul [k].harm = 5; mode_set (k, M_PINK); }
+   note ("REFLECTED: YOUR LEMMA COMES BACK");
+   return 1;
 }
 
 const boss_def bosses [7] = {
@@ -1057,4 +1579,9 @@ const boss_def bosses [7] = {
    { "LESLIE LAMPORT",  "TLA+, PAXOS",        "%",  0x7040B0, 0xE0B0FF, 0x140C24, la_arena, la_update, all_hit, la_other },
    { "ANDREW APPEL",    "VERIFIED TOOLCHAIN", "K",  0x208080, 0x80FFF0, 0x081818, ap_arena, ap_update, ap_hits, no_other },
    { "ROBERT HARPER",   "TYPE THEORY",        "&",  0xB03030, 0xFFB0A0, 0x200C0C, ha_arena, ha_update, open_hits, ha_other },
-   { "ADAM CHLIPALA",   "CERTIFIED PROGRAMS", "@",  0xB09020, 0xFFF0A0, 0x181408, ch_arena, ch_update, all_hit, no_other } };
+   { "ADAM CHLIPALA",   "CERTIFIED PROGRAMS", "@",  0xB09020, 0xFFF0A0, 0x181408, ch_arena, ch_update, all_hit, ch_other } };
+// the pinch (HP <= half: the update runs 5 times every 4 frames), announced on arena row 2
+const char *const boss_pinch [7] = {
+   "PINCH: GARBAGE COLLECTED, EVAL HURRIES", "PINCH: THE SEMAPHORES SPEED UP", "PINCH: AT QUICKSORT PACE",
+   "PINCH: THE LOGICAL CLOCKS RUN FAST", "PINCH: COMPILED WITH CONTINUATIONS", "PINCH: EVALUATION IS EAGER NOW",
+   "PINCH: CRUSH, COMPILED TO NATIVE CODE" };
