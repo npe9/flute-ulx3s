@@ -46,6 +46,7 @@ def base_name(e):
             return n if n in VARS else None
         return None
 
+CONSTW = {}                               # (variable, function) -> the constants written, or None
 CALLS, ADDR_FN, ARGS = {}, set(), {}      # caller -> callees; functions whose address is taken
 RECID = {}
 FIELDS, FIELD_FN = {}, {}                 # struct -> field names; field -> functions stored in it
@@ -103,6 +104,16 @@ def walk(node, fn, found):
         if v: found.setdefault(v, set()).add((fn or '<file scope>') + '(&)')
     if lhs is not None:
         v = base_name(lhs)
+        if v and v != 'boss':                           # what is written: a constant (a literal, an
+            rhs = strip(node['inner'][1]) if k == 'BinaryOperator' and node['opcode'] == '=' else None
+            c = None                                    # enum constant) or something else (None)
+            if strip(lhs).get('kind') == 'ArraySubscriptExpr': rhs = None   # an element: not the whole
+            if rhs is not None and rhs.get('kind') == 'IntegerLiteral': c = rhs['value']
+            elif rhs is not None and rhs.get('kind') == 'DeclRefExpr' and rhs['referencedDecl'].get('kind') == 'EnumConstantDecl':
+                c = rhs['referencedDecl']['name']
+            key = (v, fn or '<file scope>')
+            if c is None or (key in CONSTW and CONSTW[key] is None): CONSTW[key] = None
+            else: CONSTW.setdefault(key, set()).add(c)
         if v:
             if v == 'boss':                             # a whole-struct write touches every field
                 for f in BOSS_FIELDS: found.setdefault('boss.' + f, set()).add(fn or '<file scope>')

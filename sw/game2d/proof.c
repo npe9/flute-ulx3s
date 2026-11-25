@@ -1160,7 +1160,11 @@ static void minions_update (void) {
 
 // ================================================================ the boss's framework
 void boss_damage (int n) {
-   if (boss.flash) return;
+   // only a fight's live boss takes damage, and not while flashing.  Every caller already
+   // calls it only then (the shots check G_FIGHT and boss.on; the boss moves run only in the
+   // fight); the guard makes it the writer's own precondition, which the modular proof of the
+   // spec's S3 (formal/sw/cbmc/proof_rules.c) relies on instead of each caller's context
+   if (g_state != G_FIGHT || !boss.on || boss.flash) return;
 #ifdef PROOF_TEST
    if (test_hp > 0 && boss.hp - n < test_hp) n = boss.hp - test_hp;    // PROOF_HP pins the phase
 #endif

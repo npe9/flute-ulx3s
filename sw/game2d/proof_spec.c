@@ -85,9 +85,10 @@ const char *spec_S2 (const spec_state *s, uint32_t buttons, const spec_state *n)
    // invulnerable, and losing one starts the invulnerable time
    if (entered) REQUIRE (n->lives == SP_LIVES && !n->dead && n->hurt == 0 && n->certs == 0, "S2: a stage starts with five hearts");
    else {
-      unsigned heal = n->got_hearts - s->got_hearts;      // a heart pickup restores one, up to five
-      REQUIRE (heal <= 1, "S2: at most one heart pickup a frame");
-      int up = s->lives < SP_LIVES ? (int) heal : 0;     // at five hearts a pickup is points only
+      // each heart pickup restores one, up to five (several can be taken in one frame: two
+      // minions' drops can overlap the player together)
+      unsigned heal = n->got_hearts - s->got_hearts;
+      int up = s->lives >= SP_LIVES ? 0 : heal > (unsigned) (SP_LIVES - s->lives) ? SP_LIVES - s->lives : (int) heal;
       REQUIRE (n->lives <= s->lives + up, "S2: hearts are gained only from a pickup");
       REQUIRE (n->lives >= s->lives + up - 1, "S2: at most one heart lost a frame");
       if (n->lives < s->lives + up)
@@ -150,12 +151,12 @@ const char *spec_W45 (const spec_state *s, uint32_t buttons, const spec_state *n
       } else {
          unsigned got = n->got_energy - s->got_energy;
          int rose = 0;
-         REQUIRE (got <= 1, "W5: at most one energy pickup a frame");
+         // several pickups can land in one frame; each refills the selected tactic
          for (int w = 0; w < SP_NWEAPON; w++) {
             int d = n->energy [w] - s->energy [w];
             if (d < 0) REQUIRE ((w == s->weapon || w == n->weapon) && d == -cost [w] && s->energy [w] >= cost [w],
                                 "W4: firing a tactic takes exactly its cost, only if it is left");
-            if (d > 0) { REQUIRE (got && d <= SP_REFILL, "W5: energy rises only from a pickup, by at most 10"); rose++; }
+            if (d > 0) { REQUIRE (got && (unsigned) d <= SP_REFILL * got, "W5: energy rises only from a pickup, by at most 10 each"); rose++; }
          }
          REQUIRE (rose <= 1, "W5: a pickup refills one tactic");
       }

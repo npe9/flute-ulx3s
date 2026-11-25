@@ -27,8 +27,7 @@ PY
    else echo "$1: WRONG CLAUSE (wanted $want; $r)"; missed=$((missed + 1)); fi
 }
 # S3: a boss can be hit while flashing
-m flash_guard S3 proof.c "void boss_damage (int n) {
-   if (boss.flash) return;" "void boss_damage (int n) {"
+m flash_guard S3 proof.c "|| !boss.on || boss.flash) return;" "|| !boss.on) return;"
 # S2: a heart can be lost while invulnerable
 m hurt_guard S2 proof.c "   if (pl_hurt || pl_dead || g_state == G_WIN) return;" "   if (pl_dead || g_state == G_WIN) return;"
 # S5: a defeated minion takes 100 points once there are 200 (the score falls, never below 0)

@@ -50,7 +50,8 @@ points, which the clauses that it legitimately breaks allow; it is always off on
   returning to the title; the ending only after a real win that discharges the seventh boss.  The
   attract demo may return to the title at any time, and any button ends it.
 - **S2** A stage starts with five hearts, no certificates, not invulnerable.  Otherwise a heart is
-  gained only from a heart pickup (at most one a frame; at five hearts it is points only), at most
+  gained only from heart pickups, one each, up to five (at five hearts a pickup is points only;
+  several can be taken in one frame when drops overlap the player), at most
   one is lost a frame, only when not invulnerable (at most one frame of it left), and a lost heart
   starts 90 frames of invulnerability, which then count down one a frame.  Falling into a pit costs
   a heart like any hit and puts the player back at the last checkpoint.
@@ -73,8 +74,8 @@ McCarthy .. Chlipala), with energy costs 0, 1, 2, 4, 7, 2, 1, 3.
   lemma always); the demo owns all.  With S4, a tactic is gained only by a real win.
 - **W4** A stage starts with every tactic full.  Otherwise a tactic's energy falls only by firing
   it: by exactly its cost, and only if that much was left.
-- **W5** Energy rises only from an energy pickup: at most one a frame, refilling one tactic by at
-  most 10.
+- **W5** Energy rises only from energy pickups, each refilling the selected tactic by at most 10;
+  in one frame only one tactic rises.
 - Not stated yet: only the boss's weakness does 4 damage (the observation does not say which
   tactic's shot hit).
 
@@ -102,11 +103,17 @@ McCarthy .. Chlipala), with energy costs 0, 1, 2, 4, 7, 2, 1, 3.
 | Clauses | Checked by | Status |
 |---|---|---|
 | N, I, S, W1-W5 | the host oracle: every frame of every host run with `HOST_SPEC=1` (30,000 demo frames; every boss, move (the last lemmas included) and tactic via `PROOF_TEST`, plus the pinch and last-lemma HP pins and the poke, parry and clean-proof hooks: 334 runs of 2,400 frames; random button scripts), and every frame of every fuzz script (`formal/sw/host_trace.c`, fuzz.sh reports `SPEC`) | **tested**: all inputs tried pass; eleven planted engine bugs (one or more per clause family) are each caught (`formal/sw/spec_mutants.sh`) |
+| S3, and I4/I5 for the boss's hit points and flash | `formal/sw/cbmc/run_rules.sh` S3_FRAME: the real `proof_frame` from any engine state where the slice of I4/I5 holds, any buttons, with its callees replaced by stubs generated from the writer census (below); BD_NOOP: `boss_damage` does nothing to a flashing boss; three planted bugs (no flash guard, no fight guard, a win at hp < 0) each fail it (`run_rules_mutants.sh`) | **proved** for one frame, assuming the census is complete (it is a syntactic analysis of the AST, itself checked against an allow-list) and the bounded loops' bounds (their unwinding assertions hold); overflow and bounds checks over arbitrary states are not part of the claim |
 | V1 | `HOST_OVERFLOW=2` on the same runs (the VDP reference model's per-line count) | **tested** |
 | V2 | the host oracle: the flush counts its writes by kind, and host.c checks that every VDP write of the frame is one of them | **tested**; a planted write outside the flush is caught |
 | A6 | `run_proof.sh` PAXOS_INIT, PAXOS_STEP, PAXOS_AGREE: an inductive invariant of the `px_*` code, over every schedule (any order, loss, duplication); five planted protocol bugs fail it.  Also the host oracle on every frame of the game, and 1,000,000 random schedules (`proof_paxos_test.sh`) | **proved** for the protocol steps, assuming the game sends only the messages the steps produce; **tested** for the game around them |
 | A1-A5 | `formal/sw/cbmc/run_proof.sh` (CBMC; FIND by exhaustive enumeration), 5 planted mutants | **proved** over the stated domains (A4 and A5 as inductive steps; A4 assumes limbs stay under 100) |
 | B1, B2 | `TITLE=proof formal/sw/fuzz.sh` on the Sail RV32 model | **tested** |
+
+Found by reading the code against the clauses (no test had reached it): S2 and W5 said at most one
+pickup a frame, but every pickup on screen is updated each frame, so two drops overlapping the
+player are taken together.  The clauses now count each pickup (one heart each, up to five; up to
+10 energy each, one tactic).
 
 Coverage gaps the oracle cannot close by itself: the demo takes about ten energy pickups in
 30,000 frames, all within 4 of full, so W5's refill bound is checked but barely exercised (a planted
@@ -132,9 +139,21 @@ and W3 holds after every frame.
      write, address escape and array decay are each reported.
    - `spec_step` is the conjunction of one function per clause (`spec_S0` .. `spec_S6`,
      `spec_W45`), so a proof can assert a single clause in the spec's own words.
-   - Each family is then proved on the real `proof_frame`, with every callee that the census says
-     cannot reach the family's variables replaced by a stub that havocs the rest of the state,
-     and the ones that can, by a stub that also calls the real writers.
-   This is in progress; nothing in N, I, S or W is proved yet.
+   - Each family is then proved on the real `proof_frame` (`formal/sw/cbmc/proof_rules.c`,
+     `run_rules.sh`).  `gen_stubs.py` replaces each callee with a stub that havocs every global
+     that is not a rule variable, sets each rule variable it may write to anything (or, when all
+     its writers store constants, to one of those constants), leaves the family's variables to
+     the real writer (a stub that may reach `boss_damage` calls it once with 1..4: BD_NOOP shows
+     a second call in the frame would do nothing, since the flash it sets is counted down only
+     after every callee), and returns any value.  A few callees stay real because a stub would
+     lose a correlation the family needs (`next_demo` and `title_screen` clear the boss only
+     together with going to the title); their own callees are stubbed in turn.
+   - **S3 is proved this way** (about four minutes of CBMC).  The first attempts found two
+     things a stub may do that the real code never does: a shot hits the boss only in a fight,
+     and the title clears the boss only with the state.  The first is now `boss_damage`'s own
+     precondition (it returns unless the fight's boss is live and not flashing, which every
+     caller already ensured; device-write traces are byte-identical before and after on the demo
+     and on random button scripts), so the proof does not depend on the shot code's context.
+   - Next: S2 (hearts: `player_hurt`, the pickups, start_stage) and W4/W5 (energy), the same way.
 2. **The binary**: B2 makes the binary's behaviour equal the host build's on every fuzzed script;
    a proof needs tier 3 (the binary against Sail) for the whole frame, or a verified compiler.
