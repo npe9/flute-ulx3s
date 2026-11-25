@@ -20,10 +20,10 @@ pad lantern_f$FRAMES
 mkdir -p $R/build/game2d
 cc -O2 -Wall -o $R/build/game2d/lantern_host host.c lantern.c sound.c ../vdp/vdp_ref.c
 # Proof Obligation (proof.c, proof_boss.c, proof_sound.c): the same board and host glue
-P="-DTITLE_PROOF board.c proof.c proof_boss.c proof_sound.c"
+P="-DTITLE_PROOF board.c proof.c proof_boss.c proof_sound.c proof_portraits.c"
 $CC $COMMON -o proof.elf ${P} bench_rt.o -lgcc
 pad proof
 $CC $COMMON -DGAME_FRAMES=$FRAMES -o proof_f$FRAMES.elf ${P} bench_rt.o -lgcc
 pad proof_f$FRAMES
-cc -O2 -Wall -DTITLE_PROOF -o $R/build/game2d/proof_host host.c proof.c proof_boss.c proof_sound.c ../vdp/vdp_ref.c
+cc -O2 -Wall -DTITLE_PROOF -o $R/build/game2d/proof_host host.c proof.c proof_boss.c proof_sound.c proof_portraits.c ../vdp/vdp_ref.c
 ls -l lantern.bin lantern_f$FRAMES.bin proof.bin proof_f$FRAMES.bin

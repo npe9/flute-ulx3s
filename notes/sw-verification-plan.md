@@ -86,8 +86,12 @@ symbol runs (the port is parked at 0xBFFFFFF0, outside the map).  The binary is 
 board's own `lantern.elf` (since 2026-11-23; before, the `lantern_f<n>.elf` variant), stopped by
 socdev after n frames (`SOC_FRAMES`); fuzz.sh prints its md5, the same file tier 3 proves about.  `formal/sw/fuzz.sh [runs] [frames] [seed]`:
 2,000 frames take ~4 s on Sail.  `TITLE=proof` fuzzes the second title, Proof Obligation
-(`proof.elf`, notes/proof-obligation.md): 8 runs x 3,000 frames PASS (2026-11-23); tiers 2 and 3
-do not cover it yet.  Results:
+(`proof.elf`, notes/proof-obligation.md): 8 runs x 3,000 frames PASS (2026-11-23).  Tier 2
+covers its boss algorithms, not its engine: `formal/sw/cbmc/run_proof.sh` proves seven theorems
+on the game's own functions (compiler = evaluator, the K-state ring's deadlock freedom, closure
+and 24-move convergence, FIND's postcondition and 75-step termination, the Fiat limbs and Kami
+pipeline invariants as inductive steps), with five planted mutants
+(`run_proof_mutants.sh`); tier 3 does not cover it.  Results:
 - 40 frames, no buttons: Sail's trace = the host build's (4,585 writes).
 - Campaigns of 200 runs x 2,000 frames: PASS, ~116,750 writes a run (seed 7 on the source before
   tier 2's fixes, seed 11 after; half the runs with random UART / frame-counter timing).  Line

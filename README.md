@@ -756,12 +756,18 @@ Both are original designs of the 8/16-bit console class, not compatible with any
 `notes/proof-obligation.md`), a formal methods platformer: you are the tombstone (the end-of-proof
 mark), throwing lemmas through seven stages whose bosses are John McCarthy, Edsger Dijkstra, Tony
 Hoare, Leslie Lamport, Andrew Appel, Robert Harper and Adam Chlipala, each attacking with their
-own published ideas as game mechanics (cons cells that split into car and cdr, mark-and-sweep
-that frees the unreachable floor, shortest-path seekers, P/V semaphore gates, quicksort run on
-the arena's pillars, logical clocks, the bakery, Paxos quorums, continuations, proof-carrying
-code, a generational nursery, unityped orbs, computational trinitarianism, parallelism is not
-concurrency, `crush`, Bedrock footprints, Ur/Web links; the table is in the notes). The bosses
-are original emblem figures, not likenesses. Both titles play themselves when idle (an attract
+own formal-methods ideas as game mechanics, and where the idea is an algorithm the boss runs the
+real one: an expression compiled to stack code whose answer equals its value (McCarthy-Painter),
+recursion induction, AMB; the weakest precondition of a conveyor program, guarded commands, a
+loop variant, Dijkstra's K-state self-stabilizing ring; `{P} C {Q}`, Hoare's FIND with its
+invariant, a CSP rendezvous that deadlocks; a TLC-style breadth-first state search, safety and
+liveness, logical clocks, Paxos; proof-carrying code, step-indexed models, VST's no use after
+free; progress and preservation, LF derivations, "well-typed programs do not go wrong",
+computational trinitarianism; `crush`, Bedrock footprints, Fiat-style carry limbs mod 99999, a
+Kami pipeline replaying its spec (the table is in the notes). Six bosses are 32x32 caricatures
+drawn from Wikimedia Commons photographs (`sw/game2d/portraits.py`; each sprite carries its
+photo's licence, listed in `proof_portraits.c` and the notes); Adam Chlipala, with no free photo,
+stays an original emblem figure. A defeat is "Q.E.D.". Both titles play themselves when idle (an attract
 demo), and `-DTITLE_PROOF` selects Proof Obligation in `board.c`, `host.c` and the verification
 harnesses (`TITLE=proof formal/sw/fuzz.sh`, `TITLE=proof sim/game2d/frame_check.sh`); Lantern
 Drift's binary is unchanged by it. Checks: `sim/vdp_ut/run.sh` and `sim/apu_ut/run.sh` compare each
@@ -781,7 +787,11 @@ and never trap (S1), and must make exactly the host build's device writes (S2); 
 frames pass. Tier 2 (`formal/sw/cbmc/run.sh`, proved): CBMC shows by induction that for every
 button sequence the C code never has undefined behaviour, writes only real registers, keys only
 configured APU voices and makes at most 75 writes a frame. It found two frame counters that
-overflowed after ~414 days, fixed. Each tier has planted bugs it must catch
+overflowed after ~414 days, fixed. For Proof Obligation, tier 2 covers the bosses' algorithms
+(`formal/sw/cbmc/run_proof.sh`): the compiled stack code equals the evaluator, Dijkstra's K-state
+ring never deadlocks and stabilizes within 24 moves under any daemon, FIND terminates and meets
+its postcondition for every array, and the Fiat limbs and Kami pipeline invariants are inductive;
+its engine is tested, not proved. Each tier has planted bugs it must catch
 (`mutants.sh`). Tier 3 (`formal/sw/rocq/build.sh`, proved) checks the binary itself in Rocq against Sail's RV32
 model generated as Rocq: so far, that the compiled `hw_palette` writes exactly one word at
 `0xC0010400 + 4·index` for every index, in any machine state, without a trap (with the data and

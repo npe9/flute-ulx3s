@@ -170,10 +170,12 @@ static void make_bg_tiles (void) {
    tile_put (BT_GATE);
    tile_fill (2); for (int c = 0; c < 8; c++) { px (0, c, 4); px (1, c, 4); px (2, c, (c & 1) ? 4 : 2); }
    tile_put (BT_ZONE);
-   for (int k = 0; k < 3; k++) {
-      tile_fill (1 + k); for (int c = 0; c < 8; c++) { px (0, c, 4); px (7, c, 5); }
-      tile_put (BT_RED + k);
-   }
+   tile_fill (0); px (2, 2, 3); px (2, 6, 3); px (6, 2, 3); px (6, 6, 3); px (4, 4, 4);   // a visited state
+   tile_put (BT_RED);
+   tile_fill (5); for (int c = 0; c < 8; c++) { px (0, c, 4); px (1, c, 2); px (3, c, (c & 2) ? 2 : 5); px (5, c, (c & 2) ? 5 : 2); }
+   tile_put (BT_GREEN);                                                                        // a belt
+   tile_fill (1); for (int c = 0; c < 8; c++) { px (0, c, 4); px (2, c, (c & 1) ? 4 : 1); px ((c * 3) & 7, c, 5); }
+   tile_put (BT_BLUE);                                                                         // hot floor
    tile_fill (4);
    for (int c = 0; c < 8; c++) { px (0, c, 1); px (4, c, 1); px (1, c, 3); }
    for (int r = 1; r < 4; r++) px (r, 0, 1);
@@ -336,6 +338,21 @@ static void make_sprites (void) {
 static uint8_t g32 [32][32];
 static void make_boss_tiles (int b) {
    const char *em = bosses [b].emblem;
+   if (b < 6) {                                     // a caricature; frame 1 (attacking) hops a row up
+      for (int f = 0; f < 2; f++) {
+         for (int r = 0; r < 32; r++)
+            for (int c = 0; c < 32; c++) {
+               int sr = r + f;
+               char ch = sr < 32 ? portrait_rows [b][sr][c] : '0';
+               g32 [r][c] = (uint8_t) (ch <= '9' ? ch - '0' : ch - 'a' + 10);
+            }
+         for (int q = 0; q < 4; q++) {
+            for (int r = 0; r < 16; r++) for (int c = 0; c < 16; c++) g16 [r][c] = g32 [r + 16 * (q >> 1)][c + 16 * (q & 1)];
+            g16_put (T_BOSS + 32 * b + 16 * f + 4 * q);
+         }
+      }
+      return;
+   }
    for (int f = 0; f < 2; f++) {
       for (int r = 0; r < 32; r++) for (int c = 0; c < 32; c++) g32 [r][c] = 0;
       for (int r = 0; r < 32; r++)                 // the robe: wider toward the hem
@@ -375,7 +392,7 @@ static void make_boss_tiles (int b) {
 
 // ================================================================ the world map
 int k_solid (int k) { return k == K_GROUND || k == K_BRICK || k == K_PILLAR || k == K_PIVOT || k == K_GATE || k == K_ZONE
-                             || k == K_RED || k == K_GREEN || k == K_BLUE || k == K_MARKED || k == K_DOOMED; }
+                             || k == K_BELT || k == K_HOT || k == K_MARKED || k == K_DOOMED; }
 int solid_px (int x, int y) {
    if (y < 0 || y >= 8 * ROWS) return 0;
    if (x < 0 || x >= 8 * wcols) return 1;
@@ -395,9 +412,9 @@ static uint16_t kind_entry (int c, int r) {
    case K_PIVOT:  return vdp_map_entry (BT_PIVOT, B_PROP, 0, 0);
    case K_GATE:   return vdp_map_entry (BT_GATE, B_PROP, 0, 0);
    case K_ZONE:   return vdp_map_entry (BT_ZONE, B_TERRAIN, 0, 0);
-   case K_RED:    return vdp_map_entry (BT_RED, B_COLOR, 0, 0);
-   case K_GREEN:  return vdp_map_entry (BT_GREEN, B_COLOR, 0, 0);
-   case K_BLUE:   return vdp_map_entry (BT_BLUE, B_COLOR, 0, 0);
+   case K_STATE:  return vdp_map_entry (BT_RED, B_COLOR, 0, 0);
+   case K_BELT:   return vdp_map_entry (BT_GREEN, B_COLOR, 0, 0);
+   case K_HOT:    return vdp_map_entry (BT_BLUE, B_COLOR, 0, 0);
    case K_MARKED: return vdp_map_entry (BT_MARKED, B_BRICK, 0, 0);
    case K_DOOMED: return vdp_map_entry (BT_DOOMED, B_BRICK, 0, 0);
    default: {
@@ -517,6 +534,11 @@ void player_hurt (void) {
    if (pl_lives <= 0) pl_dead = 1;
 }
 void set_spawn (int x, int y) { spawn_x = x; spawn_y = y; }
+void player_push (int dx) {
+   int nx = (pl_fx + dx) >> 4;
+   if (nx != pl_x && box_solid (nx, pl_y)) return;
+   pl_fx += dx; pl_x = pl_fx >> 4;
+}
 static void pit_respawn (void) {
    player_hurt ();
    pl_x = spawn_x; pl_y = spawn_y; pl_fx = pl_x << 4; pl_fy = pl_y << 4; pl_vy = 0;
@@ -659,7 +681,8 @@ static void stage_palette (int b) {
    bank_set (B_BRICK, brick, 5);
    uint32_t bossc [7] = { 0x101010, 0xE8C8A0, 0, 0, 0x101010, 0, 0 };
    bossc [2] = d->body; bossc [3] = d->trim; bossc [5] = (d->body >> 1) & 0x7F7F7F; bossc [6] = d->trim;
-   bank_set (B_BOSS, bossc, 7);
+   if (b < 6) bank_set (B_BOSS, portrait_pal [b], 15);
+   else bank_set (B_BOSS, bossc, 7);
    (void) sky_cols;
 }
 
@@ -834,6 +857,8 @@ static void draw (void) {
    if (boss.on && !boss.hidden && !(boss.flash & 2)) {
       int base = T_BOSS + 32 * cur_boss + 16 * boss.frame;
       for (int q = 0; q < 4; q++) spr (S_BOSS + q, boss.x - cam + 16 * (q & 1), boss.y + 16 * (q >> 1), base + 4 * q, B_BOSS, VDP_SPR_ON);
+   } else if (g_state == G_TITLE) {                   // the chosen boss, top right
+      for (int q = 0; q < 4; q++) spr (S_BOSS + q, 278 + 16 * (q & 1), 8 + 16 * (q >> 1), T_BOSS + 32 * sel + 4 * q, B_BOSS, VDP_SPR_ON);
    } else for (int q = 0; q < 4; q++) spr_off (S_BOSS + q);
    for (int i = 0; i < NBUL; i++)
       if (bul [i].on && (bul [i].y >> 4) <= 210)   // lower, it is in the ground and would cost HUD-line slots

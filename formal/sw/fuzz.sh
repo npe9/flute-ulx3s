@@ -37,7 +37,7 @@ TITLE=${TITLE:-lantern}
 ELF=$ROOT/sw/game2d/$TITLE.elf
 echo "fuzz: $(md5 -q "$ELF") $ELF"
 export SOC_FRAMES=$FRAMES
-if [ "$TITLE" = proof ]; then SRCS="-DTITLE_PROOF $ROOT/sw/game2d/proof.c $ROOT/sw/game2d/proof_boss.c $ROOT/sw/game2d/proof_sound.c"
+if [ "$TITLE" = proof ]; then SRCS="-DTITLE_PROOF $ROOT/sw/game2d/proof.c $ROOT/sw/game2d/proof_boss.c $ROOT/sw/game2d/proof_sound.c $ROOT/sw/game2d/proof_portraits.c"
 else SRCS="$ROOT/sw/game2d/lantern.c $ROOT/sw/game2d/sound.c"; fi
 cc -O2 -Wall -o "$OUT/host_trace" "$ROOT/formal/sw/host_trace.c" $SRCS \
    || { echo "fuzz: host build failed"; exit 2; }
