@@ -13,6 +13,7 @@ constraint files, maps or serial logs.  This repo owns six areas: `board` and `l
 | `pins [NAME \| --grep RE]` | site, IO type, pull, drive, frequency (bus `IOBUF PORT "x[*]"` rules applied to each `x[i]`) | `constraints/ulx3s_85f.lpf`, with file:line |
 | `clock` | the crystal, every `SYS_PLL` option with its system clock, the default | the .lpf and the Makefile |
 | `map [ADDR \| NAME]` | base, limit, size, and the `ifdef`s an entry needs (an SoC profile) | `Flute/src_Testbench/SoC/SoC_Map.bsv` |
+| `periph [NAME]` | the device table SoC_Info serves (`fn_soc_memmap`): device, base, size, bus, fabric-decoded or direct, PLIC source (`irq_num_x` + 1), ifdefs | `SoC_Map.bsv`, with file:line |
 | `state` | what is in flash, how a restart works, read-only devices and refused images | `tools/hw/data/ulx3s.toml` |
 
 Facts not in the sources live in `tools/hw/data/ulx3s.toml` (public: board facts only).  A missing
@@ -24,7 +25,8 @@ fact is an error record (`HW-E-NO-FACTS`), never a guess.
 |---|---|
 | `restart` | JTAG refresh (`openFPGALoader -r`, ~0.3 s): the FPGA reloads flash slot 0 |
 | `load BIT` | `openFPGALoader -b ulx3s -m BIT`: SRAM only; prints the md5 |
-| `serial [--until RE] [--timeout S] [--send TEXT]` | the console at `HW_BAUD` (default 1,000,000); returns the matching line and a few before it, and stores the whole capture (`raw_ref` `serial:<time>`, under `build/hw/`) |
+| `serial [--until RE] [--timeout S] [--send TEXT] [--restart]` | the console at `HW_BAUD` (default 1,000,000); returns the matching line and a few before it, and stores the whole capture (`raw_ref` `serial:<time>`, under `build/hw/`).  `--restart` does the JTAG refresh and opens the console right after it under one lock: the FTDI cannot hold JTAG and the tty at once, so the console opens ~0.3 s after the refresh starts and the first boot bytes (the banner) are still lost; the answer says how many ms |
+| `test SUITE BIT [--pnr LOG] [--force] [--env EXPECT_X=V] [--quick]` | loads BIT to SRAM and runs `suite` (scripts/hw_test_suite.py), `cache`, `amo` or `blob --blob FILE` (T/M/D images through scripts/loader.py --no-banner right after the load); one check per test (name, expected, observed, raw_ref) recorded in `.hw/state.db` with the bit's md5/sha256.  Refuses (before the lock) a bitstream whose post-route log (`pnr-s<N>.log` beside it, or `--pnr`) shows < 10% margin on any clock or cannot be found (rule 7; `--force` overrides), and images on the `[readonly]` list (`HW-E-DENIED`).  A loader/harness failure is `HW-E-LAB-HARNESS`, not a test verdict |
 | `raw serial:<time> [--from N] [--lines N]` | a bounded slice of a stored capture |
 | `lock` | the shared lock's holder, and who has the console open |
 | `flash`, `power-cycle` | refused: `HW-E-FLASH-DENIED` (flash and promotion are the user's decision; use `load`), `HW-E-UNSUPPORTED` (the hub port does not cut power; use `restart`) |
@@ -46,7 +48,7 @@ reported on stderr and never changes the answer.
 
 ## Tests and measurement
 
-`python3 -I tools/hw/tests/run_tests.py`: 19 checks; the board answers each have a negative
+`python3 -I tools/hw/tests/run_tests.py`: 37 checks; the board answers each have a negative
 control (the same query on a copy with a moved pin or device must change), and the lab checks
 are its refusals and error records (no board needed).  On the board, `restart` and `serial`
 were run by hand (2026-11-25: restart 0.3 s; the flash image's SD-load progress dots captured).
@@ -54,8 +56,12 @@ were run by hand (2026-11-25: restart 0.3 s; the flash image's SD-load progress 
 One real question ("the console RX pin and its IO standard, and UART0's address"): reading the
 .lpf and SoC_Map.bsv is 41,209 bytes (~10,300 tokens); two `hw board` queries are 160 bytes (~40).
 
-Not done yet: `lab test` (the hardware suite as records), `serial --restart` (a capture that
-starts before the restart, so the first output is not missed), `board periph`, other boards.
+`lab test` refusals (thin margin vs its +15% control, unknown margin vs `--force`, read-only image
+vs a safe one) and the T/M/D and suite output parsers have negative controls there.  On the board
+(2026-11-25, promoted lx49c s3, +12.7%): `test cache` PASS, `serial --restart` 275 ms.
+
+Not done yet: other boards; a console capture that includes the boot banner (needs a second
+UART path, since the FTDI serves JTAG and the console).
 
 ## hw timing / place / fw / perf (the FPGA flow and firmware)
 

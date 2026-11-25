@@ -153,8 +153,10 @@ byte count, streams the file, then relays anything the loaded program prints.
 For agents, `tools/hw/` answers board questions and drives the board with short, structured
 results (the `board` and `lab` areas of the hwsh shell; `notes/hw-shell.md`):
 `board.py pins NAME`, `clock`, `map ADDR`, `state` read the constraints, Makefile and SoC map;
-`lab.py restart` (JTAG refresh), `load BIT` (SRAM only), `serial --until RE` and `lock` act on
-the board under the machine's shared ULX3S lease lock.  `lab.py` never writes flash and cannot
+`lab.py restart` (JTAG refresh), `load BIT` (SRAM only), `serial --until RE [--restart]`, `test
+suite|cache|amo BIT` (the hardware gates as check records; refuses a bitstream under 10% post-route
+margin and the SD-writing images) and `lock` act on the board under the machine's shared ULX3S
+lease lock; `board.py periph` lists the SoC device table with PLIC sources.  `lab.py` never writes flash and cannot
 power-cycle the board; it refuses both with an error record saying what to do instead.
 `timing.py summary build/<b>/pnr-s*.log` gives the routed Fmax per clock and seed (never a
 placement estimate), `worst`/`path` the critical paths; `place.py` reads a nextpnr `--write` JSON;

@@ -4,6 +4,8 @@
   hw board pins [NAME|--grep RE] [--limit N|--all] [--json]   the .lpf: site, IO type, pull, drive
   hw board clock [--json]                                       crystal, PLL options, the promoted clock
   hw board map [ADDR|NAME] [--json]                             the SoC memory map (SoC_Map.bsv)
+  hw board periph [NAME] [--json]                               the SoC device table (fn_soc_memmap): device,
+                                                                base, size, bus, fabric decode, PLIC source
   hw board state [--json]                                       what is on the board (data/ulx3s.toml)
 
 Every record carries the file:line it was read from.  A fact the sources do not hold is an
@@ -172,6 +174,71 @@ def cmd_map(a):
                   map=shown, **more)
 
 
+RX_REGION = re.compile(r'MemRegion\s*\{name:\s*"(\w+)",\s*device:\s*(\w+),\s*base:\s*truncate\s*\((\w+)_addr_base\),'
+                       r'\s*size:[^,]+,\s*bus:\s*"(\w+)",\s*fabric_decoded:\s*(True|False),\s*irq:\s*([^,]+),\s*flags:\s*(\d+)')
+
+
+def read_periph():
+    """-> the MemRegion rows of fn_soc_memmap (the table SoC_Info serves), with base/size from read_map()."""
+    addr = {r['name']: r for r in read_map()}
+    irqs, rows, stack, inside = {}, [], [], False
+    with open(SOC_MAP) as fh:
+        text = fh.read().split('\n')
+    for l in text:
+        m = re.match(r'\s*Integer\s+irq_num_(\w+)\s*=\s*(\d+)\s*;', l)
+        if m:
+            irqs[m.group(1)] = int(m.group(2))
+    for n, line in enumerate(text, 1):
+        s = line.strip()
+        if s.startswith('function List #(MemRegion) fn_soc_memmap'):
+            inside = True
+            continue
+        if not inside:
+            continue
+        if s.startswith('endfunction'):
+            break
+        m = re.match(r'`(ifdef|ifndef)\s+(\w+)', s)
+        if m: stack.append(('!' if m.group(1) == 'ifndef' else '') + m.group(2)); continue
+        if s.startswith('`else') and stack:
+            stack[-1] = stack[-1][1:] if stack[-1].startswith('!') else '!' + stack[-1]; continue
+        if s.startswith('`endif') and stack: stack.pop(); continue
+        m = RX_REGION.search(s)
+        if not m:
+            continue
+        name, dev, sym, bus, dec, irq, flags = m.groups()
+        a = addr.get(sym)
+        im = re.match(r'fromInteger\s*\(irq_num_(\w+)\)', irq.strip())
+        if im and im.group(1) not in irqs:
+            raise HwError('HW-E-NO-FACTS', 'irq_num_%s has no value in %s' % (im.group(1), rel(SOC_MAP)))
+        # Flute's PLIC: v_sources[j] is PLIC source j+1 (source 0 is "no interrupt")
+        src = irqs[im.group(1)] + 1 if im else None
+        rows.append({'name': name, 'device': dev, 'base': a and a['base'], 'size': a and a['size'], 'bus': bus,
+                     'fabric_decoded': dec == 'True', 'plic_source': src, 'flags': int(flags),
+                     'ifdef': list(stack), 'loc': '%s:%d' % (rel(SOC_MAP), n),
+                     'addr_loc': a and a['loc']})
+    if not rows:
+        raise HwError('HW-E-NO-FACTS', 'no MemRegion table (fn_soc_memmap) in %s' % rel(SOC_MAP))
+    return rows
+
+
+def cmd_periph(a):
+    rows = read_periph()
+    if a.what:
+        rows = [r for r in rows if a.what.lower() in (r['name'] + ' ' + r['device']).lower()]
+        if not rows:
+            raise HwError('HW-E-NOT-FOUND', 'no device matching `%s`' % a.what, 'hw board periph (the whole table)')
+    shown, more = bounded(rows, a.limit, a.all, cursor=lambda i: 'periph:%d' % i)
+    lines = []
+    for r in shown:
+        cond = (' [if %s]' % ' && '.join(r['ifdef'])) if r['ifdef'] else ''
+        lines.append('%-9s %-12s %s %-7s %-8s%s%s (%s)' % (
+            r['name'], r['device'], '0x%08x %6s' % (r['base'], size(r['size'])) if r['base'] is not None else '(no base)',
+            r['bus'], 'fabric' if r['fabric_decoded'] else 'direct', ' irq %d' % r['plic_source'] if r['plic_source'] else '',
+            cond, r['loc']))
+    note = 'irq = PLIC source number (Flute v_sources[j] = source j+1); [if X] = only in builds that define X'
+    return Result('board periph', lines=lines + [note], periph=shown, **more, _inputs=[SOC_MAP])
+
+
 def cmd_state(a):
     f, lines = facts(), []
     b = f.get('board', {})
@@ -187,7 +254,7 @@ def main(argv):
     ap = common.Parser(prog='hw board')
     ap.add_argument('--json', action='store_true')
     sub = ap.add_subparsers(dest='verb', parser_class=common.Parser)
-    for v in ('pins', 'clock', 'map', 'state'):
+    for v in ('pins', 'clock', 'map', 'periph', 'state'):
         p = sub.add_parser(v)
         p.add_argument('--json', action='store_true')
         p.add_argument('--limit', type=int, default=20)
@@ -195,13 +262,13 @@ def main(argv):
         if v == 'pins':
             p.add_argument('name', nargs='?')
             p.add_argument('--grep')
-        if v == 'map':
+        if v in ('map', 'periph'):
             p.add_argument('what', nargs='?')
     def dispatch(a):
-        fn = {'pins': cmd_pins, 'clock': cmd_clock, 'map': cmd_map, 'state': cmd_state}.get(a.verb)
+        fn = {'pins': cmd_pins, 'clock': cmd_clock, 'map': cmd_map, 'periph': cmd_periph, 'state': cmd_state}.get(a.verb)
         if fn is None:
             def fn(_):
-                raise HwError('HW-E-BADREQ', 'hw board needs a verb: pins, clock, map, state', 'hw board pins --grep led')
+                raise HwError('HW-E-BADREQ', 'hw board needs a verb: pins, clock, map, periph, state', 'hw board pins --grep led')
         return fn(a)
     return common.run(dispatch, argv, ap.parse_args)
 
