@@ -50,9 +50,11 @@ static void spr (int i, int x, int y, int tile, int bnk, int flags) {
 }
 static void spr_off (int i) { spr_sh [2 * i + 1] = 0; }
 
+static int flush_pal, flush_map, flush_spr, flush_reg;   // this frame's writes (the spec's V2)
 static void flush (void) {
+   flush_pal = flush_map = flush_spr = flush_reg = 0;
    for (int i = 0; i < 256; i++)
-      if (pal_dirty [i]) { pal_dirty [i] = 0; hw_palette (i, pal_sh [i]); }
+      if (pal_dirty [i]) { pal_dirty [i] = 0; hw_palette (i, pal_sh [i]); flush_pal++; }
    int k = 0;
    while (pn > 0 && k < MAP_FLUSH_MAX) {
       int w = plist [--pn];
@@ -61,10 +63,11 @@ static void flush (void) {
       hw_vdp_write (VDP_MAP + 4 * (uint32_t) w, (uint32_t) plane [r][c] | ((uint32_t) plane [r][c + 1] << 16));
       k++;
    }
+   flush_map = k;
    for (int i = 0; i < 128; i++)
-      if (spr_sh [i] != spr_hw [i]) { spr_hw [i] = spr_sh [i]; hw_vdp_write (VDP_SPRITES + 4 * (uint32_t) i, spr_sh [i]); }
-   if (scroll_sh != scroll_hw) { scroll_hw = scroll_sh; hw_vdp_write (VDP_BG_SCROLL, scroll_sh); }
-   if (ctrl_sh != ctrl_hw) { ctrl_hw = ctrl_sh; hw_vdp_write (VDP_CTRL, ctrl_sh); }
+      if (spr_sh [i] != spr_hw [i]) { spr_hw [i] = spr_sh [i]; hw_vdp_write (VDP_SPRITES + 4 * (uint32_t) i, spr_sh [i]); flush_spr++; }
+   if (scroll_sh != scroll_hw) { scroll_hw = scroll_sh; hw_vdp_write (VDP_BG_SCROLL, scroll_sh); flush_reg++; }
+   if (ctrl_sh != ctrl_hw) { ctrl_hw = ctrl_sh; hw_vdp_write (VDP_CTRL, ctrl_sh); flush_reg++; }
 }
 
 // ================================================================ tiles
@@ -993,6 +996,8 @@ void proof_observe (spec_state *s) {
    for (int i = 0; i < 3; i++) s->nshots += shots [i].on != 0;
    for (int i = 0; i < NBUL; i++) s->nbul += bul [i].on != 0;
    for (int i = 0; i < NPROP; i++) s->nprops += props [i].on != 0;
+   s->w_pal = flush_pal; s->w_map = flush_map; s->w_spr = flush_spr; s->w_reg = flush_reg;
+   s->vdp_writes = -1;                                 // the observer (host.c) may know it
    s->weapon = -1; s->owned = 1;                       // no tactics in the engine yet
    for (int w = 0; w < SP_NWEAPON; w++) s->energy [w] = 0;
 }

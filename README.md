@@ -795,8 +795,8 @@ its engine is tested, not proved. The game itself is written down as a specifica
 (`notes/proof-obligation-spec.md`, the same clauses as C predicates in `sw/game2d/proof_spec.c`:
 power-on, invariants, and what one frame may change -- hearts, the boss's hit points, the phase
 graph, discharged bosses, score, camera, tactics); every host run with `HOST_SPEC=1` and every fuzz
-script checks it on every frame, and `formal/sw/spec_mutants.sh` plants six engine bugs it must
-catch. Each tier has planted bugs it must catch
+script checks it on every frame, and `formal/sw/spec_mutants.sh` plants seven engine bugs it must
+catch (one makes a VDP write outside the vertical-blank flush). Each tier has planted bugs it must catch
 (`mutants.sh`). Tier 3 (`formal/sw/rocq/build.sh`, proved) checks the binary itself in Rocq against Sail's RV32
 model generated as Rocq: so far, that the compiled `hw_palette` writes exactly one word at
 `0xC0010400 + 4·index` for every index, in any machine state, without a trap (with the data and

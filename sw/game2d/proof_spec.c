@@ -32,6 +32,9 @@ const char *spec_inv (const spec_state *s) {
    REQUIRE (s->certs >= 0, "I7: certificates are counted");
    REQUIRE (s->nshots <= SP_NSHOT && s->nbul <= SP_NBUL && s->nprops <= SP_NPROP, "I7: object tables");
    REQUIRE (s->score >= 0, "I8: score is not negative");
+   REQUIRE (s->w_pal <= 256 && s->w_map <= 640 && s->w_spr <= 128 && s->w_reg <= 2, "V2: the flush's writes are bounded");
+   if (s->vdp_writes >= 0)
+      REQUIRE (s->vdp_writes == s->w_pal + s->w_map + s->w_spr + s->w_reg, "V2: every VDP write is the flush's");
    if (s->weapon >= 0) {
       REQUIRE (s->weapon < SP_NWEAPON && (s->owned & (1 << s->weapon)), "W1: the selected tactic is owned");
       REQUIRE (s->owned & 1, "W1: the lemma is always owned");

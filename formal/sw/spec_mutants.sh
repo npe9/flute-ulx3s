@@ -34,5 +34,10 @@ m demo_win    proof.c "         if (!demo) defeated |= 1 << cur_boss;" "        
 m cam_lead    proof.c "int want = pl_x - 140;" "int want = pl_x - 150;"
 # N2: a stage starts with six hearts
 m lives6      proof.c "pl_vy = 0; pl_lives = 5;" "pl_vy = 0; pl_lives = 6;"
+# V2: a VDP write outside the flush (it could land mid-screen)
+m stray_write proof.c "   psnd_frame ();
+   g_timer++;" "   psnd_frame ();
+   if ((t & 255) == 0) hw_vdp_write (VDP_BACKDROP, 1);
+   g_timer++;"
 echo "$missed missed"
 [ $missed = 0 ]

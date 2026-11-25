@@ -88,9 +88,9 @@ and the tactics (selected, owned, energy).  Three predicates over observations d
 
 | Clauses | Checked by | Status |
 |---|---|---|
-| N, I, S, W1-W3 | the host oracle: every frame of every host run with `HOST_SPEC=1` (30,000 demo frames; all 25 moves via `PROOF_TEST`, 2,400 frames each; random button scripts), and every frame of every fuzz script (`formal/sw/host_trace.c`, fuzz.sh reports `SPEC`) | **tested**: all inputs tried pass; six planted engine bugs, one per clause family, are each caught (`formal/sw/spec_mutants.sh`) |
+| N, I, S, W1-W3 | the host oracle: every frame of every host run with `HOST_SPEC=1` (30,000 demo frames; all 25 moves via `PROOF_TEST`, 2,400 frames each; random button scripts), and every frame of every fuzz script (`formal/sw/host_trace.c`, fuzz.sh reports `SPEC`) | **tested**: all inputs tried pass; seven planted engine bugs, one per clause family, are each caught (`formal/sw/spec_mutants.sh`) |
 | V1 | `HOST_OVERFLOW=2` on the same runs (the VDP reference model's per-line count) | **tested** |
-| V2 | by construction (the flush is the only writer; `HOST_STATS` measures 449 writes worst) | **by inspection**, not checked as a clause |
+| V2 | the host oracle: the flush counts its writes by kind, and host.c checks that every VDP write of the frame is one of them | **tested**; a planted write outside the flush is caught |
 | A1-A5 | `formal/sw/cbmc/run_proof.sh` (CBMC; FIND by exhaustive enumeration), 5 planted mutants | **proved** over the stated domains (A4 and A5 as inductive steps; A4 assumes limbs stay under 100) |
 | B1, B2 | `TITLE=proof formal/sw/fuzz.sh` on the Sail RV32 model | **tested** |
 
@@ -105,7 +105,5 @@ fixed to apply it to the tested fight only.
    buttons), as tier 2 does for Lantern Drift.  This turns N, I, S and W from tested into proved
    for the C program.  The frame has data-dependent loops (the TLC search layer, bullet tables)
    whose bounds must be stated.
-2. **V2 as a clause**: count writes per frame in the observation and add the bound to
-   `spec_step`.
-3. **The binary**: B2 makes the binary's behaviour equal the host build's on every fuzzed script;
+2. **The binary**: B2 makes the binary's behaviour equal the host build's on every fuzzed script;
    a proof needs tier 3 (the binary against Sail) for the whole frame, or a verified compiler.

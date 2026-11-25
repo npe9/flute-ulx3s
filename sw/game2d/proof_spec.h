@@ -36,6 +36,8 @@ typedef struct {
    unsigned t;                        // frames since power-on
    int boss_on, hp, flash, stun, shield, attack, nmoves;
    int nshots, nbul, nprops;          // live player shots, boss bullets, boss props
+   int w_pal, w_map, w_spr, w_reg;    // this frame's flush: palette, map, sprite, register writes
+   int vdp_writes;                    // all VDP writes this frame (host.c counts them; -1: unknown)
    // tactics (the Mega Man weapons); weapon < 0: not observed (the engine has none yet)
    int weapon, owned, energy [SP_NWEAPON];
 } spec_state;

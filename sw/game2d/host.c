@@ -91,6 +91,7 @@ int main (int argc, char **argv) {
 #ifdef TITLE_PROOF
       if (spec) {
          proof_observe (&sp_post);
+         sp_post.vdp_writes = (int) (nw_vdp - v0);       // every VDP write this frame (V2)
          const char *e = spec_inv (&sp_post);
          if (!e) e = spec_step (&sp_pre, b, &sp_post);
          if (e && spec_bad++ < 20) printf ("spec: frame %d: %s\n", f, e);
