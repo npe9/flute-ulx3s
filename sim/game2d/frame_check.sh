@@ -6,11 +6,12 @@
 # (APU_TRACE) is replayed into the APU reference model (sw/apu/replay.c: every sample equal), and
 # its writes must be exactly the host build's.  Also reports the CPU cycles per frame the title
 # used.
-#   sim/game2d/frame_check.sh [<game2d build dir>]     (default build/game2dv; FRAMES=40)
+#   sim/game2d/frame_check.sh [<game2d build dir>]     (default build/game2d, the netlist with
+#                                                       the APU; FRAMES=40)
 #   TITLE=proof sim/game2d/frame_check.sh ...           (Proof Obligation; default lantern)
 set -e
 R=$(cd "$(dirname "$0")/../.." && pwd); cd "$R"
-B=${1:-build/game2dv}
+B=${1:-build/game2d}
 FRAMES=${FRAMES:-40}
 TITLE=${TITLE:-lantern}
 L=$B/frame_check; [ "$TITLE" = lantern ] || L=${L}_$TITLE; mkdir -p $L

@@ -234,10 +234,10 @@ What is proved and what is only tested, separately (notes/sw-verification-plan.m
   - KAMI: "the pipeline holds the spec's last three inputs" is inductive over `km_step`, so every
     output equals the spec's input three steps earlier, for runs of any length (the empty pipeline
     satisfies it).
-  - Planted bugs: `run_proof_mutants.sh` makes nine one-line mutants (operator order, the K-state
-    copy rule, FIND's scan, the carry, the pipeline shift, and four in Paxos: phase 2 ignoring the
-    reported votes, a quorum of one, an acceptor voting below its promise, a learner trusting one
-    acceptor); each must fail its theorem.
+  - Planted bugs: `run_proof_mutants.sh` makes ten one-line mutants (operator order, the K-state
+    copy rule, FIND's scan, the carry, the pipeline shift, and five in Paxos: phase 2 ignoring the
+    reported votes, a quorum of one, an acceptor voting below its promise, both proposers using
+    every ballot, a learner trusting one acceptor); each must fail its theorem.
 - **Paxos (`px_*`): agreement proved** (`run_proof.sh` PAXOS_INIT, PAXOS_STEP, PAXOS_AGREE).
   - Agreement: never two values chosen, and `px_learned != 0` implies `px_chosen (px_learned)`,
     for every schedule of any length.
@@ -248,8 +248,8 @@ What is proved and what is only tested, separately (notes/sw-verification-plan.m
     CBMC proves it holds after `px_init`, that any single step from any state satisfying it keeps
     it, and that it implies agreement.  The network is the set of every message ever sent (ghost
     state): a step delivers any of them, at any time, any number of times, or never, so
-    reordering, duplication and loss are all covered; Prepare messages may even be forged, and an
-    Accepted message may be anything (the learner checks the vote).  Values 1..3, any own values.
+    reordering, duplication and loss are all covered; Prepare messages may even be forged and an
+    Accepted message may be anything, any integers at all (the learner checks the vote).  Values 1..3, any own values.
   - The first attempt failed the step proof on a learner record with a ballot but no value,
     which the code never makes (`px_accepted` refuses value 0); the invariant now says so.
   - Its precondition: messages are ones the steps produce.  A Promise carries what

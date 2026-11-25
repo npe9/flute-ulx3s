@@ -240,13 +240,14 @@ int main (void) {
 #ifdef PAXOS_STEP
 int main (void) {
    any_px_state ();
-   int a = nd (0, PX_A - 1), p = nd (0, 1), b = nd (0, PX_B - 1), v = nd (0, PX_V), pb, pv;
+   // a, b index the ghost network (a message that was sent); x, y, z are any ints at all
+   int a = nd (0, PX_A - 1), b = nd (0, PX_B - 1), p = nondet_int (), x = nondet_int (), y = nondet_int (), z = nondet_int (), pb, pv;
    switch (nd (0, 4)) {
-   case 0: px_start (nd (-1, 2), nd (-1, PX_B)); break;              // any start, enabled or not
-   case 1:                                                            // Prepare(b) to a: forgeable
-      if (px_prepare (a, b, &pb, &pv)) { g_ps [a][b] = 1; g_ppb [a][b] = pb; g_ppv [a][b] = pv; }
+   case 0: px_start (x, y); break;                                    // any start, enabled or not
+   case 1:                                                            // Prepare(y) to x: forgeable
+      if (px_prepare (x, y, &pb, &pv)) { g_ps [x][y] = 1; g_ppb [x][y] = pb; g_ppv [x][y] = pv; }
       break;
-   case 2:                                                            // a Promise a sent, to p
+   case 2:                                                            // a Promise a sent, to any p
       __CPROVER_assume (g_ps [a][b]);
       if (px_promise (p, a, b, g_ppb [a][b], g_ppv [a][b])) g_as [b] = px_pval [p];   // Accept(b, pval) to all
       break;
@@ -254,7 +255,7 @@ int main (void) {
       __CPROVER_assume (g_as [b] != 0);
       px_accept (a, b, g_as [b]);                                     // Accepted(b, v) goes out
       break;
-   case 4: px_accepted (a, b, v); break;                              // any Accepted at all
+   case 4: px_accepted (x, y, z); break;                              // any Accepted at all
    }
    __CPROVER_assert (px_inv (), "every step keeps the invariant");
    DONE ();

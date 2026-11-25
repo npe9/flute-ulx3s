@@ -19,8 +19,8 @@ agrees, and whether the host-only test hook is driving the fight (it forces a mo
 points, which the clauses that it legitimately breaks allow; it is always off on the board).  Three predicates over observations define the game:
 
 - `spec_init (s)`: the state at power-on (clauses N).
-- `spec_inv (s)`: true after every frame (clauses I, W1-W2).
-- `spec_step (s, buttons, s')`: relates the states before and after one frame (clauses S, W3).
+- `spec_inv (s)`: true after every frame (clauses I, V2, A6, W1-W3).
+- `spec_step (s, buttons, s')`: relates the states before and after one frame (clauses S, W4-W5).
 
 ## Clauses
 
@@ -101,10 +101,10 @@ McCarthy .. Chlipala), with energy costs 0, 1, 2, 4, 7, 2, 1, 3.
 
 | Clauses | Checked by | Status |
 |---|---|---|
-| N, I, S, W1-W3 | the host oracle: every frame of every host run with `HOST_SPEC=1` (30,000 demo frames; every boss, move (the last lemmas included) and tactic via `PROOF_TEST`, plus the pinch and last-lemma HP pins and the poke, parry and clean-proof hooks: 334 runs of 2,400 frames; random button scripts), and every frame of every fuzz script (`formal/sw/host_trace.c`, fuzz.sh reports `SPEC`) | **tested**: all inputs tried pass; eleven planted engine bugs (one or more per clause family) are each caught (`formal/sw/spec_mutants.sh`) |
+| N, I, S, W1-W5 | the host oracle: every frame of every host run with `HOST_SPEC=1` (30,000 demo frames; every boss, move (the last lemmas included) and tactic via `PROOF_TEST`, plus the pinch and last-lemma HP pins and the poke, parry and clean-proof hooks: 334 runs of 2,400 frames; random button scripts), and every frame of every fuzz script (`formal/sw/host_trace.c`, fuzz.sh reports `SPEC`) | **tested**: all inputs tried pass; eleven planted engine bugs (one or more per clause family) are each caught (`formal/sw/spec_mutants.sh`) |
 | V1 | `HOST_OVERFLOW=2` on the same runs (the VDP reference model's per-line count) | **tested** |
 | V2 | the host oracle: the flush counts its writes by kind, and host.c checks that every VDP write of the frame is one of them | **tested**; a planted write outside the flush is caught |
-| A6 | `run_proof.sh` PAXOS_INIT, PAXOS_STEP, PAXOS_AGREE: an inductive invariant of the `px_*` code, over every schedule (any order, loss, duplication); four planted protocol bugs fail it.  Also the host oracle on every frame of the game, and 1,000,000 random schedules (`proof_paxos_test.sh`) | **proved** for the protocol steps, assuming the game sends only the messages the steps produce; **tested** for the game around them |
+| A6 | `run_proof.sh` PAXOS_INIT, PAXOS_STEP, PAXOS_AGREE: an inductive invariant of the `px_*` code, over every schedule (any order, loss, duplication); five planted protocol bugs fail it.  Also the host oracle on every frame of the game, and 1,000,000 random schedules (`proof_paxos_test.sh`) | **proved** for the protocol steps, assuming the game sends only the messages the steps produce; **tested** for the game around them |
 | A1-A5 | `formal/sw/cbmc/run_proof.sh` (CBMC; FIND by exhaustive enumeration), 5 planted mutants | **proved** over the stated domains (A4 and A5 as inductive steps; A4 assumes limbs stay under 100) |
 | B1, B2 | `TITLE=proof formal/sw/fuzz.sh` on the Sail RV32 model | **tested** |
 
@@ -121,10 +121,20 @@ and W3 holds after every frame.
 
 ## Next: from tested to proved
 
-1. **The engine, in CBMC**: prove `spec_inv` is an inductive invariant of `proof_frame` and that
-   every frame satisfies `spec_step` (for all states satisfying a strengthened invariant, all
-   buttons), as tier 2 does for Lantern Drift.  This turns N, I, S and W from tested into proved
-   for the C program.  The frame has data-dependent loops (the TLC search layer, bullet tables)
-   whose bounds must be stated.
+1. **The engine, modularly.**  A whole-frame induction as for Lantern Drift is out of reach here
+   (`proof_frame` reaches 3,400 lines and 32 moves; CBMC already needs minutes for 60 lines of
+   Paxos).  The plan is per clause family:
+   - `formal/sw/census.py` lists, from clang's AST of the board build, every function that writes
+     each rule variable (or takes its address, or passes an array of it as a pointer: none do),
+     which functions may reach those writers through the call graph (indirect calls resolved by
+     the boss table's fields), and the argument values `boss_damage` receives (1..4, all
+     constants).  `--check formal/sw/census.allow` fails when any of it changes.  A planted
+     write, address escape and array decay are each reported.
+   - `spec_step` is the conjunction of one function per clause (`spec_S0` .. `spec_S6`,
+     `spec_W45`), so a proof can assert a single clause in the spec's own words.
+   - Each family is then proved on the real `proof_frame`, with every callee that the census says
+     cannot reach the family's variables replaced by a stub that havocs the rest of the state,
+     and the ones that can, by a stub that also calls the real writers.
+   This is in progress; nothing in N, I, S or W is proved yet.
 2. **The binary**: B2 makes the binary's behaviour equal the host build's on every fuzzed script;
    a proof needs tier 3 (the binary against Sail) for the whole frame, or a verified compiler.

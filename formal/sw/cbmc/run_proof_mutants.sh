@@ -46,6 +46,8 @@ m px_quorum PAXOS_STEP 10 "   if (n < 2) return 0;
    px_pph [p] = 2;"
 # an acceptor votes in a ballot below the one it promised
 m px_promise PAXOS_STEP 10 "|| v < 1 || b < px_prom [a]) return 0;" "|| v < 1) return 0;"
+# both proposers may use every ballot (two values proposed in one ballot)
+m px_owner PAXOS_STEP 10 "|| (b - 1) % 2 != p ||" "||"
 # the learner learns from one acceptor's Accepted
 m px_learn PAXOS_STEP 10 "for (int j = i + 1; j < PX_A; j++)" "for (int j = i; j < PX_A; j++)"
 echo "$missed missed"

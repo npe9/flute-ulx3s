@@ -52,4 +52,13 @@ void proof_observe (spec_state *s);   // proof.c: fill s from the engine
 const char *spec_init (const spec_state *s);
 const char *spec_inv (const spec_state *s);
 const char *spec_step (const spec_state *s, uint32_t buttons, const spec_state *n);
+// the clauses of spec_step, one each (S0 .. S6, W4-W5)
+const char *spec_S0 (const spec_state *s, uint32_t buttons, const spec_state *n);
+const char *spec_S1 (const spec_state *s, uint32_t buttons, const spec_state *n);
+const char *spec_S2 (const spec_state *s, uint32_t buttons, const spec_state *n);
+const char *spec_S3 (const spec_state *s, uint32_t buttons, const spec_state *n);
+const char *spec_S4 (const spec_state *s, uint32_t buttons, const spec_state *n);
+const char *spec_S5 (const spec_state *s, uint32_t buttons, const spec_state *n);
+const char *spec_S6 (const spec_state *s, uint32_t buttons, const spec_state *n);
+const char *spec_W45 (const spec_state *s, uint32_t buttons, const spec_state *n);
 #endif

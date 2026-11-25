@@ -62,13 +62,24 @@ static int edge (int a, int b, const spec_state *s, const spec_state *n) {
    return 0;
 }
 
-const char *spec_step (const spec_state *s, uint32_t buttons, const spec_state *n) {
+// spec_step's clauses, one function each (the modular proofs, formal/sw/cbmc/proof_rules.c,
+// prove them one at a time; spec_step is their conjunction)
+const char *spec_S0 (const spec_state *s, uint32_t buttons, const spec_state *n) {
+   (void) buttons;
    REQUIRE (n->t == s->t + 1, "S0: one frame passes");
+   return 0;
+}
+const char *spec_S1 (const spec_state *s, uint32_t buttons, const spec_state *n) {
+   (void) buttons;
    // S1: phases change only along the graph; the demo may also be left for the title at any time
    // (a button, or its time limit)
    int demo_exit = s->demo && n->state == SP_TITLE;
    REQUIRE (edge (s->state, n->state, s, n) || demo_exit, "S1: a phase change along the graph");
    REQUIRE (!(s->demo && buttons) || !n->demo, "S1: a button ends the demo");
+   return 0;
+}
+const char *spec_S2 (const spec_state *s, uint32_t buttons, const spec_state *n) {
+   (void) buttons;
    int entered = s->state == SP_TITLE && n->state == SP_PLAY;
    // S2: hearts: a stage starts with five; otherwise at most one is lost a frame, only when not
    // invulnerable, and losing one starts the invulnerable time
@@ -83,6 +94,10 @@ const char *spec_step (const spec_state *s, uint32_t buttons, const spec_state *
          REQUIRE (s->hurt <= 1 && n->hurt >= SP_HURT - 1, "S2: a heart is lost only when not invulnerable");
       REQUIRE (n->hurt >= s->hurt - 1 || n->hurt >= SP_HURT - 1, "S2: invulnerability counts down one a frame");
    }
+   return 0;
+}
+const char *spec_S3 (const spec_state *s, uint32_t buttons, const spec_state *n) {
+   (void) buttons;
    // S3: the boss: full at the fight's start; then hit points only fall, by 1..4, when it is not
    // flashing, and a hit starts the flash
    if (s->state == SP_ARENA && n->state == SP_FIGHT) REQUIRE ((n->hp == SP_HP || n->hooked) && n->flash == 0, "S3: a fight starts at 32 hp");
@@ -92,6 +107,10 @@ const char *spec_step (const spec_state *s, uint32_t buttons, const spec_state *
          REQUIRE (s->flash == 0 && s->hp - n->hp <= SP_MAXDMG && n->flash == SP_FLASH - 1, "S3: one hit of 1..4 when not flashing");
       REQUIRE ((n->state == SP_WIN) == (n->hp <= 0), "S3: the fight is won exactly when the boss has no hp");
    }
+   return 0;
+}
+const char *spec_S4 (const spec_state *s, uint32_t buttons, const spec_state *n) {
+   (void) buttons;
    // S4: discharged bosses: only a real (not demo) win adds one, the ending's restart clears all
    if (n->defeated != s->defeated) {
       int won = s->state == SP_FIGHT && n->state == SP_WIN && !s->demo && n->defeated == (s->defeated | (1 << s->cur_boss));
@@ -99,8 +118,16 @@ const char *spec_step (const spec_state *s, uint32_t buttons, const spec_state *
       REQUIRE (won || restart, "S4: only a win discharges a boss");
    }
    if (s->state == SP_FIGHT && n->state == SP_WIN && !s->demo) REQUIRE (n->defeated & (1 << s->cur_boss), "S4: a win discharges its boss");
+   return 0;
+}
+const char *spec_S5 (const spec_state *s, uint32_t buttons, const spec_state *n) {
+   (void) buttons;
    // S5: score only grows
    REQUIRE (n->score >= s->score, "S5: the score never falls");
+   return 0;
+}
+const char *spec_S6 (const spec_state *s, uint32_t buttons, const spec_state *n) {
+   (void) buttons;
    // S6: the camera: in a stage it follows the player, in the fight it is still
    if (s->state == SP_PLAY && n->state == SP_PLAY) {
       int want = n->x - SP_CAMLEAD;
@@ -108,6 +135,11 @@ const char *spec_step (const spec_state *s, uint32_t buttons, const spec_state *
       REQUIRE (n->cam == want, "S6: the camera follows the player");
    }
    if (s->state == SP_FIGHT && n->state == SP_FIGHT) REQUIRE (n->cam == s->cam, "S6: the arena does not scroll");
+   return 0;
+}
+const char *spec_W45 (const spec_state *s, uint32_t buttons, const spec_state *n) {
+   (void) buttons;
+   int entered = s->state == SP_TITLE && n->state == SP_PLAY;
    // W4, W5: energy.  A stage starts with every tactic full; otherwise a tactic's energy falls
    // only by firing it (exactly its cost, and only if that much was left) and rises only from an
    // energy pickup (at most 10, one tactic)
@@ -127,6 +159,16 @@ const char *spec_step (const spec_state *s, uint32_t buttons, const spec_state *
          }
          REQUIRE (rose <= 1, "W5: a pickup refills one tactic");
       }
+   }
+   return 0;
+}
+
+const char *spec_step (const spec_state *s, uint32_t buttons, const spec_state *n) {
+   const char *(*const clause []) (const spec_state *, uint32_t, const spec_state *) =
+      { spec_S0, spec_S1, spec_S2, spec_S3, spec_S4, spec_S5, spec_S6, spec_W45 };
+   for (unsigned k = 0; k < sizeof clause / sizeof clause [0]; k++) {
+      const char *e = clause [k] (s, buttons, n);
+      if (e) return e;
    }
    return 0;
 }

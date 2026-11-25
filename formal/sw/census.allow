@@ -1,0 +1,47 @@
+# formal/sw/census.allow: the functions allowed to write each rule variable of Proof Obligation's
+# spec, which functions may reach them, and the argument values boss_damage receives
+# (formal/sw/census.py --check).  A change here means the modular spec proofs need a look.
+g_state: proof_frame start_stage title_screen
+demo: proof_frame proof_init
+cur_boss: start_stage
+defeated: proof_frame
+pl_lives: pickup_update player_hurt start_stage
+pl_dead: player_hurt start_stage
+pl_hurt: player_hurt player_update start_stage
+pl_certs: ap_update bullets_update shot_new start_stage
+score: boss_damage boss_move_end bullets_update minion_hit pickup_update proof_frame
+pl_weapon: owned_update player_update
+pl_owned: owned_update
+pl_energy: fire pickup_update start_stage
+got_hearts: pickup_update
+got_energy: pickup_update
+t: proof_frame
+boss.hp: boss_damage proof_frame
+boss.flash: boss_damage proof_frame
+boss.on: clear_objects proof_frame
+boss.attack: next_move proof_frame
+may write g_state: next_demo proof_init
+may write demo:
+may write cur_boss: proof_frame proof_init
+may write defeated:
+may write pl_lives: ap_update bullets_update ch_update dj_update ha_update ho_update la_update mc_update minions_update pit_respawn player_update proof_frame proof_init stage_frame tick
+may write pl_dead: ap_update bullets_update ch_update dj_update ha_update ho_update la_update mc_update minions_update pit_respawn player_update proof_frame proof_init stage_frame tick
+may write pl_hurt: ap_update bullets_update ch_update dj_update ha_update ho_update la_update mc_update minions_update pit_respawn proof_frame proof_init stage_frame tick
+may write pl_certs: fire player_update proof_frame proof_init
+may write score: ap_update ch_update dj_update ha_update ho_update la_other la_update mc_update next_move shots_update
+may write pl_weapon: proof_frame proof_init start_stage
+may write pl_owned: proof_frame proof_init start_stage
+may write pl_energy: bullets_update player_update proof_frame proof_init
+may write got_hearts: bullets_update proof_frame
+may write got_energy: bullets_update proof_frame
+may write t:
+may write boss.hp: ho_update la_other la_update shots_update
+may write boss.flash: ho_update la_other la_update shots_update
+may write boss.on: next_demo proof_init start_stage title_screen
+may write boss.attack: ap_update ch_update dj_update ha_update ho_update la_update mc_update
+field arena: ap_arena ch_arena dj_arena ha_arena ho_arena la_arena mc_arena
+field shot_hits: all_hit ap_hits open_hits
+field shot_other: ch_other dj_other ha_other ho_other la_other no_other
+field update: ap_update ch_update dj_update ha_update ho_update la_update mc_update
+other address-taken functions:
+boss_damage args: 1 2 3 4

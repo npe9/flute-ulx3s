@@ -782,7 +782,7 @@ over three acceptors, two proposers).  Your lemmas drop its messages or crash ac
 agreement is proved: CBMC shows an inductive invariant of the real `px_*` code holds
 initially, survives every step, and implies that no two values are chosen, for every schedule
 of any length with messages reordered, duplicated or lost (`formal/sw/cbmc/run_proof.sh`
-PAXOS_*; four planted protocol bugs each fail it).  The spec oracle also checks agreement on
+PAXOS_*; five planted protocol bugs each fail it).  The spec oracle also checks agreement on
 every frame of the game (clause A6).  Six bosses are 32x32 caricatures
 drawn from Wikimedia Commons photographs (`sw/game2d/portraits.py`; each sprite carries its
 photo's licence, listed in `proof_portraits.c` and the notes); Adam Chlipala, with no free photo,
