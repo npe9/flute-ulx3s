@@ -73,7 +73,7 @@ TICK never stuns; Lamport's weakness to it is a longer freeze (90 frames).  The 
 | Dijkstra | TICK (Lamport) | Lamport's bakery algorithm (1974) solved Dijkstra's mutual-exclusion problem without atomic reads |
 | Lamport | BRACES (Hoare) | Lamport's "The 'Hoare Logic' of Concurrent Programs" (1980) |
 | Appel | CONS (McCarthy) | McCarthy invented garbage collection for Lisp; Appel's garbage-collection work builds on it |
-| Harper | CPS (Appel) | Appel's SML/NJ compiler (CPS-based) implements Harper's *Definition of Standard ML* |
+| Harper | CPS (Appel) | Appel's SML/NJ compiler (CPS-based) implements *The Definition of Standard ML*, which Harper co-wrote |
 | Chlipala | TRINITY (Harper) | Harper's type theory (computational trinitarianism) under Chlipala's dependent types |
 | McCarthy | CRUSH (Chlipala) | automation (`crush`) discharges the induction McCarthy's recursion induction asks for |
 
@@ -95,12 +95,18 @@ enemies.  The gimmicks change map cells only on a transition (a few cells a fram
 | Chlipala | falling crushers and belts | walkers, chasers |
 
 Enemies: walkers and chasers (as before), flyers (patrol and bob), hoppers (jump toward you),
-turrets (fire an orb every 120 frames when near), crushers (fall, wait, rise; only a tink when
+turrets (fire an orb every 120 frames when near; 96 was tried and killed the pilot too often), crushers (fall, wait, rise; only a tink when
 hit).  Enemies killed in a stage sometimes drop a pickup: energy (+10 to the selected tactic, or
 the emptiest owned one) or a heart (up to five).  The demo pilot crosses every stage: it treats
 null floor, hot strips and vanishing cells as gaps, waits for allocation and clock bridges,
 waits out crushers, uses PATH on flyers, and in a fight cycles through the tactics (160 frames
 each).
+
+Resources the tactics and stages use: sprite tiles 672-767 (all 96: tactic icons, an 8-level
+gauge, the energy capsule, flyer, hopper, turret, crusher, pellet, brace), BG tile 31 (the belt's
+chevrons), sprite slots 62 and 63 (the HUD icon and gauge; the HUD line now has 13 of its 16
+sprites), bullet kinds 90 and 91 (the energy and heart pickups, harm 0), and three new `minion`
+fields (`a`, `b`, `c`) for the new enemies' state.  The checkpoint is new with this change.
 
 ## The bosses and their attacks
 
