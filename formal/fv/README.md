@@ -183,7 +183,11 @@ python3 formal/fv/bin/fvgen.py mutate sdh            # mutation coverage
 FV_RTL_ROOT=build/fv/stage python3 ...               # against a staged RTL tree
 ```
 
-Tools: the sv-yosys build (Yosys with `bind`), `FV_YOSYS_DIR`; sby and boolector on PATH.  sby
+Tools: the sv-yosys build (Yosys with `bind`): `FV_YOSYS_DIR`, default the pinned gated install
+`~/src/sv-yosys/install/current/bin` (falling back to `~/src/sv-yosys/third_party/yosys/build`); sby and boolector on PATH.
+Each run prints the `yosys -V` banner, and each check directory gets a `tool_version` file with it.
+Fork builds before 284ee42ea (2026-11-25) folded an `if` / `case` that reads a variable after a `<=` to it in the
+same block with the new value (repro `build/fv/ifrepro/t4.sv`); results from those builds are rerun on install/t2.  sby
 runs yosys through `bin/yosys_sby.sh`, which drops the `-fast` that sby's AIGER step (abc
 engines) passes to an abc pass that no longer has it.
 

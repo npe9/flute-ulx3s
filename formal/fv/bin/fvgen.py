@@ -19,8 +19,8 @@ Usage:
   fvgen.py regs <spec> <module>      print the register model generated from a register spec
   fvgen.py lint <file.v ...>         the RTL formal-construct check alone
 
-Tools: the SVA yosys fork (sv-yosys, `bind` support): FV_YOSYS_DIR, default
-~/src/sv-yosys/third_party/yosys/build, run through bin/yosys_sby.sh (sby's AIGER step for the abc
+Tools: the SVA yosys fork (sv-yosys, `bind` support): FV_YOSYS_DIR, default the pinned install
+~/src/sv-yosys/install/current/bin, else ~/src/sv-yosys/third_party/yosys/build, run through bin/yosys_sby.sh (sby's AIGER step for the abc
 engines asks for an abc option the newer yosys dropped).  Work trees: build/fv/<ip>/.
 """
 import configparser
@@ -34,7 +34,19 @@ import tempfile
 
 FV = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REPO = os.path.dirname(os.path.dirname(FV))
-YDIR = os.environ.get('FV_YOSYS_DIR', os.path.expanduser('~/src/sv-yosys/third_party/yosys/build'))
+# The pinned, gated sv-yosys install (the Yosys session installs each build that passes its gate as
+# install/<tag>, install/current the latest); the old dev build dir only as a fallback.
+_PINNED = os.path.expanduser('~/src/sv-yosys/install/current/bin')
+YDIR = os.environ.get('FV_YOSYS_DIR') or (_PINNED if os.path.isdir(_PINNED) else
+                                          os.path.expanduser('~/src/sv-yosys/third_party/yosys/build'))
+
+
+def yosys_version():
+    """The `yosys -V` banner of the binary the checks run, recorded with every result."""
+    try:
+        return subprocess.run([f'{YDIR}/yosys', '-V'], capture_output=True, text=True).stdout.strip()
+    except OSError as e:
+        return f'unknown ({e})'
 TOOLS = ['--yosys', os.path.join(FV, 'bin', 'yosys_sby.sh'), '--abc', f'{YDIR}/yosys-abc', '--smtbmc', f'{YDIR}/yosys-smtbmc']
 
 # ---------------------------------------------------------------- RTL lint
@@ -310,6 +322,8 @@ def run_check(d, name, timeout=None):
                        timeout=timeout, env=dict(os.environ, YOSYS=f'{YDIR}/yosys'))
     except subprocess.TimeoutExpired:
         return 'TIMEOUT', ''
+    if os.path.isdir(os.path.join(d, name)):
+        open(os.path.join(d, name, 'tool_version'), 'w').write(f'{YDIR}\n{yosys_version()}\n')
     log = os.path.join(d, name, 'logfile.txt')
     txt = open(log, errors='replace').read() if os.path.exists(log) else ''
     if 'NOT attached' in txt or 'unattached' in txt:
@@ -334,6 +348,7 @@ def cmd_run(ip, only):
     if unknown:
         sys.exit(f'fvgen: no such check: {" ".join(unknown)}')
     dirs = gen(ip, c, work, only=only)
+    print(f'{ip}: yosys {YDIR}: {yosys_version()}', flush=True)
     ok = True
     for name, d in dirs.items():
         if only and name not in only:
