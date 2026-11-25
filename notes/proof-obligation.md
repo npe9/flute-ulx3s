@@ -48,7 +48,7 @@ boss's idea, and the arena says which idea it is.
 - **Moves:** each boss has 3 or 4 regular moves, which they cycle through, plus one last move.  A
   move's name is shown on arena row 3 when it starts, with a one-line explanation on row 5.
 - **Pinch:** at half HP (16 or less), the boss's update runs 5 times every 4 frames.  Every
-  timer value is still visited, so no attack is skipped.  A cue line on row 2 names the pinch in
+  timer value is still visited, so no attack is skipped.  A cue line on row 4 names the pinch in
   the boss's terms, e.g. "PINCH: THE LOGICAL CLOCKS RUN FAST".
 - **The last lemma:** at a quarter HP (8 or less), "THE LAST LEMMA" is announced and the boss
   plays one new signature move built from their idea.  From then on it alternates with the
@@ -72,7 +72,7 @@ The last lemmas:
 | John McCarthy | EVAL AND APPLY | `(FACT 3)` is traced through the interpreter's two mutually recursive halves, EVAL (left) and APPLY (right).  Each pass between them is a ball labelled with its argument or value, flying on a lane one level lower for each deeper call.  Each ball is telegraphed at its station (a paren) 24 frames ahead, with notes such as "DEPTH 2: APPLY FACT TO 1".  The returns carry the values back up; the last one, the answer, is pink; "(FACT 3) = 6: EVAL AND APPLY AGREE" | McCarthy, "Recursive Functions of Symbolic Expressions and Their Computation by Machine, Part I", CACM 1960 (the eval/apply of the LISP 1.5 manual) |
 | Edsger Dijkstra | The dining philosophers | five philosophers and five forks; every 24 frames each in turn (random order) may get hungry, take the left fork, then the right, eat (a telegraphed volley) and put both down.  If all hold their left fork, the deadlock stuns the boss.  Shooting a philosopher schedules them (THINK becomes HUNGRY) or pre-empts them (a waiting LEFT holder is delayed) | Dijkstra, "Hierarchical Ordering of Sequential Processes", Acta Informatica 1971 (EWD310) |
 | Tony Hoare | Monitors | a bounded buffer of 4 slots guarded by a monitor.  The producer (the boss) appends: an aimed shot.  When the buffer is full, it waits on NONFULL (the boss stalls).  The consumer (a turret) removes: a 3-shot volley.  When it is empty, it waits on NONEMPTY.  One process at a time is inside (shown); the other queues at the entry.  Shooting the turret makes the consumer busy, so the buffer fills | Hoare, "Monitors: An Operating System Structuring Concept", CACM 1974 |
-| Leslie Lamport | The Byzantine generals, OM(1) | the commander (the boss) sends LEFT or RIGHT to three lieutenants.  Each relays what it heard to the other two, one of them a traitor who relays the opposite, and each decides by majority.  Then all attack along the floor: arrows hover 30 frames (the telegraph), then fly.  The traitor's arrows point the loyal way and fly the other.  Shoot the traitor: damage and stun | Lamport, Shostak and Pease, "The Byzantine Generals Problem", TOPLAS 1982 |
+| Leslie Lamport | The Byzantine generals, OM(1) | the commander (the boss) sends LEFT or RIGHT to three lieutenants.  Each relays what they heard to the other two, one of them a traitor who relays the opposite, and each decides by majority.  Then all attack along the floor: arrows hover 30 frames (the telegraph), then fly.  The traitor's arrows point the loyal way and fly the other.  Shoot the traitor: damage and stun | Lamport, Shostak and Pease, "The Byzantine Generals Problem", TOPLAS 1982 |
 | Andrew Appel | Tail calls on a trampoline | `EVEN?(n)` calls `ODD?(n-1)` calls `EVEN?(n-2)`.  Each call is a bounce of the ball on a trampoline at the floor's centre, and the stack stays one frame deep.  At 0 the answer bursts into a fan, pink if TRUE.  The trampoline throws you too | Appel, *Compiling with Continuations*, 1992; Tarditi, Lee and Acharya, "No Assembly Required: Compiling Standard ML to C", LOPLAS 1992 (the trampoline) |
 | Robert Harper | Focusing: a shift flips polarity | positive (+) orbs fall, negative (-) orbs rise.  Every 150 frames a shift flips every polarity on the screen, telegraphed by 30 frames of the tiles blinking | Andreoli, "Logic Programming with Focusing Proofs in Linear Logic", 1992; Zeilberger, "On the Unity of Duality", APAL 2008 (polarity, as taught in Harper's course) |
 | Adam Chlipala | Proof by reflection | a mirror in front of the boss.  An unproved lemma that hits it comes back pink (parry it for a certificate).  A lemma that carries a proof is checked and passes.  The mirror blinks, then drops for 70 of every 270 frames ("THE TACTIC RUNS") | Boutin, "Using Reflection to Build Efficient and Certified Decision Procedures", TACS 1997; *Certified Programming with Dependent Types*, ch. "Proof by Reflection" |
@@ -166,6 +166,10 @@ What is proved and what is only tested, separately (notes/sw-verification-plan.m
   - The property expected is agreement: never `px_chosen (1)` and `px_chosen (2)` together, and
     `px_learned != 0` implies `px_chosen (px_learned)`.  It should hold for any order, loss or
     duplication of messages.
+  - Its precondition: messages are ones the steps produce.  A Promise carries what
+    `px_prepare` returned.  An Accept is `(b, px_pval [p])`, sent after `px_promise` returned 1.
+    A stale message from an old ballot is fine; a forged one is not.  `px_accepted` checks the
+    vote itself.  The test's loop is the shape a CBMC harness would take.
   - The steps are pure functions of their message's fields (`px_start`, `px_prepare`,
     `px_promise`, `px_accept`, `px_accepted`, `px_chosen`), ready for a CBMC harness.
   - `sw/game2d/proof_paxos_test.sh` extracts them from `proof_boss.c` and runs 1,000,000 random
@@ -186,6 +190,12 @@ What is proved and what is only tested, separately (notes/sw-verification-plan.m
     `PROOF_TEST=<boss>,<move>` starts the pilot in that arena, invulnerable, with the fight opening
     on that move.  `PROOF_HP=<n>` pins the boss's HP, which tests the pinch (16) and the last lemma
     (8).  `PROOF_CLEAN=1` and `PROOF_PARRY=1` exercise the clean-proof bonus and the parry.
+    `PROOF_POKE=1` lands a lemma on the move's interactive target every 50 frames.  The targets
+    are a philosopher, the monitor's consumer, a Paxos message or acceptor, a lieutenant, and
+    the mirror, with and without a proof.  This reaches what the pilot never does.
+  - A coverage build (clang `-fcoverage-mapping`) over all these runs plus the 30,000-frame demo
+    executes every region of the new fight code.  The exceptions are argument-range guards: the
+    `px_*` checks against messages the steps never send, and `bullet_new` failing.
   - Results: 32 moves (the last lemmas included) plus 14 pinch and last-lemma runs, each 2,400
     frames with `HOST_OVERFLOW=2`.  None had a sanitizer report or a sprite overflow.
   - Contact sheets of every new move were looked at.

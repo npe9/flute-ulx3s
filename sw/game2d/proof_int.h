@@ -113,7 +113,7 @@ void boss_cue (const char *text);   // announce an attack (arena row 3)
 // <= BOSS_HP / 2 the update runs 5 times every 4 frames (the pinch, its line boss_pinch [b]);
 // at HP <= BOSS_HP / 4 each boss alternates its desperation move with the others
 void boss_move_end (void);
-void boss_banner (const char *s);   // a phase line on arena row 2, shown for 150 frames
+void boss_banner (const char *s);   // a phase line on arena row 4, shown for 150 frames
 extern const char *const boss_pinch [7];
 void player_bounce (int vy);        // throw the player up (SUB units a frame, negative is up)
 

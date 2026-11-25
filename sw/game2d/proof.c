@@ -583,7 +583,8 @@ static int g_timer;
 // host test hook (never in the board build): PROOF_TEST=<boss>,<move> starts the demo pilot at
 // that boss's arena, invulnerable, with the fight opening on that move
 #include <stdlib.h>
-static int test_boss = -1, test_move, test_hp, test_clean, test_parry;
+static int test_boss = -1, test_move, test_hp, test_clean, test_parry, test_poke;
+void boss_poke (int k);
 #endif
 static int move_hit;                  // the player was hit during this boss move (no clean proof)
 void player_hurt (void) {
@@ -738,7 +739,7 @@ void boss_damage (int n) {
 }
 void boss_cue (const char *s) { arena_text (3, s); psnd_cue (); }
 static int fight_rest, fight_pinch, fight_banner;
-void boss_banner (const char *s) { arena_text (2, s); fight_banner = 150; psnd_cue (); }
+void boss_banner (const char *s) { arena_text (4, s); fight_banner = 150; psnd_cue (); }
 // a boss move ended: if it did not hit the player, that was a clean proof (+500, a short rest)
 void boss_move_end (void) {
 #ifdef PROOF_TEST
@@ -890,6 +891,7 @@ void proof_init (void) {
       if (getenv ("PROOF_HP")) test_hp = atoi (getenv ("PROOF_HP"));       // start (and stay) at this HP
       test_clean = getenv ("PROOF_CLEAN") != NULL;          // test hits do not spoil a clean proof
       test_parry = getenv ("PROOF_PARRY") != NULL;          // parry every pink shot that comes near
+      test_poke = getenv ("PROOF_POKE") != NULL;            // lemmas land on the boss's targets
       demo_boss = test_boss;
       start_stage (test_boss);
       pl_x = spawn_x = arena_x - 16; pl_fx = pl_x << 4; pl_fy = pl_y << 4; player_bump_up ();
@@ -1033,6 +1035,7 @@ int proof_frame (uint32_t buttons) {
       if (test_parry)                                        // host only: parry every pink shot
          for (int i = 0; i < NBUL; i++)
             if (bul [i].on && bul [i].mode == M_PINK && iabs ((bul [i].x >> 4) - pl_x) < 14 && iabs ((bul [i].y >> 4) - pl_y) < 14) pl_parry = 1;
+      if (test_poke && g_timer > 60 && g_timer % 50 == 25) boss_poke (g_timer / 50);
 #endif
       if (g_timer > 60) {
          if (fight_rest) { if (--fight_rest == 0) arena_clear_text (7); }   // after a clean proof
@@ -1041,7 +1044,7 @@ int proof_frame (uint32_t buttons) {
             if (boss.hp > 0 && boss.hp <= BOSS_HP / 2 && (g_timer & 3) == 0 && !fight_rest) bosses [cur_boss].update ();   // the pinch: 5 a 4 frames
          }
          if (!fight_pinch && boss.hp > 0 && boss.hp <= BOSS_HP / 2) { fight_pinch = 1; boss_banner (boss_pinch [cur_boss]); }
-         if (fight_banner && --fight_banner == 0) arena_clear_text (2);
+         if (fight_banner && --fight_banner == 0) arena_clear_text (4);
       }
       else if (g_timer == 2) arena_text (3, bosses [cur_boss].field);
       else if (g_timer == 60) arena_clear_text (3);

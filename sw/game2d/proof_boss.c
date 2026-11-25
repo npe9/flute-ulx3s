@@ -495,7 +495,7 @@ static int dj_other (int x, int y) {
       for (int i = 0; i < DP_N; i++)
          if (shot_near (x, y, props [i].x + 8, props [i].y + 8, 10)) {   // you schedule them
             if (dp_st [i] == DP_THINK) { dp_st [i] = DP_HUNGRY; note ("SCHEDULED: HUNGRY NOW"); }
-            else if (dp_st [i] == DP_LEFT) { dp_w [i] = 3; note ("PREEMPTED: IT WAITS LONGER"); }
+            else if (dp_st [i] == DP_LEFT) { dp_w [i] = 3; note ("PREEMPTED: THEY WAIT LONGER"); }
             fx (x, y, T_SPARK); return 1;
          }
    if (boss.attack == 2 && props [0].on && shot_near (x, y, props [0].x + 8, props [0].y + 7, 9)) {
@@ -748,7 +748,10 @@ static void la_label (int i) {
 // them, and a crashed acceptor gets nothing (its state survives, as on stable storage).
 // Proposer p owns the ballots b = 2r + 1 + p (b < PX_B), so no ballot has two proposers.
 // Agreement (expected to hold, for any order, loss and duplication of messages): if px_chosen (v)
-// and px_chosen (w) then v == w; and px_learned != 0 implies px_chosen (px_learned).
+// and px_chosen (w) then v == w; and px_learned != 0 implies px_chosen (px_learned).  It assumes
+// the messages are ones the steps produce: a Promise carries the (b, *pb, *pv) px_prepare gave,
+// and an Accept is (b, px_pval [p]) sent after px_promise returned 1 for p's ballot b (a stale
+// message from an old ballot is fine; a forged one is not).  px_accepted checks its vote itself.
 #define PX_A 3                                   // acceptors
 #define PX_B 9                                   // ballots 1..8; 0 is "none"
 int px_prom [PX_A];                              // the highest ballot each acceptor promised
@@ -799,7 +802,7 @@ int px_accept (int a, int b, int v) {
 // the learner receives Accepted(b, v) from acceptor a: a value is learned when two acceptors'
 // latest Accepted are of one ballot (a quorum voted in it); returns the learned value or 0
 int px_accepted (int a, int b, int v) {
-   if (a < 0 || a >= PX_A || b < 1 || b >= PX_B) return px_learned;
+   if (a < 0 || a >= PX_A || b < 1 || b >= PX_B || v < 1 || px_vote [a][b] != v) return px_learned;   // not a vote a cast
    if (b > px_lbal [a]) { px_lbal [a] = b; px_lval [a] = v; }
    for (int i = 0; i < PX_A; i++)
       for (int j = i + 1; j < PX_A; j++)
@@ -988,7 +991,7 @@ static void la_update (void) {
          px_init (1, 2);
          for (int p = 0; p < 2; p++) { px_round [p] = 0; px_tmo [p] = 0; }
          for (int a = 0; a < PX_A; a++) px_down [a] = 0;
-         boss.a [0] = 0; boss.a [1] = 90 + (int) (rnd () % 60);   // the ghost's first ballot
+         boss.a [0] = 0; boss.a [1] = 120 + (int) (rnd () % 120);   // the ghost's first ballot
       }
       if (tt == 30) px_go (0);
       if (tt == boss.a [1]) px_go (1);
@@ -1580,8 +1583,28 @@ const boss_def bosses [7] = {
    { "ANDREW APPEL",    "VERIFIED TOOLCHAIN", "K",  0x208080, 0x80FFF0, 0x081818, ap_arena, ap_update, ap_hits, no_other },
    { "ROBERT HARPER",   "TYPE THEORY",        "&",  0xB03030, 0xFFB0A0, 0x200C0C, ha_arena, ha_update, open_hits, ha_other },
    { "ADAM CHLIPALA",   "CERTIFIED PROGRAMS", "@",  0xB09020, 0xFFF0A0, 0x181408, ch_arena, ch_update, all_hit, ch_other } };
-// the pinch (HP <= half: the update runs 5 times every 4 frames), announced on arena row 2
+// the pinch (HP <= half: the update runs 5 times every 4 frames), announced on arena row 4
 const char *const boss_pinch [7] = {
    "PINCH: GARBAGE COLLECTED, EVAL HURRIES", "PINCH: THE SEMAPHORES SPEED UP", "PINCH: AT QUICKSORT PACE",
    "PINCH: THE LOGICAL CLOCKS RUN FAST", "PINCH: COMPILED WITH CONTINUATIONS", "PINCH: EVALUATION IS EAGER NOW",
    "PINCH: CRUSH, COMPILED TO NATIVE CODE" };
+#ifdef PROOF_TEST
+// host only (PROOF_POKE=1): every 50 frames a lemma lands on the move's interactive target, so the
+// tests run the branches the pilot never reaches (k counts the pokes)
+void boss_poke (int k) {
+   int x = -1, y = -1, proved = shot_proved;
+   switch (cur_boss * 8 + boss.attack) {
+   case 1 * 8 + 4: x = props [k % DP_N].x + 8; y = props [k % DP_N].y + 8; break;     // a philosopher
+   case 2 * 8 + 3: x = props [4].x + 8; y = props [4].y + 8; break;                   // the consumer
+   case 3 * 8 + 3:
+      if (k & 1) { x = px_ax ((k >> 1) % PX_A) + 8; y = px_ay () + 6; break; }       // an acceptor
+      for (int i = 0; i < NBUL; i++)                                                  // a message
+         if (bul [i].on && bul [i].kind == 70) { x = (bul [i].x >> 4) + 8; y = (bul [i].y >> 4) + 8; break; }
+      break;
+   case 3 * 8 + 4: x = om_x (k % 3) + 8; y = om_y () + 8; break;                      // a lieutenant
+   case 6 * 8 + 4: x = boss.x - 10; y = boss.y + 8; shot_proved = k & 1; break;       // the mirror
+   }
+   if (x >= 0) bosses [cur_boss].shot_other (x, y);
+   shot_proved = proved;
+}
+#endif
