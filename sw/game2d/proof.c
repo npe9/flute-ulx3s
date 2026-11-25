@@ -596,6 +596,7 @@ static shot_t shots [3];
 
 // ---- the weapons (tactics): weapon b + 1 is won by beating boss b
 int pl_weapon, pl_owned = 1, pl_energy [NWEAPON];
+static unsigned got_hearts, got_energy;   // pickups taken since power-on (the spec's S2, W5)
 int clock_stop;
 static const int w_cost [NWEAPON] = { 0, 1, 2, 4, 7, 2, 1, 3 };
 static const char *const w_name [NWEAPON] = { "LEMMA", "CONS", "PATH", "BRACES", "TICK", "CPS", "TRINITY", "CRUSH" };
@@ -994,7 +995,8 @@ static void pickup_update (bullet *b) {                // weapon energy or a hea
    if (b->t > 600 || x < cam - 48 || y > 8 * ROWS) { b->on = 0; return; }
    if (pl_dead || !overlap (pl_x + 3, pl_y + 2, 10, 14, x + 4, y + 4, 8, 8)) return;
    b->on = 0; score += 50; psnd_pick ();
-   if (b->kind == BK_HEART) { if (pl_lives < 5) pl_lives++; return; }
+   if (b->kind == BK_HEART) { got_hearts++; if (pl_lives < 5) pl_lives++; return; }
+   got_energy++;
    int w = pl_weapon;
    if (w == W_LEMMA)                                  // the lemma needs none: the emptiest tactic
       for (int k = 1; k < NWEAPON; k++) if ((pl_owned & (1 << k)) && (w == W_LEMMA || pl_energy [k] < pl_energy [w])) w = k;
@@ -1616,6 +1618,7 @@ int proof_frame (uint32_t buttons) {
          fprintf (stderr, "dbg %u: x %d y %d vy %d ground %d btn %x w %d feet %d\n", t, pl_x, pl_y, pl_vy, pl_ground, (unsigned) buttons, pl_weapon, feet_kind ());
    }
 #endif
+   owned_update ();                                   // a win's tactic is owned from its frame on
    if (g_state != G_TITLE) stream ();
    draw ();
    return score;
@@ -1639,6 +1642,10 @@ void proof_observe (spec_state *s) {
    for (int i = 0; i < NPROP; i++) s->nprops += props [i].on != 0;
    s->w_pal = flush_pal; s->w_map = flush_map; s->w_spr = flush_spr; s->w_reg = flush_reg;
    s->vdp_writes = -1;                                 // the observer (host.c) may know it
-   s->weapon = -1; s->owned = 1;                       // no tactics in the engine yet
-   for (int w = 0; w < SP_NWEAPON; w++) s->energy [w] = 0;
+   s->weapon = pl_weapon; s->owned = pl_owned; s->granted = 0;
+#ifdef PROOF_TEST
+   if (test_weapon >= 0) s->granted = 1 << test_weapon;  // the host test hook's extra tactic
+#endif
+   for (int w = 0; w < SP_NWEAPON; w++) s->energy [w] = pl_energy [w];
+   s->got_hearts = got_hearts; s->got_energy = got_energy;
 }

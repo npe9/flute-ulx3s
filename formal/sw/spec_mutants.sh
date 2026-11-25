@@ -14,8 +14,10 @@ m () {   # name file "from" "to"
    python3 - "$d/sw/game2d/$2" "$3" "$4" <<'PY'
 import sys
 p, a, b = sys.argv[1:]; s = open(p).read()
-assert s.count(a) == 1, (p, a); open(p, 'w').write(s.replace(a, b))
+if s.count(a) != 1: sys.exit("anchor not found once: %r" % a)
+open(p, 'w').write(s.replace(a, b))
 PY
+   [ $? = 0 ] || { echo "$1: ANCHOR FAILED (the source changed; update the mutant)"; missed=$((missed + 1)); return; }
    if ! (cd "$d/sw/game2d" && cc -O1 -DTITLE_PROOF -I. -I../vdp "${S[@]}" -o "$d/h") > "$d/build.log" 2>&1; then
       echo "$1: BUILD FAILED"; missed=$((missed + 1)); return; fi
    r=$(cd "$d" && HOST_SPEC=1 ./h 30000 o.ppm | grep -m1 -E "spec: (frame|init)")
@@ -27,7 +29,7 @@ m flash_guard proof.c "   if (boss.flash) return;
 # S2: a heart can be lost while invulnerable
 m hurt_guard  proof.c "   if (pl_hurt || pl_dead || g_state == G_WIN) return;" "   if (pl_dead || g_state == G_WIN) return;"
 # S5: a defeated minion takes a point
-m score_down  proof.c "mins [m].on = 0; score += 100;" "mins [m].on = 0; score -= 1;"
+m score_down  proof.c "   n->on = 0; score += 100;" "   n->on = 0; score -= 1;"
 # S4: the demo discharges bosses
 m demo_win    proof.c "         if (!demo) defeated |= 1 << cur_boss;" "         defeated |= 1 << cur_boss;"
 # S6: the camera leads by 150, not 140
@@ -39,5 +41,13 @@ m stray_write proof.c "   psnd_frame ();
    g_timer++;" "   psnd_frame ();
    if ((t & 255) == 0) hw_vdp_write (VDP_BACKDROP, 1);
    g_timer++;"
+# W4: TICK costs 6, not 7
+m tick_cost   proof.c "w_cost [NWEAPON] = { 0, 1, 2, 4, 7, 2, 1, 3 };" "w_cost [NWEAPON] = { 0, 1, 2, 4, 6, 2, 1, 3 };"
+# W3: the demo lacks PATH
+m demo_owned  proof.c "pl_owned = demo ? (1 << NWEAPON) - 1 :" "pl_owned = demo ? (1 << NWEAPON) - 5 :"
+# (W5's refill bound has no mutant: the demo's few energy pickups all find a tactic within 4 of
+# full, so a wrong refill is hidden by the cap; notes/proof-obligation-spec.md)
+# S2: a heart that no pickup gave
+m free_heart  proof.c "{ got_hearts++; if (pl_lives < 5) pl_lives++; return; }" "{ if (pl_lives < 5) pl_lives++; return; }"
 echo "$missed missed"
 [ $missed = 0 ]

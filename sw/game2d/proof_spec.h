@@ -24,6 +24,7 @@ enum { SP_TITLE, SP_PLAY, SP_ARENA, SP_FIGHT, SP_WIN, SP_OVER, SP_END };   // th
 #define SP_NPROP    10
 #define SP_NWEAPON  8                 // the lemma and seven bosses' tactics
 #define SP_ENERGY   28                // a tactic's full energy
+#define SP_REFILL   10                // what an energy pickup gives
 
 typedef struct {
    int state, demo;                   // SP_*; the attract demo is playing
@@ -38,8 +39,10 @@ typedef struct {
    int nshots, nbul, nprops;          // live player shots, boss bullets, boss props
    int w_pal, w_map, w_spr, w_reg;    // this frame's flush: palette, map, sprite, register writes
    int vdp_writes;                    // all VDP writes this frame (host.c counts them; -1: unknown)
-   // tactics (the Mega Man weapons); weapon < 0: not observed (the engine has none yet)
+   // tactics (the weapons won from bosses): tactic b+1 is boss b's; weapon < 0: not observed
    int weapon, owned, energy [SP_NWEAPON];
+   int granted;                       // tactics the host test hook adds (0 on the board)
+   unsigned got_hearts, got_energy;   // heart and energy pickups taken since power-on
 } spec_state;
 
 void proof_observe (spec_state *s);   // proof.c: fill s from the engine

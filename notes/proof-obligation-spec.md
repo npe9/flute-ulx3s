@@ -46,9 +46,11 @@ and the tactics (selected, owned, energy).  Three predicates over observations d
   with game over reachable from the stage, the arena and the fight, and game over and the ending
   returning to the title; the ending only after a real win that discharges the seventh boss.  The
   attract demo may return to the title at any time, and any button ends it.
-- **S2** A stage starts with five hearts, no certificates, not invulnerable.  Otherwise hearts are
-  never gained, at most one is lost a frame, only when not invulnerable (at most one frame of it
-  left), and a lost heart starts 90 frames of invulnerability, which then count down one a frame.
+- **S2** A stage starts with five hearts, no certificates, not invulnerable.  Otherwise a heart is
+  gained only from a heart pickup (at most one a frame; at five hearts it is points only), at most
+  one is lost a frame, only when not invulnerable (at most one frame of it left), and a lost heart
+  starts 90 frames of invulnerability, which then count down one a frame.  Falling into a pit costs
+  a heart like any hit and puts the player back at the last checkpoint.
 - **S3** A fight starts with the boss at 32 hit points, not flashing.  In the fight the boss never
   heals; it loses hit points only when not flashing, 1..4 at a time (4 is a weakness hit), and a
   hit starts its 14-frame flash.  The fight is won exactly when the boss has no hit points left.
@@ -59,12 +61,18 @@ and the tactics (selected, owned, energy).  Three predicates over observations d
   world; in a fight the screen does not scroll.
 
 ### Tactics (W): the weapons won from bosses
+Tactic 0 is the lemma; tactic b+1 is boss b's (CONS, PATH, BRACES, TICK, CPS, TRINITY, CRUSH for
+McCarthy .. Chlipala), with energy costs 0, 1, 2, 4, 7, 2, 1, 3.
 - **W1** The selected tactic is owned; the lemma is always owned.
 - **W2** Each tactic's energy is 0..28.
-- **W3** Tactics are never lost, and are gained only by winning a fight.
-- To be added with the weapons (in progress): a tactic is owned exactly when its boss is
-  discharged (all of them in the demo); firing tactic w takes exactly its cost and only if that
-  much energy is left; a stage starts with every tactic full; only the boss's weakness does 4.
+- **W3** Outside the attract demo a tactic is owned exactly when its boss is discharged (the
+  lemma always); the demo owns all.  With S4, a tactic is gained only by a real win.
+- **W4** A stage starts with every tactic full.  Otherwise a tactic's energy falls only by firing
+  it: by exactly its cost, and only if that much was left.
+- **W5** Energy rises only from an energy pickup: at most one a frame, refilling one tactic by at
+  most 10.
+- Not stated yet: only the boss's weakness does 4 damage (the observation does not say which
+  tactic's shot hit).
 
 ### The screen and the bus (V)
 - **V1** No line shows more than 16 sprites.
@@ -88,15 +96,22 @@ and the tactics (selected, owned, energy).  Three predicates over observations d
 
 | Clauses | Checked by | Status |
 |---|---|---|
-| N, I, S, W1-W3 | the host oracle: every frame of every host run with `HOST_SPEC=1` (30,000 demo frames; all 25 moves via `PROOF_TEST`, 2,400 frames each; random button scripts), and every frame of every fuzz script (`formal/sw/host_trace.c`, fuzz.sh reports `SPEC`) | **tested**: all inputs tried pass; seven planted engine bugs, one per clause family, are each caught (`formal/sw/spec_mutants.sh`) |
+| N, I, S, W1-W3 | the host oracle: every frame of every host run with `HOST_SPEC=1` (30,000 demo frames; every boss, move and tactic via `PROOF_TEST`, 200 runs of 2,400 frames; random button scripts), and every frame of every fuzz script (`formal/sw/host_trace.c`, fuzz.sh reports `SPEC`) | **tested**: all inputs tried pass; ten planted engine bugs (one or more per clause family) are each caught (`formal/sw/spec_mutants.sh`) |
 | V1 | `HOST_OVERFLOW=2` on the same runs (the VDP reference model's per-line count) | **tested** |
 | V2 | the host oracle: the flush counts its writes by kind, and host.c checks that every VDP write of the frame is one of them | **tested**; a planted write outside the flush is caught |
 | A1-A5 | `formal/sw/cbmc/run_proof.sh` (CBMC; FIND by exhaustive enumeration), 5 planted mutants | **proved** over the stated domains (A4 and A5 as inductive steps; A4 assumes limbs stay under 100) |
 | B1, B2 | `TITLE=proof formal/sw/fuzz.sh` on the Sail RV32 model | **tested** |
 
+Coverage gaps the oracle cannot close by itself: the demo takes about ten energy pickups in
+30,000 frames, all within 4 of full, so W5's refill bound is checked but barely exercised (a planted
+wrong refill is hidden by the cap and survives); and a real game that owns some tactics but not
+all is reached only by human play, not by the demo or the random scripts.
+
 What the oracle has found: the host-only `PROOF_TEST` hook applied the tested move to every
 later fight in the demo, so Appel's fight could run a fourth move that does not exist (I4);
-fixed to apply it to the tested fight only.
+fixed to apply it to the tested fight only.  With the tactics: ownership was refreshed only at the
+start of a frame, so it trailed a win by one frame; the engine now refreshes it at the end too,
+and W3 holds after every frame.
 
 ## Next: from tested to proved
 

@@ -39,6 +39,8 @@ const char *spec_inv (const spec_state *s) {
       REQUIRE (s->weapon < SP_NWEAPON && (s->owned & (1 << s->weapon)), "W1: the selected tactic is owned");
       REQUIRE (s->owned & 1, "W1: the lemma is always owned");
       for (int w = 0; w < SP_NWEAPON; w++) REQUIRE (s->energy [w] >= 0 && s->energy [w] <= SP_ENERGY, "W2: energy 0..28");
+      int want = s->demo ? (1 << SP_NWEAPON) - 1 : 1 | (s->defeated << 1);
+      REQUIRE (s->owned == (want | s->granted), "W3: a tactic is owned exactly when its boss is discharged (all in the demo)");
    }
    return 0;
 }
@@ -70,8 +72,12 @@ const char *spec_step (const spec_state *s, uint32_t buttons, const spec_state *
    // invulnerable, and losing one starts the invulnerable time
    if (entered) REQUIRE (n->lives == SP_LIVES && !n->dead && n->hurt == 0 && n->certs == 0, "S2: a stage starts with five hearts");
    else {
-      REQUIRE (n->lives == s->lives || n->lives == s->lives - 1, "S2: at most one heart a frame, never gained");
-      if (n->lives < s->lives)
+      unsigned heal = n->got_hearts - s->got_hearts;      // a heart pickup restores one, up to five
+      REQUIRE (heal <= 1, "S2: at most one heart pickup a frame");
+      int up = s->lives < SP_LIVES ? (int) heal : 0;     // at five hearts a pickup is points only
+      REQUIRE (n->lives <= s->lives + up, "S2: hearts are gained only from a pickup");
+      REQUIRE (n->lives >= s->lives + up - 1, "S2: at most one heart lost a frame");
+      if (n->lives < s->lives + up)
          REQUIRE (s->hurt <= 1 && n->hurt >= SP_HURT - 1, "S2: a heart is lost only when not invulnerable");
       REQUIRE (n->hurt >= s->hurt - 1 || n->hurt >= SP_HURT - 1, "S2: invulnerability counts down one a frame");
    }
@@ -100,11 +106,25 @@ const char *spec_step (const spec_state *s, uint32_t buttons, const spec_state *
       REQUIRE (n->cam == want, "S6: the camera follows the player");
    }
    if (s->state == SP_FIGHT && n->state == SP_FIGHT) REQUIRE (n->cam == s->cam, "S6: the arena does not scroll");
-   // W: tactics (checked once the engine reports them)
-   if (s->weapon >= 0 && n->weapon >= 0 && !entered) {
-      REQUIRE ((n->owned & s->owned) == s->owned, "W3: tactics are never lost");
-      if (n->owned != s->owned)
-         REQUIRE (s->state == SP_FIGHT && n->state == SP_WIN, "W3: a tactic is gained only by a win");
+   // W4, W5: energy.  A stage starts with every tactic full; otherwise a tactic's energy falls
+   // only by firing it (exactly its cost, and only if that much was left) and rises only from an
+   // energy pickup (at most 10, one tactic)
+   if (s->weapon >= 0 && n->weapon >= 0) {
+      static const int cost [SP_NWEAPON] = { 0, 1, 2, 4, 7, 2, 1, 3 };
+      if (entered) {
+         for (int w = 0; w < SP_NWEAPON; w++) REQUIRE (n->energy [w] == SP_ENERGY, "W4: a stage starts with every tactic full");
+      } else {
+         unsigned got = n->got_energy - s->got_energy;
+         int rose = 0;
+         REQUIRE (got <= 1, "W5: at most one energy pickup a frame");
+         for (int w = 0; w < SP_NWEAPON; w++) {
+            int d = n->energy [w] - s->energy [w];
+            if (d < 0) REQUIRE ((w == s->weapon || w == n->weapon) && d == -cost [w] && s->energy [w] >= cost [w],
+                                "W4: firing a tactic takes exactly its cost, only if it is left");
+            if (d > 0) { REQUIRE (got && d <= SP_REFILL, "W5: energy rises only from a pickup, by at most 10"); rose++; }
+         }
+         REQUIRE (rose <= 1, "W5: a pickup refills one tactic");
+      }
    }
    return 0;
 }
