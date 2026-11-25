@@ -764,7 +764,23 @@ invariant, a CSP rendezvous that deadlocks; a TLC-style breadth-first state sear
 liveness, logical clocks, Paxos; proof-carrying code, step-indexed models, VST's no use after
 free; progress and preservation, LF derivations, "well-typed programs do not go wrong",
 computational trinitarianism; `crush`, Bedrock footprints, Fiat-style carry limbs mod 99999, a
-Kami pipeline replaying its spec (the table is in the notes). Six bosses are 32x32 caricatures
+Kami pipeline replaying its spec (the table is in the notes). A fight borrows the shape of
+bullet-hell and run-and-gun bosses, mechanics only:
+
+- the boss bar fills during the intro;
+- at half HP a pinch speeds the boss up;
+- at a quarter HP each boss plays a last lemma: McCarthy's eval/apply, Dijkstra's dining
+  philosophers, a Hoare monitor, Lamport's Byzantine generals OM(1), Appel's trampolined tail
+  calls, Harper's polarity shifts, or Chlipala's proof by reflection;
+- big attacks are telegraphed;
+- a move survived without a hit is a "CLEAN PROOF" (+500);
+- BLUE shots hurt only if you move (safety) and ORANGE shots only if you stand still (liveness);
+- PINK shots are proved and can be parried for a proof certificate.
+
+Lamport's Paxos is the real single-decree protocol (`px_*`: ballots, prepare/promise/accept/accepted
+over three acceptors, two proposers).  Your lemmas drop its messages or crash acceptors.  Its
+agreement holds in 1,000,000 random schedules (`sw/game2d/proof_paxos_test.sh`) and on every
+frame the spec oracle checks (clause A6); tested, not yet proved.  Six bosses are 32x32 caricatures
 drawn from Wikimedia Commons photographs (`sw/game2d/portraits.py`; each sprite carries its
 photo's licence, listed in `proof_portraits.c` and the notes); Adam Chlipala, with no free photo,
 stays an original emblem figure. A defeat is "Q.E.D." and gives you that boss's tactic, a weapon
@@ -799,7 +815,7 @@ its engine is tested, not proved. The game itself is written down as a specifica
 (`notes/proof-obligation-spec.md`, the same clauses as C predicates in `sw/game2d/proof_spec.c`:
 power-on, invariants, and what one frame may change -- hearts, the boss's hit points, the phase
 graph, discharged bosses, score, camera, tactics); every host run with `HOST_SPEC=1` and every fuzz
-script checks it on every frame, and `formal/sw/spec_mutants.sh` plants ten engine bugs it must
+script checks it on every frame, and `formal/sw/spec_mutants.sh` plants eleven engine bugs it must
 catch (one makes a VDP write outside the vertical-blank flush). Each tier has planted bugs it must catch
 (`mutants.sh`). Tier 3 (`formal/sw/rocq/build.sh`, proved) checks the binary itself in Rocq against Sail's RV32
 model generated as Rocq: so far, that the compiled `hw_palette` writes exactly one word at

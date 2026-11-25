@@ -23,12 +23,14 @@ const char *spec_inv (const spec_state *s) {
       REQUIRE (s->boss_on && s->hp > 0 && s->hp <= SP_HP, "I4: a fight has a live boss, 1..32 hp");
       REQUIRE (s->attack >= 0 && s->attack < s->nmoves, "I4: the boss runs one of its moves");
       REQUIRE (s->cam == s->arena_x, "I4: the fight's screen is the arena");
+      REQUIRE (s->attack < s->nmoves - 1 || s->hp <= SP_LASTHP || s->hooked, "I9: the last lemma only at a quarter HP");
    }
    REQUIRE (s->flash >= 0 && s->flash < SP_FLASH && s->stun >= 0, "I5: hit flash and stun in range");
    if (play (s->state)) {
       REQUIRE (s->cam >= 0 && s->cam <= s->arena_x, "I6: the camera stays in the world");
       REQUIRE (s->x >= s->cam && s->x <= 8 * s->wcols - 16, "I6: the player is on screen, in the world");
    }
+   REQUIRE (s->px_agree, "A6: Paxos never chooses two values, and learns only a chosen one");
    REQUIRE (s->certs >= 0, "I7: certificates are counted");
    REQUIRE (s->nshots <= SP_NSHOT && s->nbul <= SP_NBUL && s->nprops <= SP_NPROP, "I7: object tables");
    REQUIRE (s->score >= 0, "I8: score is not negative");
@@ -83,7 +85,7 @@ const char *spec_step (const spec_state *s, uint32_t buttons, const spec_state *
    }
    // S3: the boss: full at the fight's start; then hit points only fall, by 1..4, when it is not
    // flashing, and a hit starts the flash
-   if (s->state == SP_ARENA && n->state == SP_FIGHT) REQUIRE (n->hp == SP_HP && n->flash == 0, "S3: a fight starts at 32 hp");
+   if (s->state == SP_ARENA && n->state == SP_FIGHT) REQUIRE ((n->hp == SP_HP || n->hooked) && n->flash == 0, "S3: a fight starts at 32 hp");
    if (s->state == SP_FIGHT && (n->state == SP_FIGHT || n->state == SP_WIN)) {
       REQUIRE (n->hp <= s->hp, "S3: a boss never heals");
       if (n->hp < s->hp)

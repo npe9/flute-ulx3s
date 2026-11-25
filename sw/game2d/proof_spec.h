@@ -14,6 +14,7 @@
 enum { SP_TITLE, SP_PLAY, SP_ARENA, SP_FIGHT, SP_WIN, SP_OVER, SP_END };   // the game's phases
 #define SP_BOSSES   7
 #define SP_HP       32                // a boss's hit points
+#define SP_LASTHP   8                 // the last lemma (move nmoves - 1) only at this HP or less
 #define SP_LIVES    5                 // hearts a stage
 #define SP_HURT     90                // frames of invulnerability after a hit
 #define SP_FLASH    14                // frames a hit boss cannot be hit again
@@ -42,6 +43,8 @@ typedef struct {
    // tactics (the weapons won from bosses): tactic b+1 is boss b's; weapon < 0: not observed
    int weapon, owned, energy [SP_NWEAPON];
    int granted;                       // tactics the host test hook adds (0 on the board)
+   int hooked;                        // the host test hook forces the move or pins HP (0 on the board)
+   int px_agree;                      // Lamport's Paxos: no two values chosen; the learned one is chosen
    unsigned got_hearts, got_energy;   // heart and energy pickups taken since power-on
 } spec_state;
 

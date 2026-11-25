@@ -24,8 +24,8 @@ PY
    if [ -n "$r" ]; then echo "$1: caught ($r)"; else echo "$1: MISSED"; missed=$((missed + 1)); fi
 }
 # S3: a boss can be hit while flashing
-m flash_guard proof.c "   if (boss.flash) return;
-   boss.hp -= n;" "   boss.hp -= n;"
+m flash_guard proof.c "void boss_damage (int n) {
+   if (boss.flash) return;" "void boss_damage (int n) {"
 # S2: a heart can be lost while invulnerable
 m hurt_guard  proof.c "   if (pl_hurt || pl_dead || g_state == G_WIN) return;" "   if (pl_dead || g_state == G_WIN) return;"
 # S5: a defeated minion takes a point
@@ -45,6 +45,8 @@ m stray_write proof.c "   psnd_frame ();
 m tick_cost   proof.c "w_cost [NWEAPON] = { 0, 1, 2, 4, 7, 2, 1, 3 };" "w_cost [NWEAPON] = { 0, 1, 2, 4, 6, 2, 1, 3 };"
 # W3: the demo lacks PATH
 m demo_owned  proof.c "pl_owned = demo ? (1 << NWEAPON) - 1 :" "pl_owned = demo ? (1 << NWEAPON) - 5 :"
+# I9: the last lemma at half HP, not a quarter
+m last_early  proof_boss.c "if (boss.hp <= BOSS_HP / 4 && boss.attack < n)" "if (boss.hp <= BOSS_HP / 2 && boss.attack < n)"
 # (W5's refill bound has no mutant: the demo's few energy pickups all find a tactic within 4 of
 # full, so a wrong refill is hidden by the cap; notes/proof-obligation-spec.md)
 # S2: a heart that no pickup gave

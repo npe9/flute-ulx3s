@@ -108,30 +108,69 @@ chevrons), sprite slots 62 and 63 (the HUD icon and gauge; the HUD line now has 
 sprites), bullet kinds 90 and 91 (the energy and heart pickups, harm 0), and three new `minion`
 fields (`a`, `b`, `c`) for the new enemies' state.  The checkpoint is new with this change.
 
+## The fight structure
+
+A fight borrows its shape from bullet-hell and run-and-gun boss design: mechanics only, with no
+characters, art, music or attack patterns taken from any game.  Every mechanic is tied to the
+boss's idea, and the arena says which idea it is.
+
+- **Intro:** for 60 frames the boss bar fills from empty, with a tick sound, before the first move.
+- **Moves:** each boss has 3 or 4 regular moves, which they cycle through, plus one last move.  A
+  move's name is shown on arena row 3 when it starts, with a one-line explanation on row 5.
+- **Pinch:** at half HP (16 or less), the boss's update runs 5 times every 4 frames.  Every
+  timer value is still visited, so no attack is skipped.  A cue line on row 4 names the pinch in
+  the boss's terms, e.g. "PINCH: THE LOGICAL CLOCKS RUN FAST".
+- **The last lemma:** at a quarter HP (8 or less), "THE LAST LEMMA" is announced and the boss
+  plays one new signature move built from their idea.  From then on it alternates with the
+  regular moves.
+- **Telegraphs:** the big attacks are announced 20-40 frames ahead by a blinking `!` ring, blinking
+  tiles or a note.
+- **Clean proof:** a move survived without a hit gives +500 and "CLEAN PROOF +500" on row 7,
+  followed by 50 frames of rest.  It is scored by `boss_move_end()`, which `next_move` calls.
+- **Bullet modes** (palette banks 14 and 15):
+  - **BLUE** hurts only if you moved this frame: a safety property is kept by doing nothing.
+  - **ORANGE** hurts only if you stood still: a liveness property needs progress.
+  - **PINK** is a proved shot.  Touch it in the air with UP newly pressed (an 8-frame window) to
+    parry it.  It breaks, you bounce up and you gain a proof certificate, the same certificate as
+    Appel's tombstones (proof-carrying code: the proof travels with the shot).  Otherwise it hurts.
+  - A certificate also lets a lemma pierce a shield.
+
+The last lemmas:
+
+| Boss | The last lemma | Mechanic | Source |
+|---|---|---|---|
+| John McCarthy | EVAL AND APPLY | `(FACT 3)` is traced through the interpreter's two mutually recursive halves, EVAL (left) and APPLY (right).  Each pass between them is a ball labelled with its argument or value, flying on a lane one level lower for each deeper call.  Each ball is telegraphed at its station (a paren) 24 frames ahead, with notes such as "DEPTH 2: APPLY FACT TO 1".  The returns carry the values back up; the last one, the answer, is pink; "(FACT 3) = 6: EVAL AND APPLY AGREE" | McCarthy, "Recursive Functions of Symbolic Expressions and Their Computation by Machine, Part I", CACM 1960 (the eval/apply of the LISP 1.5 manual) |
+| Edsger Dijkstra | The dining philosophers | five philosophers and five forks; every 24 frames each in turn (random order) may get hungry, take the left fork, then the right, eat (a telegraphed volley) and put both down.  If all hold their left fork, the deadlock stuns the boss.  Shooting a philosopher schedules them (THINK becomes HUNGRY) or pre-empts them (a waiting LEFT holder is delayed) | Dijkstra, "Hierarchical Ordering of Sequential Processes", Acta Informatica 1971 (EWD310) |
+| Tony Hoare | Monitors | a bounded buffer of 4 slots guarded by a monitor.  The producer (the boss) appends: an aimed shot.  When the buffer is full, it waits on NONFULL (the boss stalls).  The consumer (a turret) removes: a 3-shot volley.  When it is empty, it waits on NONEMPTY.  One process at a time is inside (shown); the other queues at the entry.  Shooting the turret makes the consumer busy, so the buffer fills | Hoare, "Monitors: An Operating System Structuring Concept", CACM 1974 |
+| Leslie Lamport | The Byzantine generals, OM(1) | the commander (the boss) sends LEFT or RIGHT to three lieutenants.  Each relays what they heard to the other two, one of them a traitor who relays the opposite, and each decides by majority.  Then all attack along the floor: arrows hover 30 frames (the telegraph), then fly.  The traitor's arrows point the loyal way and fly the other.  Shoot the traitor: damage and stun | Lamport, Shostak and Pease, "The Byzantine Generals Problem", TOPLAS 1982 |
+| Andrew Appel | Tail calls on a trampoline | `EVEN?(n)` calls `ODD?(n-1)` calls `EVEN?(n-2)`.  Each call is a bounce of the ball on a trampoline at the floor's centre, and the stack stays one frame deep.  At 0 the answer bursts into a fan, pink if TRUE.  The trampoline throws you too | Appel, *Compiling with Continuations*, 1992; Tarditi, Lee and Acharya, "No Assembly Required: Compiling Standard ML to C", LOPLAS 1992 (the trampoline) |
+| Robert Harper | Focusing: a shift flips polarity | positive (+) orbs fall, negative (-) orbs rise.  Every 150 frames a shift flips every polarity on the screen, telegraphed by 30 frames of the tiles blinking | Andreoli, "Logic Programming with Focusing Proofs in Linear Logic", 1992; Zeilberger, "On the Unity of Duality", APAL 2008 (polarity, as taught in Harper's course) |
+| Adam Chlipala | Proof by reflection | a mirror in front of the boss.  An unproved lemma that hits it comes back pink (parry it for a certificate).  A lemma that carries a proof is checked and passes.  The mirror blinks, then drops for 70 of every 270 frames ("THE TACTIC RUNS") | Boutin, "Using Reflection to Build Efficient and Certified Decision Procedures", TACS 1997; *Certified Programming with Dependent Types*, ch. "Proof by Reflection" |
+
 ## The bosses and their attacks
 
-Each attack is one of the boss's own formal-methods ideas working as a mechanic; where the idea
-is an algorithm, the game runs the real algorithm (its state is global in `proof_boss.c` --
-`mc_*`, `ss_*`, `fd_*`, `ft_*`, `km_*` -- so a CBMC harness can state its theorem directly; see
-Verification for what is proved so far).
+Each attack is one of the boss's own formal-methods ideas working as a mechanic.  Where the idea
+is an algorithm, the game runs the real algorithm.  Its state is global in `proof_boss.c`
+(`mc_*`, `ss_*`, `fd_*`, `ft_*`, `km_*`, `px_*`), so a CBMC harness can state its theorem
+directly.  See Verification for what is proved so far.
 
 | Boss | Attack | Mechanic | Source |
 |---|---|---|---|
-| John McCarthy | Compiler correctness | a random expression `(o1 a (o2 b c))` or `(o1 (o2 a b) c)` (o in +, *) is compiled to stack code (PUSH n, ADD, MUL) and run one instruction every 40 frames, the stack shown as digits; PUSH fires an aimed orb, an operator a pair; at the end "RUN = EVAL = v" and a fan of v orbs | McCarthy and Painter, "Correctness of a Compiler for Arithmetic Expressions", 1967 |
+| John McCarthy | Compiler correctness | a random expression `(o1 a (o2 b c))` or `(o1 (o2 a b) c)` (o in +, *) is compiled to stack code (PUSH n, ADD, MUL) and run one instruction every 40 frames, the stack shown as digits; PUSH fires an aimed orb, an operator a pair; at the end "RUN = EVAL = v" and a fan of v orbs (telegraphed; its middle orb is pink) | McCarthy and Painter, "Correctness of a Compiler for Arithmetic Expressions", 1967 |
 | | Recursion induction | F and G (two colours, mirrored) are thrown as a 2; each landing node n splits into two n-1, a 0 vanishes; the leaf counts of F and G are shown equal | "A Basis for a Mathematical Theory of Computation", 1961/63 |
 | | `(AMB A B)` | two ghosts show where the boss may be; the angelic choice puts the boss at the one farther from you | ibid. |
 | Edsger Dijkstra | The weakest precondition | Q (5 floor columns) is marked; wp(S, Q) -- Q moved back by the belt's shift d -- is computed and shown; S runs (the floor is a conveyor carrying you d columns), then the floor outside Q burns | *A Discipline of Programming*, 1976; "Guarded commands, nondeterminacy and formal derivation of programs", CACM 1975 |
 | | Guarded commands | `if X<14 -> rain [] X>25 -> roll [] high -> aim fi`: every 70 frames a true guard is chosen nondeterministically and its action runs; if none holds the boss aborts (stunned) | ibid. |
 | | A loop variant | shielded while `do ... od` runs: V starts at 9 and each turn (a volley) lowers it; shooting V lowers it too; at 0 the loop terminates and the boss is open | ibid. |
 | | Self-stabilization | Dijkstra's K-state token ring (N=5, K=6) from a random state, a central daemon moving one privileged machine every 30 frames; privileged machines glow and fire; the boss is shielded while more than one is privileged; shooting a machine is a fault and the ring stabilizes again | "Self-stabilizing systems in spite of distributed control", CACM 1974 |
-| Tony Hoare | `{P} C {Q}` | a zone P appears on the floor; a lemma thrown from inside P is proved to reach Q (it homes on the boss) | "An Axiomatic Basis for Computer Programming", CACM 1969 |
+| Tony Hoare | `{P} C {Q}` | a zone P appears on the floor; a lemma thrown from inside P is proved to reach Q (it homes on the boss); every third aimed shot is pink (a proved shot: parry it) | "An Axiomatic Basis for Computer Programming", CACM 1969 |
 | | FIND | eight pillars rise in random order; Hoare's FIND places the 8th, 7th, 6th and 5th smallest one comparison every 6 frames (the pivot gold), invariant "LEFT <= A(F) <= RIGHT"; the top four become stairs | Algorithm 65, CACM 1961; "Proof of a Program: FIND", CACM 1971 |
 | | CSP | P (left) does `c!v`, the boss `c?x`; when both are ready the value passes and the boss fires on it; shoot P and the boss waits for ever: deadlock (it falls, stunned) | "Communicating Sequential Processes", CACM 1978 |
 | Leslie Lamport | TLA+ model checking | a breadth-first search of every reachable state from the boss, one depth layer every 5 frames, the visited states dotted; if it reaches you, "INVARIANT VIOLATED" (a hit), else "NO ERROR: n DISTINCT STATES" | TLA+ and TLC, *Specifying Systems*, 2002 |
-| | Safety and liveness | safety: segments of floor warn, then burn ("nothing bad happens"); liveness: `!` tokens with a countdown -- reach each in time (the boss is hit) or "LIVENESS VIOLATED" | "Proving the Correctness of Multiprocess Programs", TSE 1977 |
+| | Safety and liveness | safety ("nothing bad happens"): three BLUE walls sweep the arena, telegraphed 30 frames ahead; standing still is always safe.  Liveness ("something good happens"): ORANGE sweeps, which hurt whoever stands still, and `!` tokens with a countdown.  Reach each token in time (the boss is hit) or "LIVENESS VIOLATED" | "Proving the Correctness of Multiprocess Programs", TSE 1977 |
 | | Logical clocks | four emitters show their clocks; the least (clock, id) fires next and takes max + 1; your hit is a message, setting its clock to max + 1 | "Time, Clocks, and the Ordering of Events in a Distributed System", CACM 1978 |
-| | Paxos | three acceptors light one by one; a quorum (two) decides and a rain falls; shoot two before they accept and the ballot fails (the boss is stunned) | "The Part-Time Parliament", TOCS 1998 |
-| Andrew Appel | Proof-carrying code | the boss's checker rejects unproved lemmas; tombstone certificates appear, each giving your next three lemmas a proof the checker accepts | "Foundational Proof-Carrying Code", LICS 2001 (PCC: Necula and Lee) |
+| | Paxos | real single-decree Paxos (`px_*`).  Two proposers: the boss, whose value 1 is a rain, and a ghost on the left platform, whose value 2 is a fan.  Three acceptors; a quorum is any two.  Every message (Prepare, Promise, Accept, Accepted) is a bullet that homes on its receiver, labelled with its ballot or value.  Each acceptor shows its promised ballot above and its accepted value below.  A proposer with a quorum of promises adopts the highest voted value reported.  A stuck proposer retries with a higher ballot.  When the learner (the boss) sees a quorum, "CHOSEN: VALUE v" and that value is the telegraphed attack.  Your lemmas drop messages or crash acceptors, which keep their state; with nothing chosen by the timeout, the boss is stunned ("SAFE, BUT NOT LIVE") | "The Part-Time Parliament", TOCS 1998; "Paxos Made Simple", 2001 |
+| Andrew Appel | Proof-carrying code | the boss's checker rejects unproved lemmas; tombstone certificates appear, each giving your next three lemmas a proof the checker accepts; some of the boss's shots are pink, and a parry is a certificate too | "Foundational Proof-Carrying Code", LICS 2001 (PCC: Necula and Lee) |
 | | Step-indexed models | orbs carry an index 4; each bounce (a step) spends one, splitting while the index is 2 or more; at 0 the orb is gone | Appel and McAllester, "An Indexed Model of Recursive Types", TOPLAS 2001 |
 | | VST: no use after free | malloc makes blocks (platforms); pointer orbs fly to an allocated block and burst there; a freed block vanishes and every pointer to it fizzles | Verified Software Toolchain, *Program Logics for Certified Compilers*, 2014 |
 | Robert Harper | Progress and preservation | a large orb steps every 40 frames: it splits into two smaller ones (the same type) until each is a value (a harmless dot) | *Practical Foundations for Programming Languages*, 2012/16 |
@@ -148,11 +187,12 @@ Verification for what is proved so far).
 - Each frame first flushes the previous frame's shadow state (palette, sprite table, scroll,
   changed map words, at most 640 a frame), then simulates, so every VDP write lands in the
   vertical blank (42 lines, about 67,000 CPU clocks at 50 MHz).
-- Host build, 30,000 demo frames: VDP writes a frame mean 4, worst 414 (a stage's first map);
-  APU worst 6 (before the tactics: worst 449 and 9); no frame has a sprite overflow (`HOST_OVERFLOW=1`; `=2` prints the frame and line
+- Host build, 30,000 demo frames: VDP writes a frame mean 5, worst 434 (a stage's first map);
+  APU worst 9; no frame has a sprite overflow (`HOST_OVERFLOW=1`; `=2` prints the frame and line
   of each).  The 16-sprites-a-line limit shaped the design: bullets buried in the ground are not
-  drawn (they would share the HUD's lines, now 13 sprites with the tactic icon and gauge), spawned volleys start above the figures,
-  and every move was run with `HOST_OVERFLOW=2` (Verification).
+  drawn (they would share the HUD's lines, 13 sprites with the tactic icon and gauge), spawned
+  volleys start above the figures, and every move was run with `HOST_OVERFLOW=2` (Verification).
+  Over all the PROOF_TEST fight runs, the worst frame is 421 VDP writes.
 - CPU time a frame on the strict sim (50 MHz SoC, a frame is 840,000 cycles): over the first 120
   frames (the title's init, then the demo's first stage run) mean 17,105 cycles, worst 186,428
   (frame 0, which draws every tile and sprite).  No boss fight has run on the RTL, so the fights'
@@ -195,19 +235,49 @@ What is proved and what is only tested, separately (notes/sw-verification-plan.m
     satisfies it).
   - Planted bugs: `run_proof_mutants.sh` makes five one-line mutants (operator order, the K-state
     copy rule, FIND's scan, the carry, the pipeline shift); each must fail its theorem.
-- **Not proved:** the game engine's properties (no undefined behaviour over a whole frame, only
-  real device registers, at most 16 sprites a line, the per-frame write bound), the other attacks
-  (Paxos here is a vote count, not the protocol, and claims nothing), and anything about the
-  binary (tier 3).  These are tested:
-- Host: built with `-Wall -Wextra -fsanitize=address,undefined`, 30,000 demo frames clean; and
-  every boss move driven directly (`-DPROOF_TEST`, a host-only hook:
-  `PROOF_TEST=<boss>,<move>[,<weapon>]` starts the pilot in that arena, invulnerable, the fight
-  opening on that move, firing that tactic): every move x all 8 tactics, 200 runs x 2,400 frames
-  with `HOST_OVERFLOW=2`, no sanitizer report, no sprite overflow, no text line the font cannot
-  draw.  Contact sheets of every move were looked at (frames 80, 200, 320, 500 of each), and of
-  each stage and each tactic in use.  `PROOF_STAGE=<boss>` starts the demo at that stage (damage
-  on) and `PROOF_TRACE=1` prints state changes: the pilot reaches all seven arenas.  The tactics,
-  weaknesses, stage gimmicks and enemies are tested only, not proved.
+- **Paxos (`px_*`), tested, not yet proved.**
+  - The property expected is agreement: never `px_chosen (1)` and `px_chosen (2)` together, and
+    `px_learned != 0` implies `px_chosen (px_learned)`.  It should hold for any order, loss or
+    duplication of messages.
+  - Its precondition: messages are ones the steps produce.  A Promise carries what
+    `px_prepare` returned.  An Accept is `(b, px_pval [p])`, sent after `px_promise` returned 1.
+    A stale message from an old ballot is fine; a forged one is not.  `px_accepted` checks the
+    vote itself.  The test's loop is the shape a CBMC harness would take.
+  - The steps are pure functions of their message's fields (`px_start`, `px_prepare`,
+    `px_promise`, `px_accept`, `px_accepted`, `px_chosen`), ready for a CBMC harness.
+  - `sw/game2d/proof_paxos_test.sh` extracts them from `proof_boss.c` and runs 1,000,000 random
+    schedules of 120 steps each, covering any order, loss and duplication.  Agreement held in all
+    of them; a value was learned in 978,921.
+  - Its planted bug, phase 2 ignoring the reported votes, breaks agreement in run 2.
+- **Not proved:**
+  - the game engine's properties: no undefined behaviour over a whole frame, only real device
+    registers, at most 16 sprites a line, and the per-frame write bound;
+  - the other attacks, including the last lemmas (the dining philosophers, the monitor and
+    OM(1) are game simulations of the algorithms, and they claim nothing);
+  - anything about the binary (tier 3).
+
+  These are tested:
+- Host:
+  - Built with `-Wall -Wextra -fsanitize=address,undefined`; 30,000 demo frames run clean.
+  - Every boss move is driven directly with `-DPROOF_TEST`, a host-only hook.
+    `PROOF_TEST=<boss>,<move>` starts the pilot in that arena, invulnerable, with the fight opening
+    on that move.  `PROOF_HP=<n>` pins the boss's HP, which tests the pinch (16) and the last lemma
+    (8).  `PROOF_CLEAN=1` and `PROOF_PARRY=1` exercise the clean-proof bonus and the parry.
+    `PROOF_POKE=1` lands a lemma on the move's interactive target every 50 frames.  The targets
+    are a philosopher, the monitor's consumer, a Paxos message or acceptor, a lieutenant, and
+    the mirror, with and without a proof.  This reaches what the pilot never does.
+  - A coverage build (clang `-fcoverage-mapping`) over all these runs plus the 30,000-frame demo
+    executes every region of the new fight code.  The exceptions are argument-range guards: the
+    `px_*` checks against messages the steps never send, and `bullet_new` failing.
+  - Results: 32 moves (the last lemmas included) plus 14 pinch and last-lemma runs, each 2,400
+    frames with `HOST_OVERFLOW=2`.  None had a sanitizer report or a sprite overflow.
+  - Contact sheets of every new move were looked at.
+- Tactics: `PROOF_TEST=<boss>,<move>,<weapon>` also fires that tactic; every move x all 8
+  tactics runs 2,400 frames with `HOST_OVERFLOW=2` and the spec checked every frame
+  (`HOST_SPEC=1`).  Contact sheets of each stage and each tactic in use were looked at.
+  `PROOF_STAGE=<boss>` starts the demo at that stage (damage on) and `PROOF_TRACE=1` prints
+  state changes: the pilot reaches all seven arenas.  The tactics, weaknesses, stage gimmicks and
+  enemies are tested only, not proved.
 - Tier 1 (`TITLE=proof formal/sw/fuzz.sh 8 3000 7`): `proof.elf` on the Sail RV32 model with the
   SoC's devices, random buttons, half the runs with random UART / frame timing: S1 (no trap, only
   real device registers, word accesses) and S2 (its device-write trace equals the host build's)

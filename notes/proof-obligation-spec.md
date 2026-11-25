@@ -14,7 +14,9 @@ ending), whether the attract demo is playing, the stage's boss and the discharge
 hearts, game over, invulnerable frames, proof certificates, the player's position, the camera,
 the arena and world size, the score, the frame count, the boss (alive, hit points, hit flash,
 stun, shield, current move, its number of moves), the counts of live shots, bullets and props,
-and the tactics (selected, owned, energy).  Three predicates over observations define the game:
+the tactics (selected, owned, energy), the pickups taken, the frame's VDP writes, whether Paxos
+agrees, and whether the host-only test hook is driving the fight (it forces a move or pins hit
+points, which the clauses that it legitimately breaks allow; it is always off on the board).  Three predicates over observations define the game:
 
 - `spec_init (s)`: the state at power-on (clauses N).
 - `spec_inv (s)`: true after every frame (clauses I, W1-W2).
@@ -39,6 +41,7 @@ and the tactics (selected, owned, energy).  Three predicates over observations d
   player is on screen and inside the world.
 - **I7** Certificates are not negative; at most 3 shots, 24 bullets, 10 props are live.
 - **I8** The score is not negative.
+- **I9** A boss's last lemma (its last move) runs only at a quarter of its hit points (8) or less.
 
 ### One frame (S)
 - **S0** Exactly one frame passes.
@@ -51,7 +54,8 @@ and the tactics (selected, owned, energy).  Three predicates over observations d
   one is lost a frame, only when not invulnerable (at most one frame of it left), and a lost heart
   starts 90 frames of invulnerability, which then count down one a frame.  Falling into a pit costs
   a heart like any hit and puts the player back at the last checkpoint.
-- **S3** A fight starts with the boss at 32 hit points, not flashing.  In the fight the boss never
+- **S3** A fight starts with the boss at 32 hit points, not flashing (the host test hook may pin it
+  lower).  In the fight the boss never
   heals; it loses hit points only when not flashing, 1..4 at a time (4 is a weakness hit), and a
   hit starts its 14-frame flash.  The fight is won exactly when the boss has no hit points left.
 - **S4** Only a real win (not the demo's) discharges a boss, and a real win discharges its boss;
@@ -87,6 +91,7 @@ McCarthy .. Chlipala), with energy costs 0, 1, 2, 4, 7, 2, 1, 3.
   nothing smaller to its right, permuting the array.
 - **A4** Chlipala's limbs equal the spec number modulo 99999 (inductive step).
 - **A5** Chlipala's pipeline fires the spec's shots three steps later (inductive).
+- **A6** Lamport's Paxos never chooses two values, and the learner learns only a chosen value.
 
 ### The program (B): the binary is the C program
 - **B1** The RISC-V binary never traps and touches only real device registers, with word accesses.
@@ -96,9 +101,10 @@ McCarthy .. Chlipala), with energy costs 0, 1, 2, 4, 7, 2, 1, 3.
 
 | Clauses | Checked by | Status |
 |---|---|---|
-| N, I, S, W1-W3 | the host oracle: every frame of every host run with `HOST_SPEC=1` (30,000 demo frames; every boss, move and tactic via `PROOF_TEST`, 200 runs of 2,400 frames; random button scripts), and every frame of every fuzz script (`formal/sw/host_trace.c`, fuzz.sh reports `SPEC`) | **tested**: all inputs tried pass; ten planted engine bugs (one or more per clause family) are each caught (`formal/sw/spec_mutants.sh`) |
+| N, I, S, W1-W3 | the host oracle: every frame of every host run with `HOST_SPEC=1` (30,000 demo frames; every boss, move (the last lemmas included) and tactic via `PROOF_TEST`, plus the pinch and last-lemma HP pins and the poke, parry and clean-proof hooks: 334 runs of 2,400 frames; random button scripts), and every frame of every fuzz script (`formal/sw/host_trace.c`, fuzz.sh reports `SPEC`) | **tested**: all inputs tried pass; eleven planted engine bugs (one or more per clause family) are each caught (`formal/sw/spec_mutants.sh`) |
 | V1 | `HOST_OVERFLOW=2` on the same runs (the VDP reference model's per-line count) | **tested** |
 | V2 | the host oracle: the flush counts its writes by kind, and host.c checks that every VDP write of the frame is one of them | **tested**; a planted write outside the flush is caught |
+| A6 | the host oracle, every frame (the game's own Paxos runs, with the player dropping messages and crashing acceptors); and `sw/game2d/proof_paxos_test.sh`: 1,000,000 random schedules (any order, loss, duplication) of the same `px_*` code, with a planted bug caught | **tested**; a CBMC proof over all schedules is next |
 | A1-A5 | `formal/sw/cbmc/run_proof.sh` (CBMC; FIND by exhaustive enumeration), 5 planted mutants | **proved** over the stated domains (A4 and A5 as inductive steps; A4 assumes limbs stay under 100) |
 | B1, B2 | `TITLE=proof formal/sw/fuzz.sh` on the Sail RV32 model | **tested** |
 
