@@ -38,6 +38,11 @@ int main (void) {
    g_state = nondet_int (); demo = nondet_int (); cur_boss = nd (0, 6); defeated = nondet_int ();
    pl_lives = nondet_int (); pl_dead = nondet_int (); pl_hurt = nondet_int (); pl_certs = nondet_int ();
    score = nondet_int (); pl_weapon = nd (0, NWEAPON - 1); pl_owned = nondet_int (); t = nondet_int ();
+   __CPROVER_havoc_object (&pl_energy); got_hearts = nondet_int (); got_energy = nondet_int ();
+   // so every global is arbitrary except: g_state is one of the seven phases, cur_boss one of the
+   // seven bosses, pl_weapon one of the tactics (the indexes the frame needs in range), and the
+   // slice of I4/I5 holds.  Function-local statics (text buffers of the boss moves) are left at
+   // their initial values; the moves that own them are all stubbed in S3.
    __CPROVER_assume (g_state >= G_TITLE && g_state <= G_END);
    __CPROVER_assume (i45 ());
    spec_state pre, post;

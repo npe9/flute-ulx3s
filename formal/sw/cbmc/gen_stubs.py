@@ -26,6 +26,9 @@ FAMILIES = {
    'S3': (['boss.hp', 'boss.flash'], 'if (nondet_int ()) boss_damage (nd (1, 4));', {'next_demo', 'title_screen'}),
 }
 KEEP, CALL, ALSO_REAL = FAMILIES[family]
+# what the writer's guard reads: a stub havocs, then calls the writer, so it cannot reproduce a
+# callee that hits and then changes one of these; such a callee must stay real (or be refused)
+GUARD_READS = {'S3': ['g_state', 'boss.on', 'boss.flash']}[family]
 # never stubbed: the frame itself and what the family proves through
 REAL = {'proof_frame', 'boss_damage', 'proof_observe'} | ALSO_REAL
 
@@ -119,7 +122,11 @@ for f in sorted(callees):
       else: body.append('   __CPROVER_havoc_object (&%s);' % v)
    keep = lambda fld: 0 if fld in bossf else 1
    if bossf: body.append('   havoc_boss_except (%d, %d, %d, %d);' % (keep('hp'), keep('flash'), keep('on'), keep('attack')))
-   if any(f in may[v] or f in writers[v] for v in KEEP): body.append('   ' + CALL)
+   if any(f in may[v] or f in writers[v] for v in KEEP):
+      bad = [v for v in GUARD_READS if v not in KEEP and (f in writers[v] or f in may[v])]
+      if bad: sys.exit('gen_stubs: %s reaches the writer and may also write %s, which its guard reads:'
+                       ' a stub would be unsound; keep it real' % (f, ' '.join(bad)))
+      body.append('   ' + CALL)
    if ret != 'void': body.append('   %s r; return r;' % ret)
    lines.append('%s stub_%s (%s) {' % (ret, f, plist))   # external: goto-cc keeps it
    lines += body
