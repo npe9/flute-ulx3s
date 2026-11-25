@@ -156,7 +156,9 @@ def cmd_load(a):
         lk.left = '%s in SRAM (md5 %s); safe to reprogram' % (os.path.basename(bit), md5(bit))
     return Result('lab load', lines=['loaded %s into SRAM in %.1f s (md5 %s); flash untouched; hw lab restart returns to flash'
                                      % (os.path.relpath(bit, ROOT), dt, md5(bit))],
-                  bitstream=os.path.relpath(bit, ROOT), md5=md5(bit), seconds=round(dt, 1), target='sram')
+                  bitstream=os.path.relpath(bit, ROOT), md5=md5(bit), seconds=round(dt, 1), target='sram',
+                  _inputs=[bit], _tool='openFPGALoader', _checks=[{'name': 'sram load', 'status': 'pass',
+                  'expected': 'loader exit 0', 'observed': 'exit 0 in %.1f s' % dt}])
 
 
 def open_port(dev, baud):
@@ -270,7 +272,7 @@ def main(argv):
                              'python3 scripts/hw_test_suite.py (the full gate) until it is'),
               }.get(a.verb) or refuse('HW-E-BADREQ', 'hw lab needs a verb: restart, load, serial, raw, lock', 'hw lab lock')
         return fn(a)
-    return common.run(dispatch, argv, ap.parse_args)
+    return common.run(dispatch, argv, ap.parse_args, area='lab')
 
 
 if __name__ == '__main__':

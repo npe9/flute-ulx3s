@@ -38,6 +38,12 @@ board.  `HW_SERIAL` names the console device; both come from the environment or
 Status and exit codes follow the contract: `ok` 0, `fail` 1, `HW-E-BADREQ` 2, `HW-E-TIMEOUT`
 and `HW-E-INTERNAL` 4, other errors 3; every answer carries `cached` (false: nothing is cached).
 
+With `HW_PROJECT` set, every `hw lab` answer (refusals and errors included) is recorded in that
+project's hw state DB (`<project>/.hw/state.db`, untracked; `~/src/hwsh/STATE.md`) through
+`hwstate.record()`: area lab runs are never cached, a load records the bitstream's sha256 as its
+input (so lineage reaches the run that built it) and a pass/fail check.  A recording failure is
+reported on stderr and never changes the answer.
+
 ## Tests and measurement
 
 `python3 -I tools/hw/tests/run_tests.py`: 19 checks; the board answers each have a negative

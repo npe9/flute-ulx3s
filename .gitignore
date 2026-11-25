@@ -27,3 +27,4 @@ test/debug/logs/
 # tools/hw: machine facts (serial device, holder) stay local
 tools/hw/local.toml
 __pycache__/
+.hw/
