@@ -158,7 +158,7 @@ Info:    routing  1.53  7.28 Net ra_MULT18X18D_A0_P0[2] (23,13) -> (23,14)
 Info:                          Sink acc_TRELLIS_FF_Q_DI_CCU2C_S0_3$CCU2_COMB0.B
 Info:                          Defined in:
 Info:                               tiny.v:3.56-3.67
-Info:                               /opt/homebrew/bin/../share/yosys/ecp5/arith_map.v:32.22-32.23
+Info:                               /usr/share/yosys/ecp5/arith_map.v:32.22-32.23
 Info:      logic  0.45  7.73 Source acc_TRELLIS_FF_Q_DI_CCU2C_S0_3$CCU2_COMB0.FCO
 Info:    routing  0.00  7.73 Net acc_TRELLIS_FF_Q_DI_CCU2C_S0_3$CCU2_FCI_INT (23,14) -> (23,14)
 Info:                          Sink acc_TRELLIS_FF_Q_DI_CCU2C_S0_3$CCU2_COMB1.FCI
@@ -167,8 +167,8 @@ Info:    routing  0.00  7.73 Net acc_TRELLIS_FF_Q_DI_CCU2C_S0_3_COUT (23,14) -> 
 Info:                          Sink acc_TRELLIS_FF_Q_DI_CCU2C_S0_2$CCU2_COMB0.FCI
 Info:                          Defined in:
 Info:                               tiny.v:3.56-3.67
-Info:                               /opt/homebrew/bin/../share/yosys/ecp5/arith_map.v:74.7-80.4
-Info:                               /opt/homebrew/bin/../share/yosys/ecp5/cells_sim.v:82.9-82.13
+Info:                               /usr/share/yosys/ecp5/arith_map.v:74.7-80.4
+Info:                               /usr/share/yosys/ecp5/cells_sim.v:82.9-82.13
 Info:      logic  0.07  7.80 Source acc_TRELLIS_FF_Q_DI_CCU2C_S0_2$CCU2_COMB0.FCO
 Info:    routing  0.00  7.80 Net acc_TRELLIS_FF_Q_DI_CCU2C_S0_2$CCU2_FCI_INT (23,14) -> (23,14)
 Info:                          Sink acc_TRELLIS_FF_Q_DI_CCU2C_S0_2$CCU2_COMB1.FCI
@@ -177,8 +177,8 @@ Info:    routing  0.00  7.80 Net acc_TRELLIS_FF_Q_DI_CCU2C_S0_2_COUT (23,14) -> 
 Info:                          Sink acc_TRELLIS_FF_Q_DI_CCU2C_S0_1$CCU2_COMB0.FCI
 Info:                          Defined in:
 Info:                               tiny.v:3.56-3.67
-Info:                               /opt/homebrew/bin/../share/yosys/ecp5/arith_map.v:74.7-80.4
-Info:                               /opt/homebrew/bin/../share/yosys/ecp5/cells_sim.v:82.9-82.13
+Info:                               /usr/share/yosys/ecp5/arith_map.v:74.7-80.4
+Info:                               /usr/share/yosys/ecp5/cells_sim.v:82.9-82.13
 Info:      logic  0.07  7.87 Source acc_TRELLIS_FF_Q_DI_CCU2C_S0_1$CCU2_COMB0.FCO
 Info:    routing  0.00  7.87 Net acc_TRELLIS_FF_Q_DI_CCU2C_S0_1$CCU2_FCI_INT (24,14) -> (24,14)
 Info:                          Sink acc_TRELLIS_FF_Q_DI_CCU2C_S0_1$CCU2_COMB1.FCI
@@ -187,8 +187,8 @@ Info:    routing  0.00  7.87 Net acc_TRELLIS_FF_Q_DI_CCU2C_S0_1_COUT (24,14) -> 
 Info:                          Sink acc_TRELLIS_FF_Q_DI_CCU2C_S0$CCU2_COMB0.FCI
 Info:                          Defined in:
 Info:                               tiny.v:3.56-3.67
-Info:                               /opt/homebrew/bin/../share/yosys/ecp5/arith_map.v:74.7-80.4
-Info:                               /opt/homebrew/bin/../share/yosys/ecp5/cells_sim.v:82.9-82.13
+Info:                               /usr/share/yosys/ecp5/arith_map.v:74.7-80.4
+Info:                               /usr/share/yosys/ecp5/cells_sim.v:82.9-82.13
 Info:      logic  0.07  7.94 Source acc_TRELLIS_FF_Q_DI_CCU2C_S0$CCU2_COMB0.FCO
 Info:    routing  0.00  7.94 Net acc_TRELLIS_FF_Q_DI_CCU2C_S0$CCU2_FCI_INT (24,14) -> (24,14)
 Info:                          Sink acc_TRELLIS_FF_Q_DI_CCU2C_S0$CCU2_COMB1.FCI
@@ -197,8 +197,8 @@ Info:    routing  0.00  7.94 Net acc_TRELLIS_FF_Q_DI_CCU2C_S0_COUT (24,14) -> (2
 Info:                          Sink acc_TRELLIS_FF_Q_DI_CCU2C_S0_6$CCU2_COMB0.FCI
 Info:                          Defined in:
 Info:                               tiny.v:3.56-3.67
-Info:                               /opt/homebrew/bin/../share/yosys/ecp5/arith_map.v:74.7-80.4
-Info:                               /opt/homebrew/bin/../share/yosys/ecp5/cells_sim.v:82.9-82.13
+Info:                               /usr/share/yosys/ecp5/arith_map.v:74.7-80.4
+Info:                               /usr/share/yosys/ecp5/cells_sim.v:82.9-82.13
 Info:      logic  0.07  8.01 Source acc_TRELLIS_FF_Q_DI_CCU2C_S0_6$CCU2_COMB0.FCO
 Info:    routing  0.00  8.01 Net acc_TRELLIS_FF_Q_DI_CCU2C_S0_6$CCU2_FCI_INT (24,14) -> (24,14)
 Info:                          Sink acc_TRELLIS_FF_Q_DI_CCU2C_S0_6$CCU2_COMB1.FCI
@@ -207,8 +207,8 @@ Info:    routing  0.00  8.01 Net acc_TRELLIS_FF_Q_DI_CCU2C_S0_6_COUT (24,14) -> 
 Info:                          Sink acc_TRELLIS_FF_Q_DI_CCU2C_S0_5$CCU2_COMB0.FCI
 Info:                          Defined in:
 Info:                               tiny.v:3.56-3.67
-Info:                               /opt/homebrew/bin/../share/yosys/ecp5/arith_map.v:74.7-80.4
-Info:                               /opt/homebrew/bin/../share/yosys/ecp5/cells_sim.v:82.9-82.13
+Info:                               /usr/share/yosys/ecp5/arith_map.v:74.7-80.4
+Info:                               /usr/share/yosys/ecp5/cells_sim.v:82.9-82.13
 Info:      logic  0.07  8.09 Source acc_TRELLIS_FF_Q_DI_CCU2C_S0_5$CCU2_COMB0.FCO
 Info:    routing  0.00  8.09 Net acc_TRELLIS_FF_Q_DI_CCU2C_S0_5$CCU2_FCI_INT (24,14) -> (24,14)
 Info:                          Sink acc_TRELLIS_FF_Q_DI_CCU2C_S0_5$CCU2_COMB1.FCI
@@ -217,8 +217,8 @@ Info:    routing  0.00  8.09 Net acc_TRELLIS_FF_Q_DI_CCU2C_S0_5_COUT (24,14) -> 
 Info:                          Sink acc_TRELLIS_FF_Q_DI_CCU2C_S0_4$CCU2_COMB0.FCI
 Info:                          Defined in:
 Info:                               tiny.v:3.56-3.67
-Info:                               /opt/homebrew/bin/../share/yosys/ecp5/arith_map.v:74.7-80.4
-Info:                               /opt/homebrew/bin/../share/yosys/ecp5/cells_sim.v:82.9-82.13
+Info:                               /usr/share/yosys/ecp5/arith_map.v:74.7-80.4
+Info:                               /usr/share/yosys/ecp5/cells_sim.v:82.9-82.13
 Info:      logic  0.07  8.16 Source acc_TRELLIS_FF_Q_DI_CCU2C_S0_4$CCU2_COMB0.FCO
 Info:    routing  0.00  8.16 Net acc_TRELLIS_FF_Q_DI_CCU2C_S0_4$CCU2_FCI_INT (25,14) -> (25,14)
 Info:                          Sink acc_TRELLIS_FF_Q_DI_CCU2C_S0_4$CCU2_COMB1.FCI
@@ -227,7 +227,7 @@ Info:    routing  0.13  8.69 Net acc_TRELLIS_FF_Q_DI[15] (25,14) -> (25,14)
 Info:                          Sink acc_TRELLIS_FF_Q.DI
 Info:                          Defined in:
 Info:                               tiny.v:3.56-3.67
-Info:                               /opt/homebrew/bin/../share/yosys/ecp5/arith_map.v:34.26-34.27
+Info:                               /usr/share/yosys/ecp5/arith_map.v:34.26-34.27
 Info:      setup  0.00  8.69 Source acc_TRELLIS_FF_Q.DI
 Info: 5.73 ns logic, 2.96 ns routing
 
