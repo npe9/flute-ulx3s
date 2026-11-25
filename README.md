@@ -767,7 +767,11 @@ computational trinitarianism; `crush`, Bedrock footprints, Fiat-style carry limb
 Kami pipeline replaying its spec (the table is in the notes). Six bosses are 32x32 caricatures
 drawn from Wikimedia Commons photographs (`sw/game2d/portraits.py`; each sprite carries its
 photo's licence, listed in `proof_portraits.c` and the notes); Adam Chlipala, with no free photo,
-stays an original emblem figure. A defeat is "Q.E.D.". Both titles play themselves when idle (an attract
+stays an original emblem figure. A defeat is "Q.E.D." and gives you that boss's tactic, a weapon
+(CONS, PATH, BRACES, TICK, CPS, TRINITY, CRUSH; DOWN changes it, each with an energy gauge), and
+each boss is weak to one other boss's tactic for a real historical reason (the cycle is in the
+notes); each stage has its own gimmick (allocation bridges, belts, null floor, clock platforms,
+crumbling bridges, hot strips, crushers) and enemies (flyers, hoppers, turrets). Both titles play themselves when idle (an attract
 demo), and `-DTITLE_PROOF` selects Proof Obligation in `board.c`, `host.c` and the verification
 harnesses (`TITLE=proof formal/sw/fuzz.sh`, `TITLE=proof sim/game2d/frame_check.sh`); Lantern
 Drift's binary is unchanged by it. Checks: `sim/vdp_ut/run.sh` and `sim/apu_ut/run.sh` compare each

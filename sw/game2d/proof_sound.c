@@ -29,7 +29,7 @@ static const uint8_t tunes [10][4] = {
 static uint8_t lead [32], bass [8];
 static int tune, step_frames;
 static unsigned frame;                    // unsigned: wraps defined
-static int jump_t, shot_t, cue_t;
+static int jump_t, shot_t, cue_t, get_t, shot_base;
 
 static void compose (int n) {
    const uint8_t *tu = tunes [n];
@@ -87,7 +87,7 @@ void psnd_init (void) {
    w (APU_ADSR (7), apu_adsr (255, 30, 0, 30));   w (APU_PITCH (7), note_pitch (96));
    w (APU_MASTER, 24);                     // the worst case of all voices at peak stays under full scale
    w (APU_CTRL, 1);
-   frame = 0; jump_t = shot_t = cue_t = 0;
+   frame = 0; jump_t = shot_t = cue_t = get_t = 0; shot_base = 88;
    compose (8); tune = 8;
 }
 
@@ -110,13 +110,24 @@ void psnd_frame (void) {
       if (on) w (APU_KEYON, on);
    }
    if (jump_t) { jump_t--; w (APU_PITCH (4), note_pitch (72 + 2 * (6 - jump_t))); }   // a rising sweep
-   if (shot_t) { shot_t--; w (APU_PITCH (4), note_pitch (88 - 3 * (3 - shot_t))); }
+   if (shot_t) { shot_t--; w (APU_PITCH (4), note_pitch (shot_base - 3 * (3 - shot_t))); }
    if (cue_t) { cue_t--; if (cue_t == 6) { w (APU_PITCH (6), note_pitch (79)); w (APU_KEYON, 0x40); } }
+   if (get_t) {                          // a new tactic: a rising arpeggio, four notes
+      get_t--;
+      if (get_t % 6 == 5) { static const uint8_t arp [4] = { 72, 76, 79, 84 }; w (APU_PITCH (6), note_pitch (arp [3 - get_t / 6])); w (APU_KEYON, 0x40); }
+   }
    frame++;
 }
 
 void psnd_jump (void) { jump_t = 6; shot_t = 0; w (APU_PITCH (4), note_pitch (72)); w (APU_KEYON, 0x10); }
-void psnd_shot (void) { if (jump_t) return; shot_t = 3; w (APU_PITCH (4), note_pitch (88)); w (APU_KEYON, 0x10); }
+void psnd_shot (void) { psnd_fire (0); }
+void psnd_fire (int wp) {             // each weapon its own pitch (the lemma 88)
+   static const uint8_t base [8] = { 88, 84, 91, 79, 67, 86, 93, 72 };
+   if (jump_t) return;
+   shot_base = base [wp & 7]; shot_t = 3; w (APU_PITCH (4), note_pitch (shot_base)); w (APU_KEYON, 0x10);
+}
+void psnd_get (void) { get_t = 24; cue_t = 0; }
+void psnd_pick (void) { w (APU_PITCH (6), note_pitch (84)); w (APU_KEYON, 0x40); }
 void psnd_hurt (void) { w (APU_PITCH (5), 9000); w (APU_KEYON, 0x20); }
 void psnd_boom (void) { w (APU_PITCH (5), 4000); w (APU_KEYON, 0x20); }
 void psnd_boss_hit (void) { w (APU_PITCH (6), note_pitch (60)); w (APU_KEYON, 0x40); }

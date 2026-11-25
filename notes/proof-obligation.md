@@ -11,9 +11,10 @@ so its tier-3 proof still names it.
 ## The game
 
 You are a tombstone, the end-of-proof mark.  LEFT / RIGHT run, UP jumps (hold for height), FIRE2
-throws a lemma (FIRE1 is the SoC reset).  Each stage is a short scrolling run (pits, ledges,
-walking counterexamples) into a one-screen arena where a boss attacks with their own ideas.  Five
-hearts a stage; a pit costs one.  A boss has 32 hit points (a 20-cell bar); a hit is followed by
+throws a lemma or the selected tactic, DOWN changes tactic (FIRE1 is the SoC reset).  Each stage
+is a short scrolling run (pits, ledges, its own gimmick and enemies, below) into a one-screen
+arena where a boss attacks with their own ideas.  Five hearts a stage; a pit costs one and puts
+you back at the last safe ground you stood on (a checkpoint).  A boss has 32 hit points (a 20-cell bar); a hit is followed by
 14 frames in which it cannot be hit again.  Defeat all seven ("proof obligation discharged") for
 the ending.  The title screen lists the bosses (UP / DOWN, FIRE2); with no input for 20 s, and
 from power-on, the game plays itself (the attract demo: a pilot that runs, jumps and throws,
@@ -37,6 +38,75 @@ Adam Chlipala has no freely licensed photograph on Commons, so that boss stays t
 robed emblem figure drawn by `proof.c`.  The rest of the game is not derived from the photos.
 The tone is respectful: a defeated boss gets "Q.E.D.".  Every attack's name is shown when it
 starts, with one line saying what the idea is.
+
+## Tactics (weapons), weaknesses and stages
+
+Defeating boss b gives you their tactic, weapon b+1 (the attract demo owns all eight).  The lemma
+(weapon 0) is free; every other tactic has 28 energy, refilled at each stage's start, and each
+use costs its weapon's cost.  The HUD shows the selected tactic's icon (sprite 62) and an 8-level
+energy gauge (sprite 63) on the hearts' line.  All tactics use the same three shot slots (sprites
+12-14) as the lemma, and every shot that reaches the boss goes through the boss's own
+`shot_other` and `shot_hits`, so a boss's rules about what counts as a hit (a certificate, a
+shield, a phase) apply to every tactic; only the damage differs.
+
+| # | Tactic | From | Cost | What it does |
+|---|---|---|---|---|
+| 0 | lemma | (start) | 0 | the original shot |
+| 1 | CONS | McCarthy | 1 | a pair: the car flies up-diagonal, the cdr straight |
+| 2 | PATH | Dijkstra | 2 | homes on the nearest on-screen enemy, else the boss |
+| 3 | BRACES | Hoare | 4 | `{P}` and `{Q}` orbit you and erase enemy bullets they touch; FIRE again throws them |
+| 4 | TICK | Lamport | 7 | stops the clock: bullets, enemies, the boss and the stage's gimmicks freeze for 40 frames (90 if it is the boss's weakness); the sky turns grey |
+| 5 | CPS | Appel | 2 | a boomerang: goes out, slows, and the continuation returns to you; pierces enemies |
+| 6 | TRINITY | Harper | 1 | a three-way spread |
+| 7 | CRUSH | Chlipala | 3 | shockwaves both ways along the floor |
+
+Braces erase only the bullets the engine moves (kinds 0 and 1); a boss's own objects (Harper's
+shields, kinds 51/53, and the other attack props) are never erased, so no attack's rules change.
+
+**Weaknesses** (`weakness[7]` in `proof.c`): a boss hit by their weakness takes 4 damage and is
+stunned for 40 frames (the stun is only set after the boss's own `shot_hits` accepted the hit).
+TICK never stuns; Lamport's weakness to it is a longer freeze (90 frames).  The cycle, and why:
+
+| Boss | Weak to | Why |
+|---|---|---|
+| Hoare | PATH (Dijkstra) | *Structured Programming* (1972), the book Dijkstra, Hoare and Dahl wrote together |
+| Dijkstra | TICK (Lamport) | Lamport's bakery algorithm (1974) solved Dijkstra's mutual-exclusion problem without atomic reads |
+| Lamport | BRACES (Hoare) | Lamport's "The 'Hoare Logic' of Concurrent Programs" (1980) |
+| Appel | CONS (McCarthy) | McCarthy invented garbage collection for Lisp; Appel's garbage-collection work builds on it |
+| Harper | CPS (Appel) | Appel's SML/NJ compiler (CPS-based) implements *The Definition of Standard ML*, which Harper co-wrote |
+| Chlipala | TRINITY (Harper) | Harper's type theory (computational trinitarianism) under Chlipala's dependent types |
+| McCarthy | CRUSH (Chlipala) | automation (`crush`) discharges the induction McCarthy's recursion induction asks for |
+
+After the Q.E.D. the screen says NEW TACTIC: <name> and one line on what it does, with a short
+jingle; the first win in a real game adds "DOWN: CHANGE TACTIC".
+
+**Stages.**  Each stage is generated deterministically (`build_stage`) and has its own gimmick and
+enemies.  The gimmicks change map cells only on a transition (a few cells a frame, well within the
+640-word flush).
+
+| Stage | Gimmick | Enemies |
+|---|---|---|
+| McCarthy | allocation bridges over pits: cells appear in turn, stay, and are collected | hoppers |
+| Dijkstra | conveyor belts (chevron floor) that push you | flyers |
+| Hoare | null floor: looks like ground with a faint tell, and you fall through | turrets |
+| Lamport | clock platforms: solid, blink, gone, on one shared clock | flyers |
+| Appel | crumbling bridges: stand on one and it gives way, then is reallocated | hoppers |
+| Harper | hot strips that blink and then hurt | turrets, a flyer |
+| Chlipala | falling crushers and belts | walkers, chasers |
+
+Enemies: walkers and chasers (as before), flyers (patrol and bob), hoppers (jump toward you),
+turrets (fire an orb every 120 frames when near; 96 was tried and killed the pilot too often), crushers (fall, wait, rise; only a tink when
+hit).  Enemies killed in a stage sometimes drop a pickup: energy (+10 to the selected tactic, or
+the emptiest owned one) or a heart (up to five).  The demo pilot crosses every stage: it treats
+null floor, hot strips and vanishing cells as gaps, waits for allocation and clock bridges,
+waits out crushers, uses PATH on flyers, and in a fight cycles through the tactics (160 frames
+each).
+
+Resources the tactics and stages use: sprite tiles 672-767 (all 96: tactic icons, an 8-level
+gauge, the energy capsule, flyer, hopper, turret, crusher, pellet, brace), BG tile 31 (the belt's
+chevrons), sprite slots 62 and 63 (the HUD icon and gauge; the HUD line now has 13 of its 16
+sprites), bullet kinds 90 and 91 (the energy and heart pickups, harm 0), and three new `minion`
+fields (`a`, `b`, `c`) for the new enemies' state.  The checkpoint is new with this change.
 
 ## The bosses and their attacks
 
@@ -78,10 +148,10 @@ Verification for what is proved so far).
 - Each frame first flushes the previous frame's shadow state (palette, sprite table, scroll,
   changed map words, at most 640 a frame), then simulates, so every VDP write lands in the
   vertical blank (42 lines, about 67,000 CPU clocks at 50 MHz).
-- Host build, 30,000 demo frames: VDP writes a frame mean 4, worst 449 (a stage's first map);
-  APU worst 9; no frame has a sprite overflow (`HOST_OVERFLOW=1`; `=2` prints the frame and line
+- Host build, 30,000 demo frames: VDP writes a frame mean 4, worst 414 (a stage's first map);
+  APU worst 6 (before the tactics: worst 449 and 9); no frame has a sprite overflow (`HOST_OVERFLOW=1`; `=2` prints the frame and line
   of each).  The 16-sprites-a-line limit shaped the design: bullets buried in the ground are not
-  drawn (they would share the HUD's lines, 11 sprites), spawned volleys start above the figures,
+  drawn (they would share the HUD's lines, now 13 sprites with the tactic icon and gauge), spawned volleys start above the figures,
   and every move was run with `HOST_OVERFLOW=2` (Verification).
 - CPU time a frame on the strict sim (50 MHz SoC, a frame is 840,000 cycles): over the first 120
   frames (the title's init, then the demo's first stage run) mean 17,105 cycles, worst 186,428
@@ -130,10 +200,14 @@ What is proved and what is only tested, separately (notes/sw-verification-plan.m
   (Paxos here is a vote count, not the protocol, and claims nothing), and anything about the
   binary (tier 3).  These are tested:
 - Host: built with `-Wall -Wextra -fsanitize=address,undefined`, 30,000 demo frames clean; and
-  every boss move driven directly (`-DPROOF_TEST`, a host-only hook: `PROOF_TEST=<boss>,<move>`
-  starts the pilot in that arena, invulnerable, the fight opening on that move): 25 runs x 2,400
-  frames with `HOST_OVERFLOW=2`, no sanitizer report, no sprite overflow.  Contact sheets of every
-  move were looked at (frames 80, 200, 320, 500 of each).
+  every boss move driven directly (`-DPROOF_TEST`, a host-only hook:
+  `PROOF_TEST=<boss>,<move>[,<weapon>]` starts the pilot in that arena, invulnerable, the fight
+  opening on that move, firing that tactic): every move x all 8 tactics, 200 runs x 2,400 frames
+  with `HOST_OVERFLOW=2`, no sanitizer report, no sprite overflow, no text line the font cannot
+  draw.  Contact sheets of every move were looked at (frames 80, 200, 320, 500 of each), and of
+  each stage and each tactic in use.  `PROOF_STAGE=<boss>` starts the demo at that stage (damage
+  on) and `PROOF_TRACE=1` prints state changes: the pilot reaches all seven arenas.  The tactics,
+  weaknesses, stage gimmicks and enemies are tested only, not proved.
 - Tier 1 (`TITLE=proof formal/sw/fuzz.sh 8 3000 7`): `proof.elf` on the Sail RV32 model with the
   SoC's devices, random buttons, half the runs with random UART / frame timing: S1 (no trap, only
   real device registers, word accesses) and S2 (its device-write trace equals the host build's)
@@ -149,4 +223,6 @@ What is proved and what is only tested, separately (notes/sw-verification-plan.m
 Playable on the host build and the strict sim; not yet run on the board, because the game2d
 SoC's timing is still open (`notes/soc-family-plan.md`, game2d status).  The attract pilot
 cannot reach Dijkstra (who hovers level with the high platforms), so in the demo that fight
-mostly times out; a player can reach it.
+mostly times out; a player can reach it.  The pilot crosses every stage but loses most fights
+(it wins Harper's and Chlipala's, and McCarthy's sometimes, in 40,000 demo frames); a fight it
+loses or times out moves the demo on to the next stage, so it still visits every boss.

@@ -1,8 +1,10 @@
 // sw/game2d/proof.c: Proof Obligation, the game2d platformer (an original game): the engine,
 // graphics, title, stages and player.  You are a tombstone (the end-of-proof mark); run and jump
-// with the D-pad (UP jumps), throw lemmas with FIRE2.  Each of the seven stages ends in an arena
-// where a boss attacks with their ideas (proof_boss.c); discharge all seven proof obligations.
-// With no input the game plays itself (the attract demo, which visits every boss in turn).
+// with the D-pad (UP jumps), throw lemmas with FIRE2.  Each of the seven stages has its own
+// gimmick and enemies and ends in an arena where a boss attacks with their ideas (proof_boss.c);
+// discharge all seven proof obligations.  A defeated boss gives you their tactic (a weapon; DOWN
+// changes it), and each boss is weak to one tactic (weakness []).  With no input the game plays
+// itself (the attract demo, which owns every tactic and visits every boss in turn).
 // Everything on screen is generated here; the machine is reached only through hw.h, so host.c
 // can run the same frames against the VDP reference model.
 //
@@ -16,6 +18,7 @@
 #include "proof.h"
 
 uint8_t kind [ROWS][WMAX];
+static int8_t belt_dir [WMAX];        // a stage conveyor in this column: +1 right, -1 left (0: the arena's)
 int wcols, arena_x;
 unsigned t;
 static uint32_t rs = 0x9E3779B9u;
@@ -147,7 +150,8 @@ int sfont (char c) {
 
 // ---- background tiles
 enum { BT_TOP = 1, BT_FILL, BT_BRICK, BT_NULL, BT_GONE, BT_PILLAR, BT_PIVOT, BT_GATE, BT_ZONE,
-       BT_RED, BT_GREEN, BT_BLUE, BT_MARKED, BT_DOOMED, BT_STAR1, BT_STAR2, BT_BAR, BT_BAREMPTY };
+       BT_RED, BT_GREEN, BT_BLUE, BT_MARKED, BT_DOOMED, BT_STAR1, BT_STAR2, BT_BAR, BT_BAREMPTY,
+       BT_BELT = 31 };                  // 19-30 free (the font starts at 32)
 
 static void make_bg_tiles (void) {
    tile_fill (0); tile_put (0);
@@ -192,6 +196,11 @@ static void make_bg_tiles (void) {
    tile_fill (0); for (int r = 1; r < 7; r++) for (int c = 0; c < 7; c++) px (r, c, r == 1 ? 3 : 2); tile_put (BT_BAR);
    tile_fill (0); for (int c = 0; c < 7; c++) { px (1, c, 1); px (6, c, 1); } px (2, 0, 1); px (5, 0, 1); px (3, 0, 1); px (4, 0, 1);
    tile_put (BT_BAREMPTY);
+   tile_fill (5);                                     // a stage conveyor: chevrons show its way
+   for (int c = 0; c < 8; c++) { px (0, c, 4); px (6, c, 3); px (7, c, 3); }
+   for (int k = 0; k < 2; k++) { px (1, 1 + 4 * k, 4); px (2, 2 + 4 * k, 4); px (3, 3 + 4 * k, 4); px (4, 2 + 4 * k, 4); px (5, 1 + 4 * k, 4); }
+   px (7, 1, 5); px (7, 5, 5);
+   tile_put (BT_BELT);
    // the font: BG text tiles (nibble 1) and the sprite glyphs (top left of a 16x16 sprite)
    for (int g = 0; FONT_CHARS [g]; g++) {
       tile_fill (0);
@@ -293,6 +302,97 @@ static const char *const cursor_img [16] = {
 
 static void put_rows (int n, const char *const rows [16]) { g16_rows (rows); g16_put (n); }
 
+// ---- the weapons (tactics), the HUD gauge, the stage enemies and pickups (tiles 672-767)
+// weapon art: 1 the edge, 2 the core, 3 the glow (bank B_SHOT; B_BUL2 when it carries a proof)
+static const char *const icon_img [7][16] = {
+   { "................", "................", "................", "................",    // CONS: a cell
+     "1111111111111...", "1222221333331...", "1222221333331...", "1222221333331...",
+     "1222221333331...", "1111111111111...", "................", "................",
+     "................", "................", "................", "................" },
+   { "................", "..........111...", ".........12221..", ".........12321..",    // PATH: a path
+     ".........12221..", "........3.111...", ".......3........", "..111.3.........",
+     ".12223..........", ".12321..........", ".12221..........", "..111...........",
+     "................", "................", "................", "................" },
+   { "................", "...111....111...", "..122......221..", "..12........21..",    // BRACES: { }
+     "..12........21..", "..12........21..", ".122........221.", "122..........221",
+     ".122........221.", "..12........21..", "..12........21..", "..12........21..",
+     "..122......221..", "...111....111...", "................", "................" },
+   { "................", ".....111111.....", "...1122222211...", "..122222322221..",    // TICK: a clock
+     "..122222322221..", ".12222223222221.", ".12222223222221.", ".12222223333321.",
+     ".12222222222221.", ".12222222222221.", "..122222222221..", "..122222222221..",
+     "...1122222211...", ".....111111.....", "................", "................" },
+   { "................", "..........1111..", ".........12221..", "........12221...",    // CPS: there
+     ".......12221....", "......12221.....", ".....12221......", "....12221.......",    // and back
+     "....12221.......", ".....12221......", "......12221.....", ".......12221....",
+     "........12221...", ".........12221..", "..........1111..", "................" },
+   { "................", "......111.......", ".....12221......", ".....12321......",    // TRINITY
+     ".....12221......", "......111.......", "................", "................",
+     "..111......111..", ".12221....12221.", ".12321....12321.", ".12221....12221.",
+     "..111......111..", "................", "................", "................" },
+   { "................", "................", "................", "................",    // CRUSH: a wave
+     "................", "................", ".......11.......", "......1221......",
+     ".....123321.....", "....12333321....", "...1233333321...", "..123333333321..",
+     ".12333333333321.", "1233333333333321", "1222222222222221", "1111111111111111" } };
+static const char *const energy_img [16] = {
+   "................", "................", "....11111111....", "...1222222221...",
+   "...1233333321...", "...1233333321...", "...1222222221...", "...1233333321...",
+   "...1233333321...", "...1222222221...", "....11111111....", "................",
+   "................", "................", "................", "................" };
+// stage enemies (bank B_ENEMY: 1 dark, 2 red, 3 pale, 4 darker; the crusher B_PROP)
+static const char *const flyer_img [2][16] = {
+   { "................", "................", "1..............1", "11............11",
+     "121...1111...121", "1221.122221.1221", ".12212333321221.", "..122233332221..",
+     "...1122332211...", ".....122221.....", "......1111......", "................",
+     "................", "................", "................", "................" },
+   { "................", "................", "................", "................",
+     "......1111......", ".....122221.....", "...1123333211...", "..122233332221..",
+     ".12212233221221.", "1221.122221.1221", "121...1111...121", "11............11",
+     "1..............1", "................", "................", "................" } };
+static const char *const hopper_img [2][16] = {
+   { "................", "................", ".....111111.....", "....12222221....",
+     "...1232222321...", "...1222222221...", "...1222222221...", "....12222221....",
+     ".....111111.....", "......1..1......", ".....1....1.....", "......1..1......",
+     ".....1....1.....", "......1..1......", "....444..444....", "................" },
+   { "................", "................", "................", "................",
+     "................", "................", ".....111111.....", "....12222221....",
+     "...1232222321...", "...1222222221...", "...1222222221...", "....12222221....",
+     ".....111111.....", ".....1.11.1.....", "....444..444....", "................" } };
+static const char *const turret_img [16] = {
+   "................", "................", "................", "................",
+   "................", "................", "1111111.........", "1222221111......",
+   "11111112221.....", "......123321....", ".....12333321...", "....1222222221..",
+   "...122222222221.", "...144444444441.", "...111111111111.", "................" };
+static const char *const crusher_img [16] = {
+   "......1111......", "......1221......", "1111111111111111", "1333333333333331",
+   "1322222222222231", "1322222222222231", "1322111111112231", "1322222222222231",
+   "1322222222222231", "1333333333333331", "1111111111111111", "1212121212121212",
+   ".1.1.1.1.1.1.1.1", "................", "................", "................" };
+static void make_weapon_sprites (void) {
+   for (int w = 0; w < 7; w++) put_rows (T_ICON + 4 * w, icon_img [w]);
+   for (int lv = 0; lv < 8; lv++) {               // the gauge: a dark frame, 2 pixels a level
+      g16_clear ();
+      for (int c = 0; c < 16; c++) { g16 [5][c] = g16 [10][c] = 1; }
+      for (int r = 5; r <= 10; r++) g16 [r][0] = g16 [r][15] = 1;
+      for (int r = 6; r <= 9; r++)
+         for (int c = 1; c < 15; c++) g16 [r][c] = (uint8_t) (c <= 2 * lv ? (r == 6 ? 5 : 4) : 1);
+      g16_put (T_GAUGE + 4 * lv);
+   }
+   put_rows (T_ENERGY, energy_img);
+   put_rows (T_FLYER, flyer_img [0]); put_rows (T_FLYER + 4, flyer_img [1]);
+   put_rows (T_HOPPER, hopper_img [0]); put_rows (T_HOPPER + 4, hopper_img [1]);
+   put_rows (T_TURRET, turret_img);
+   put_rows (T_CRUSHER, crusher_img);
+   g16_clear (); g16_disc (16, 16, 4, 1, 2, 3); g16_put (T_PELLET);
+   g16_clear ();                                  // a brace, '{' (flipped: '}'), 16 tall
+   for (int r = 0; r < 16; r++) {
+      int c = r < 6 ? 6 : r < 10 ? (r == 7 || r == 8 ? 3 : 4) : 6;
+      if (r == 0 || r == 15) c = 7;
+      g16 [r][c] = 2; g16 [r][c + 1] = 2; g16 [r][c - 1] = 1; g16 [r][c + 2] = 1;
+   }
+   g16 [0][9] = g16 [15][9] = 2; g16 [0][10] = g16 [15][10] = 1;
+   g16_put (T_BRACE);
+}
+
 static void make_sprites (void) {
    for (int f = 0; f < 4; f++) {
       g16_rows (player_img);
@@ -335,6 +435,7 @@ static void make_sprites (void) {
    g16_clear (); for (int k = 0; k < 8; k++) { uint32_t r = rnd (); g16_disc ((int) (r % 20) + 6, (int) ((r >> 8) % 20) + 6, 3, 1, 2, 0); } g16_put (T_PUFF);
    put_rows (T_GHOST, ghost_img);
    put_rows (T_CURSOR, cursor_img);
+   make_weapon_sprites ();
 }
 
 // ---- the bosses: a robed figure with the boss's emblem on the chest (not a likeness)
@@ -408,7 +509,7 @@ static uint16_t kind_entry (int c, int r) {
    int k = kind [r][c];
    switch (k) {
    case K_GROUND: return vdp_map_entry (r > 0 && k_solid (kind [r - 1][c]) ? BT_FILL : BT_TOP, B_TERRAIN, (c * 7 + r) & 1, 0);
-   case K_NULL:   return vdp_map_entry (BT_NULL, B_TERRAIN, 0, 0);
+   case K_NULL:   return vdp_map_entry (r > 0 && kind [r - 1][c] == K_NULL ? BT_FILL : BT_NULL, B_TERRAIN, 0, 0);
    case K_BRICK:  return vdp_map_entry (BT_BRICK, B_BRICK, 0, 0);
    case K_GONE:   return vdp_map_entry (BT_GONE, B_BRICK, 0, 0);
    case K_PILLAR: return vdp_map_entry (BT_PILLAR, B_PROP, 0, 0);
@@ -416,7 +517,7 @@ static uint16_t kind_entry (int c, int r) {
    case K_GATE:   return vdp_map_entry (BT_GATE, B_PROP, 0, 0);
    case K_ZONE:   return vdp_map_entry (BT_ZONE, B_TERRAIN, 0, 0);
    case K_STATE:  return vdp_map_entry (BT_RED, B_COLOR, 0, 0);
-   case K_BELT:   return vdp_map_entry (BT_GREEN, B_COLOR, 0, 0);
+   case K_BELT:   return belt_dir [c] ? vdp_map_entry (BT_BELT, B_COLOR, belt_dir [c] < 0, 0) : vdp_map_entry (BT_GREEN, B_COLOR, 0, 0);
    case K_HOT:    return vdp_map_entry (BT_BLUE, B_COLOR, 0, 0);
    case K_MARKED: return vdp_map_entry (BT_MARKED, B_BRICK, 0, 0);
    case K_DOOMED: return vdp_map_entry (BT_DOOMED, B_BRICK, 0, 0);
@@ -461,6 +562,10 @@ void arena_text (int row, const char *s) {
    text_rows [row] = 1;
    for (int c = 0; c < ACOLS; c++) plane_set (a + c, row, kind_entry (a + c, row));
    int n = slen (s); if (n > ACOLS) n = ACOLS;
+#ifdef PROOF_TEST
+   for (int i = 0; s [i]; i++) if (s [i] != ' ' && !glyph (s [i])) fprintf (stderr, "text: no glyph for '%c' in \"%s\"\n", s [i], s);
+   if (slen (s) > ACOLS) fprintf (stderr, "text: longer than %d: \"%s\"\n", ACOLS, s);
+#endif
    for (int i = 0; i < n; i++) plane_set (a + (ACOLS - n) / 2 + i, row, vdp_map_entry (T_FONT + glyph (s [i]), B_TEXT, 0, 0));
 }
 void arena_clear_text (int row) {
@@ -482,9 +587,37 @@ int pl_x, pl_y, pl_dead;
 static int pl_fx, pl_fy, pl_vy, pl_face, pl_ground, pl_hurt, pl_lives, pl_cool, pl_anim, pl_prev;
 static int score;
 static int spawn_x, spawn_y;
-typedef struct { int on, x, y, vx, proved; } shot_t;
+// a player projectile: kind is the weapon that threw it; fx, fy, vx, vy in SUB units, x, y the
+// sprite's top left in pixels; t its age; a its state (braces: 0 orbiting, 1 thrown; CPS: 0 out,
+// 1 back); hit: the minions a piercing CPS has already hit (bit i)
+typedef struct { int on, kind, x, y, fx, fy, vx, vy, proved, t, a, hit; } shot_t;
 int pl_certs, shot_proved;
 static shot_t shots [3];
+
+// ---- the weapons (tactics): weapon b + 1 is won by beating boss b
+int pl_weapon, pl_owned = 1, pl_energy [NWEAPON];
+int clock_stop;
+static const int w_cost [NWEAPON] = { 0, 1, 2, 4, 7, 2, 1, 3 };
+static const char *const w_name [NWEAPON] = { "LEMMA", "CONS", "PATH", "BRACES", "TICK", "CPS", "TRINITY", "CRUSH" };
+static const char *const w_says [NWEAPON] = {      // what a tactic does (36 characters at most)
+   "", "THE CAR FLIES UP, THE CDR STRAIGHT", "THE SHORTEST PATH TO THE NEAREST FOE",
+   "{P} {Q} GUARD YOU. FIRE THROWS THEM", "STOPS THE CLOCK: NOTHING ELSE MOVES",
+   "OUT, THEN THE CONTINUATION RETURNS", "THREE WAYS AT ONCE, ALL THE SAME",
+   "SHOCKWAVES BOTH WAYS ALONG THE FLOOR" };
+// the weakness cycle, boss b's weakness (a weapon); each a real connection (the notes say which):
+// McCarthy <- CRUSH, Dijkstra <- TICK, Hoare <- PATH, Lamport <- BRACES, Appel <- CONS,
+// Harper <- CPS, Chlipala <- TRINITY
+const int weakness [7] = { W_CRUSH, W_TICK, W_PATH, W_BRACES, W_CONS, W_CPS, W_TRINITY };
+static const int cos32 [32] = { 64, 63, 59, 53, 45, 36, 24, 12, 0, -12, -24, -36, -45, -53, -59, -63,
+                                -64, -63, -59, -53, -45, -36, -24, -12, 0, 12, 24, 36, 45, 53, 59, 63 };
+static int c32 (int a) { return cos32 [a & 31]; }
+static int s32 (int a) { return cos32 [(a - 8) & 31]; }
+static void aim (int x0, int y0, int x1, int y1, int speed, int *vx, int *vy) {   // SUB a frame
+   int dx = x1 - x0, dy = y1 - y0, ax = iabs (dx), ay = iabs (dy);
+   int d = ax > ay ? ax + ay / 2 : ay + ax / 2;
+   if (d == 0) { *vx = speed; *vy = 0; return; }
+   *vx = dx * speed / d; *vy = dy * speed / d;
+}
 
 int bullet_new (int k, int x, int y, int vx, int vy, int tile, int bnk) {
    for (int i = 0; i < NBUL; i++)
@@ -502,10 +635,99 @@ int minion_new (int x, int y, int vx, int hp, int tile, int bnk) {
       if (!mins [i].on) {
          minion *m = &mins [i];
          m->on = 1; m->x = x << 4; m->y = y << 4; m->vx = vx; m->vy = 0; m->hp = hp; m->kind = 0;
-         m->t = 0; m->tile = tile; m->bank = bnk; m->label = -1;
+         m->t = 0; m->tile = tile; m->bank = bnk; m->label = -1; m->a = m->b = m->c = 0;
          return i;
       }
    return -1;
+}
+
+// ---- the stages' gimmicks: timed or triggered map cells (only while a stage runs, not a fight)
+// GM_ALLOC (McCarthy): cons cells over a pit, allocated two columns at a time, then freed in
+// order; GM_CLOCK (Lamport): platforms that blink and vanish on the shared tick; GM_CRUMBLE
+// (Appel): marked platforms freed after you stand on them, reallocated later; GM_HOT (Harper):
+// floor strips that warn, then burn.  Belts (Dijkstra, Chlipala) are static, belt_dir.
+enum { GM_ALLOC, GM_CLOCK, GM_CRUMBLE, GM_HOT };
+#define NGM 16
+typedef struct { int type, c0, c1, r, a, b; } gimmick;     // columns c0..c1 of row r
+static gimmick gm [NGM];
+static int ngm;
+static int gclk;                       // the stages' shared tick (stops with the clock, TICK)
+#define ALLOC_T 240                    // a bridge's cycle: cell i at 14 i, all up at 14 n, freed from 150
+#define CLOCK_T 150                    // solid to 84, blinking to 114, gone to 150
+#define HOT_T   200                    // ground to 90, warning to 130, hot to 200
+static int gm_cell_on (const gimmick *g, int c, int when) {     // solid at time `when`?
+   switch (g->type) {
+   case GM_ALLOC: {
+      int p = (when + g->a) % ALLOC_T, i = (c - g->c0) / 2;
+      return p >= 14 * i && p < 150 + 18 * i;
+   }
+   case GM_CLOCK: return (when + g->a) % CLOCK_T < 114;
+   case GM_CRUMBLE: return g->a < 3;
+   default: return 1;
+   } }
+static int gm_cell_hot (const gimmick *g, int when) { return g->type == GM_HOT && (when + g->a) % HOT_T >= 130; }
+static int gm_at (int c, int r) {
+   for (int i = 0; i < ngm; i++) if (gm [i].r == r && c >= gm [i].c0 && c <= gm [i].c1) return i;
+   return -1;
+}
+static int box_solid (int x, int y);
+static void gimmicks_update (void) {
+   int changed = 0;
+   for (int i = 0; i < ngm; i++) {
+      gimmick *g = &gm [i];
+      for (int c = g->c0; c <= g->c1; c++) {
+         int k = kind [g->r][c], nk = k;
+         switch (g->type) {
+         case GM_ALLOC: nk = gm_cell_on (g, c, gclk) ? K_BRICK : K_GONE; break;
+         case GM_CLOCK: {
+            int p = (gclk + g->a) % CLOCK_T;
+            nk = p < 84 ? K_BRICK : p < 114 ? (((p - 84) >> 3) & 1 ? K_BRICK : K_DOOMED) : K_GONE;
+            break;
+         }
+         case GM_CRUMBLE: nk = g->a == 0 ? K_MARKED : g->a == 1 ? K_MARKED : g->a == 2 ? K_DOOMED : K_GONE; break;
+         case GM_HOT: {
+            int p = (gclk + g->a) % HOT_T;
+            nk = p < 90 ? K_GROUND : p < 130 ? (((p - 90) >> 3) & 1 ? K_ZONE : K_GROUND) : K_HOT;
+            break;
+         } }
+         if (nk != k) { tile_set (c, g->r, nk); changed |= k_solid (nk); }
+      }
+      if (g->type == GM_CRUMBLE) {                    // 0 idle, 1 stood on, 2 failing, 3 freed
+         int pc = (pl_x + 8) >> 3;                    // stood on: your feet's centre on it
+         int on = pl_y + 16 == 8 * g->r && pc >= g->c0 && pc <= g->c1;
+         if (g->a == 0 && on) { g->a = 1; g->b = 0; }
+         else if (g->a) {
+            g->b++;
+            if (g->a == 1 && g->b >= 26) g->a = 2;
+            else if (g->a == 2 && g->b >= 44) g->a = 3;
+            else if (g->a == 3 && g->b >= 230) g->a = 0;
+         }
+      }
+   }
+   if (changed && box_solid (pl_x, pl_y)) player_bump_up ();     // a cell came back where you are
+}
+// the stage's enemies wait in a list and enter when the camera nears them
+#define NSPAWN 24
+typedef struct { int x, y, kind, done; } spawn_t;
+static spawn_t spawns [NSPAWN];
+static int nspawn;
+static void minion_spawn (int k, int x, int y) {
+   static const int hp [6] = { 1, 1, 1, 2, 3, 99 };
+   static const int tile [6] = { T_ENEMY, T_ENEMY, T_FLYER, T_HOPPER, T_TURRET, T_CRUSHER };
+   int i = minion_new (x, y, k == MK_FLY ? -6 : k == MK_HOP || k >= MK_TURRET ? 0 : -8, hp [k], tile [k], k == MK_CRUSH ? B_PROP : B_ENEMY);
+   if (i < 0) return;
+   mins [i].kind = k; mins [i].a = x << 4; mins [i].b = y << 4; mins [i].c = 0;
+   if (k == MK_CRUSH) mins [i].c = 40 + (x & 63);          // its first fall
+}
+static void spawns_update (int cam_x) {
+   for (int i = 0; i < nspawn; i++)
+      if (!spawns [i].done && spawns [i].x < cam_x + 336) {
+         int free = 0;
+         for (int m = 0; m < NMIN; m++) free += !mins [m].on;
+         if (!free) return;
+         spawns [i].done = 1;
+         if (spawns [i].x > cam_x - 16) minion_spawn (spawns [i].kind, spawns [i].x, spawns [i].y);
+      }
 }
 
 // ---- the player
@@ -523,10 +745,14 @@ static int g_state;
 enum { G_TITLE, G_PLAY, G_ARENA, G_FIGHT, G_WIN, G_OVER, G_END };
 static int g_timer;
 #ifdef PROOF_TEST
-// host test hook (never in the board build): PROOF_TEST=<boss>,<move> starts the demo pilot at
-// that boss's arena, invulnerable, with the fight opening on that move
+// host test hook (never in the board build): PROOF_TEST=<boss>,<move>[,<weapon>] starts the demo
+// pilot at that boss's arena, invulnerable, with the fight opening on that move (and that weapon
+// owned, selected, never running dry, the pilot firing it); PROOF_STAGE=<boss> starts the demo at
+// that stage's beginning, damage on; PROOF_TRACE=1 prints state changes and hurts to stderr,
+// PROOF_DBG=<from>,<to> the player frame by frame; a text line with a character the font lacks,
+// or over 40, is reported (text:)
 #include <stdlib.h>
-static int test_boss = -1, test_move;
+static int test_boss = -1, test_move, test_weapon = -1;
 #endif
 void player_hurt (void) {
 #ifdef PROOF_TEST
@@ -534,6 +760,9 @@ void player_hurt (void) {
 #endif
    if (pl_hurt || pl_dead || g_state == G_WIN) return;
    pl_lives--; pl_hurt = 90; psnd_hurt ();
+#ifdef PROOF_TEST
+   if (getenv ("PROOF_TRACE")) fprintf (stderr, "trace: frame %u boss %d hurt at x %d y %d (state %d)\n", t, cur_boss, pl_x, pl_y, g_state);
+#endif
    if (pl_lives <= 0) pl_dead = 1;
 }
 void set_spawn (int x, int y) { spawn_x = x; spawn_y = y; }
@@ -546,6 +775,67 @@ static void pit_respawn (void) {
    player_hurt ();
    pl_x = spawn_x; pl_y = spawn_y; pl_fx = pl_x << 4; pl_fy = pl_y << 4; pl_vy = 0;
    player_bump_up ();
+}
+
+// ---- throwing: a weapon's projectiles take free shot slots; a tactic costs energy only if it fires
+static int shots_free (void) { int n = 0; for (int i = 0; i < 3; i++) n += !shots [i].on; return n; }
+static shot_t *shot_new (int k, int x, int y, int vx, int vy) {   // pixels; SUB a frame
+   for (int i = 0; i < 3; i++)
+      if (!shots [i].on) {
+         shot_t *s = &shots [i];
+         s->on = 1; s->kind = k; s->x = x; s->y = y; s->fx = x * SUB; s->fy = y * SUB; s->vx = vx; s->vy = vy;
+         s->t = 0; s->a = 0; s->hit = 0;
+         s->proved = pl_certs > 0; if (pl_certs > 0) pl_certs--;
+         return s;
+      }
+   return 0;
+}
+static int braces_out (void) { for (int i = 0; i < 3; i++) if (shots [i].on && shots [i].kind == W_BRACES && shots [i].a == 0) return 1; return 0; }
+static int cps_out (void) { for (int i = 0; i < 3; i++) if (shots [i].on && shots [i].kind == W_CPS) return 1; return 0; }
+static void freeze_start (int n);
+static void fire (int pressed) {
+   int w = pl_weapon, dir = pl_face ? -1 : 1, fx0 = pl_x + (pl_face ? -4 : 8), cool = 10;
+   if (w == W_BRACES && braces_out ()) {              // FIRE again: throw them
+      if (!pressed) return;
+      for (int i = 0; i < 3; i++)
+         if (shots [i].on && shots [i].kind == W_BRACES && shots [i].a == 0) { shots [i].a = 1; shots [i].vx = 80 * dir; shots [i].vy = 0; }
+      pl_cool = 10; psnd_fire (w);
+      return;
+   }
+   if (pl_energy [w] < w_cost [w]) { if (pressed) psnd_tink (); return; }
+   int need = w == W_CONS || w == W_BRACES || w == W_CRUSH ? 2 : 1;
+   if (w == W_TICK) need = 0;
+   if (shots_free () < need || (w == W_TICK && clock_stop) || (w == W_CPS && cps_out ()) || (w == W_CRUSH && !pl_ground)) return;
+   switch (w) {
+   case W_LEMMA: shot_new (W_LEMMA, fx0, pl_y + 3, 80 * dir, 0); break;
+   case W_CONS: shot_new (W_CONS, fx0, pl_y - 2, 64 * dir, -32); shot_new (W_CONS, fx0, pl_y + 1, 80 * dir, 0); cool = 14; break;
+   case W_PATH: shot_new (W_PATH, fx0, pl_y, 56 * dir, -16); cool = 16; break;
+   case W_BRACES: {
+      shot_t *s = shot_new (W_BRACES, pl_x, pl_y, 0, 0); if (s) s->hit = 0;
+      s = shot_new (W_BRACES, pl_x, pl_y, 0, 0); if (s) s->hit = 16;   // half a turn behind
+      cool = 20; break;
+   }
+   case W_TICK: {
+      int weak = 0;
+      if (g_state == G_FIGHT) weak = weakness [cur_boss] == W_TICK;
+      freeze_start (weak ? 90 : 40); cool = 30; break;
+   }
+   case W_CPS: shot_new (W_CPS, fx0, pl_y, 112 * dir, 0); cool = 12; break;
+   case W_TRINITY: {
+      int n = shots_free ();
+      shot_new (W_TRINITY, fx0, pl_y + 1, 80 * dir, 0);
+      if (n >= 2) shot_new (W_TRINITY, fx0, pl_y + 1, 76 * dir, -28);
+      if (n >= 3) shot_new (W_TRINITY, fx0, pl_y + 1, 76 * dir, 28);
+      cool = 14; break;
+   }
+   case W_CRUSH: shot_new (W_CRUSH, pl_x + 6, pl_y, 64, 0); shot_new (W_CRUSH, pl_x - 6, pl_y, -64, 0); cool = 24; break;
+   }
+   int keep = 0;
+#ifdef PROOF_TEST
+   keep = test_weapon >= 0;                            // the test hook never runs dry
+#endif
+   if (!keep) pl_energy [w] -= w_cost [w];
+   pl_cool = cool; psnd_fire (w);
 }
 
 static void player_update (uint32_t b) {
@@ -575,13 +865,15 @@ static void player_update (uint32_t b) {
    if (pl_x < cam) { pl_x = cam; pl_fx = pl_x << 4; }
    if (pl_y > 8 * ROWS) pit_respawn ();
    if (pl_cool) pl_cool--;
-   if ((b & BTN_FIRE2) && !pl_cool)
-      for (int i = 0; i < 3; i++) if (!shots [i].on) {
-         shots [i].on = 1; shots [i].x = pl_x + (pl_face ? -4 : 8); shots [i].y = pl_y + 3;
-         shots [i].vx = pl_face ? -5 : 5; pl_cool = 10; psnd_shot ();
-         shots [i].proved = pl_certs > 0; if (pl_certs > 0) pl_certs--;
-         break;
+   uint32_t edge = b & ~(uint32_t) pl_prev;
+   if (edge & BTN_DOWN) {                              // the next owned weapon
+      for (int k = 1; k <= NWEAPON; k++) {
+         int w = (pl_weapon + k) % NWEAPON;
+         if (pl_owned & (1 << w)) { pl_weapon = w; break; }
       }
+      psnd_tink ();
+   }
+   if ((b & BTN_FIRE2) && !pl_cool) fire (edge & BTN_FIRE2);
    if (pl_hurt) pl_hurt--;
    pl_anim = !pl_ground ? 3 : dx ? 1 + ((t >> 3) & 1) : 0;
    pl_prev = (int) b;
@@ -590,65 +882,199 @@ static void player_update (uint32_t b) {
 static int overlap (int ax, int ay, int aw, int ah, int bx, int by, int bw, int bh) {
    return ax < bx + bw && bx < ax + aw && ay < by + bh && by < ay + ah;
 }
+static void minion_hit (int m, int dmg) {             // a projectile hit minion m
+   minion *n = &mins [m];
+   if (n->kind == MK_CRUSH) { psnd_tink (); return; }  // a crusher is not refuted
+   n->hp -= dmg;
+   if (n->hp > 0) { psnd_tink (); return; }
+   n->on = 0; score += 100;
+   int k = bullet_new (2, n->x, n->y, 0, 0, T_PUFF, B_BUL2);
+   if (k >= 0) bul [k].harm = 0;
+   if (g_state != G_FIGHT && rnd () % 3 == 0) {        // a drop: weapon energy, or a heart
+      int heart = rnd () % 3 == 0;
+      int j = bullet_new (heart ? BK_HEART : BK_ENERGY, n->x, n->y - (4 << 4), 0, -32, heart ? T_HEART : T_ENERGY, heart ? B_HUD : B_SHOT);
+      if (j >= 0) bul [j].harm = 0;
+   }
+   psnd_boss_hit ();
+}
+// orbiting braces erase the harmful bullets they touch: only the engine's own kinds (0 straight,
+// 1 falling), never a boss's objects (an LF node, a trinity orb, a pillar...), whose removal is
+// the boss's business (shot_other)
+static void braces_erase (int cx, int cy) {
+   for (int i = 0; i < NBUL; i++) {
+      bullet *b = &bul [i];
+      if (b->on && b->harm && (b->kind == 0 || b->kind == 1) && iabs ((b->x >> 4) + 8 - cx) < 10 && iabs ((b->y >> 4) + 8 - cy) < 10) {
+         b->kind = 2; b->harm = 0; b->t = 8; b->tile = T_SPARK; b->bank = B_BUL2; b->vx = b->vy = 0; b->flags = 0;
+      }
+   }
+}
 static void shots_update (void) {
+   int pcx = pl_x + 8, pcy = pl_y + 8;
    for (int i = 0; i < 3; i++) {
       shot_t *s = &shots [i];
       if (!s->on) continue;
-      s->x += s->vx;
-      int cx = s->x + 6, cy = s->y + 7;
-      if (s->x < cam - 16 || s->x > cam + 320 || solid_px (cx, cy)) { s->on = 0; continue; }
+      s->t++;
+      int orbit = s->kind == W_BRACES && s->a == 0;
+      switch (s->kind) {
+      case W_PATH: {                                  // steer for the nearest minion, else the boss
+         int tx = 0, ty = 0, best = 1 << 30;
+         for (int m = 0; m < NMIN; m++)
+            if (mins [m].on && mins [m].kind != MK_CRUSH) {
+               int mx = (mins [m].x >> 4) + 8, my = (mins [m].y >> 4) + 9, d = iabs (mx - s->x - 8) + iabs (my - s->y - 8);
+               if (d < best && mx > cam && mx < cam + 320) { best = d; tx = mx; ty = my; }
+            }
+         if (best == 1 << 30 && g_state == G_FIGHT && boss.on && !boss.hidden) { best = 0; tx = boss.x + 16; ty = boss.y + 16; }
+         if (best < 1 << 30 && s->t > 4) {
+            int vx, vy; aim (s->x + 8, s->y + 8, tx, ty, 64, &vx, &vy);
+            s->vx += 6 * isgn (vx - s->vx); s->vy += 6 * isgn (vy - s->vy);
+         }
+         if (s->t > 150) s->on = 0;
+         break;
+      }
+      case W_BRACES:                                  // orbiting you, 22 pixels out (hit: the phase)
+         if (orbit) {
+            int a = s->hit + s->t;
+            s->fx = (pcx - 8 + (c32 (a) * 22 >> 6)) * SUB; s->fy = (pcy - 8 + (s32 (a) * 22 >> 6)) * SUB;
+            if (s->t > 420) s->on = 0;
+         }
+         break;
+      case W_CPS:                                     // out, slowing; then the continuation: back to you
+         if (s->a == 0) { if (s->t % 4 == 0) s->vx -= 8 * isgn (s->vx); if (s->vx == 0 || s->t > 60) s->a = 1; }
+         else {
+            aim (s->x + 8, s->y + 8, pcx, pcy, 88, &s->vx, &s->vy);
+            if (iabs (s->x + 8 - pcx) < 10 && iabs (s->y + 8 - pcy) < 10) { s->on = 0; continue; }
+         }
+         if (s->t > 220) s->on = 0;
+         break;
+      }
+      if (!s->on) continue;
+      if (!orbit) { s->fx += s->vx; s->fy += s->vy; }
+      s->x = s->fx >> 4; s->y = s->fy >> 4;
+      int cx = s->x + 8, cy = s->y + 8;
+      if (s->kind == W_LEMMA) { cx = s->x + 6; cy = s->y + 7; }
+      if (s->kind == W_CRUSH) cy = s->y + 11;
+      int through = orbit || s->kind == W_CPS;        // these pass walls
+      if (s->x < cam - 24 || s->x > cam + 328 || (!through && solid_px (cx, cy))) { s->on = 0; continue; }
+      if (s->kind == W_CRUSH && (!solid_px (cx, s->y + 17) || s->t > 90)) { s->on = 0; continue; }   // the floor ends
+      if (orbit) braces_erase (cx, cy);
+      int hw = s->kind == W_LEMMA ? 3 : 5, hh = s->kind == W_LEMMA ? 2 : 5;
       for (int m = 0; m < NMIN && s->on; m++)
-         if (mins [m].on && overlap (cx - 3, cy - 2, 6, 4, (mins [m].x >> 4) + 2, (mins [m].y >> 4) + 2, 12, 14)) {
-            s->on = 0;
-            if (--mins [m].hp <= 0) {
-               mins [m].on = 0; score += 100;
-               int k = bullet_new (2, mins [m].x, mins [m].y, 0, 0, T_PUFF, B_BUL2);
-               if (k >= 0) bul [k].harm = 0;
-               psnd_boss_hit ();
-            } else psnd_tink ();
+         if (mins [m].on && overlap (cx - hw, cy - hh, 2 * hw, 2 * hh, (mins [m].x >> 4) + 2, (mins [m].y >> 4) + 2, 12, 14)) {
+            if (s->kind == W_CPS) { if (s->hit & (1 << m)) continue; s->hit |= 1 << m; }   // pierces: each once
+            else s->on = 0;
+            minion_hit (m, 1);
          }
       if (!s->on) continue;
+      // every projectile meets the boss through the boss's own rules: shot_other, then shot_hits
       shot_proved = s->proved;
       if (g_state == G_FIGHT && bosses [cur_boss].shot_other (cx, cy)) { s->on = 0; continue; }
       if (g_state == G_FIGHT && boss.on && !boss.hidden && cx >= boss.x + 2 && cx < boss.x + 30 && cy >= boss.y + 2 && cy < boss.y + 32) {
          s->on = 0;
-         if (bosses [cur_boss].shot_hits (cx, cy)) boss_damage (boss.stun ? 2 : 1);
+         if (bosses [cur_boss].shot_hits (cx, cy)) {
+            if (s->kind == weakness [cur_boss] && !boss.flash) {     // the weakness: 4, and a stun
+               boss_damage (4);
+               if (boss.stun < 40) boss.stun = 40;
+               int k = bullet_new (2, (cx - 8) * SUB, (cy - 16) * SUB, 0, 0, T_SPARK, B_SHOT); if (k >= 0) bul [k].harm = 0;
+            } else boss_damage (boss.stun ? 2 : 1);
+         }
          else { psnd_tink (); int k = bullet_new (2, (cx - 8) << 4, (cy - 8) << 4, 0, 0, T_SPARK, B_BUL2); if (k >= 0) bul [k].harm = 0; }
       }
    }
 }
 
+static void pickup_update (bullet *b) {                // weapon energy or a heart, on the ground
+   if (!clock_stop) {
+      b->t++;
+      b->vy += 4; if (b->vy > 64) b->vy = 64;
+      int ny = (b->y + b->vy) >> 4;
+      if (b->vy > 0 && solid_px ((b->x >> 4) + 8, ny + 16)) { b->vy = 0; b->y = (((ny + 16) & ~7) - 16) << 4; }
+      else b->y += b->vy;
+   }
+   int x = b->x >> 4, y = b->y >> 4;
+   if (b->t > 600 || x < cam - 48 || y > 8 * ROWS) { b->on = 0; return; }
+   if (pl_dead || !overlap (pl_x + 3, pl_y + 2, 10, 14, x + 4, y + 4, 8, 8)) return;
+   b->on = 0; score += 50; psnd_pick ();
+   if (b->kind == BK_HEART) { if (pl_lives < 5) pl_lives++; return; }
+   int w = pl_weapon;
+   if (w == W_LEMMA)                                  // the lemma needs none: the emptiest tactic
+      for (int k = 1; k < NWEAPON; k++) if ((pl_owned & (1 << k)) && (w == W_LEMMA || pl_energy [k] < pl_energy [w])) w = k;
+   if (w != W_LEMMA) { pl_energy [w] += 10; if (pl_energy [w] > W_ENERGY) pl_energy [w] = W_ENERGY; }
+}
 static void bullets_update (void) {
    for (int i = 0; i < NBUL; i++) {
       bullet *b = &bul [i];
       if (!b->on) continue;
-      b->t++;
-      if (b->kind == 0) { b->x += b->vx; b->y += b->vy; if (bullet_solid (b) && b->t > 4) b->on = 0; }
-      else if (b->kind == 1) { b->vy += 4; b->x += b->vx; b->y += b->vy; if (bullet_solid (b)) b->on = 0; }
-      else if (b->kind == 2) { if (b->t > 16) b->on = 0; }
+      if (b->kind == BK_ENERGY || b->kind == BK_HEART) { pickup_update (b); continue; }
+      if (!clock_stop) {                              // stopped clock: nothing moves, all still hurts
+         b->t++;
+         if (b->kind == 0) { b->x += b->vx; b->y += b->vy; if (bullet_solid (b) && b->t > 4) b->on = 0; }
+         else if (b->kind == 1) { b->vy += 4; b->x += b->vx; b->y += b->vy; if (bullet_solid (b)) b->on = 0; }
+         else if (b->kind == 2) { if (b->t > 16) b->on = 0; }
+      }
       int x = b->x >> 4, y = b->y >> 4;
       if (x < cam - 48 || x > cam + 360 || y > 8 * ROWS + 16 || y < -96) { b->on = 0; continue; }
       if (b->harm && !pl_dead && overlap (pl_x + 3, pl_y + 2, 10, 14, x + 8 - b->harm, y + 8 - b->harm, 2 * b->harm, 2 * b->harm))
          player_hurt ();
    }
 }
+static int on_ground_at (int x, int y) { return solid_px (x + 8, y + 17); }   // a minion's feet
+static void minion_fall (minion *m) {                 // gravity, landing on the ground
+   m->vy += 4; if (m->vy > 96) m->vy = 96;
+   int ny = (m->y + m->vy) >> 4;
+   if (m->vy > 0 && solid_px ((m->x >> 4) + 8, ny + 16)) { m->vy = 0; m->y = (((ny + 16) & ~7) - 16) << 4; }
+   else m->y += m->vy;
+}
 static void minions_update (void) {
    for (int i = 0; i < NMIN; i++) {
       minion *m = &mins [i];
       if (!m->on) continue;
-      m->t++;
       int x = m->x >> 4, y = m->y >> 4;
-      if (m->kind == 1 && (m->t & 31) == 0) m->vx = pl_x > x ? iabs (m->vx) : -iabs (m->vx);   // chasers
-      int nx = (m->x + m->vx) >> 4;
-      int ahead = m->vx > 0 ? nx + 13 : nx + 2;
-      if (solid_px (ahead, y + 8) || (m->kind == 0 && !solid_px (ahead, y + 17) && solid_px (x + 8, y + 17))) m->vx = -m->vx;
-      else m->x += m->vx;
-      m->vy += 4; if (m->vy > 96) m->vy = 96;
-      int ny = (m->y + m->vy) >> 4;
-      if (m->vy > 0 && solid_px ((m->x >> 4) + 8, ny + 16)) { m->vy = 0; m->y = (((ny + 16) & ~7) - 16) << 4; }
-      else m->y += m->vy;
+      if (g_state == G_PLAY && x < cam - 64) { m->on = 0; continue; }   // left behind
+      if (!clock_stop) {
+         m->t++;
+         switch (m->kind) {
+         case MK_FLY:                                  // a patrol about home (a, b), a sine bob
+            if (iabs (m->x + m->vx - m->a) > 56 << 4) m->vx = -m->vx;
+            m->x += m->vx;
+            m->y = m->b + (s32 ((int) (m->t >> 1)) * 14 >> 6) * SUB;
+            break;
+         case MK_HOP:                                  // crouches, then jumps toward you
+            if (on_ground_at (x, y) && m->vy >= 0) {
+               m->vx = 0;
+               if (++m->c >= 56) { m->c = 0; m->vy = -72; m->vx = pl_x > x ? 12 : -12; }
+            } else if (!solid_px (m->vx > 0 ? x + 14 : x + 1, y + 8)) m->x += m->vx;
+            minion_fall (m);
+            break;
+         case MK_TURRET:                               // stationary; fires at you every 120 frames
+            minion_fall (m);
+            if (m->t % 120 == 60 && x > cam && x < cam + 304 && iabs (pl_x - x) < 180) {
+               int vx, vy; aim (x + 8, y + 6, pl_x + 8, pl_y + 8, 26, &vx, &vy);
+               int k = bullet_new (0, x * SUB, (y - 2) * SUB, vx, vy, T_ORB, B_BUL);
+               if (k >= 0) bul [k].harm = 3;
+            }
+            break;
+         case MK_CRUSH:                                // a: 0 up, 1 falling, 2 down, 3 rising; c: timer
+            if (m->a == 0) { if (--m->c <= 0) { m->a = 1; m->vy = 0; } }
+            else if (m->a == 1) {
+               m->vy += 10; if (m->vy > 112) m->vy = 112;
+               int ny = (m->y + m->vy) >> 4;
+               if (solid_px (x + 8, ny + 13)) { m->y = (((ny + 13) & ~7) - 13) << 4; m->a = 2; m->c = 36; if (x > cam && x < cam + 304) psnd_boom (); }
+               else m->y += m->vy;
+            } else if (m->a == 2) { if (--m->c <= 0) m->a = 3; }
+            else { m->y -= 16; if (m->y <= m->b) { m->y = m->b; m->a = 0; m->c = 90; } }
+            break;
+         default: {                                    // walkers (0) and chasers (1)
+            if (m->kind == MK_CHASE && (m->t & 31) == 0) m->vx = pl_x > x ? iabs (m->vx) : -iabs (m->vx);
+            int nx = (m->x + m->vx) >> 4;
+            int ahead = m->vx > 0 ? nx + 13 : nx + 2;
+            if (solid_px (ahead, y + 8) || (m->kind == MK_WALK && !solid_px (ahead, y + 17) && solid_px (x + 8, y + 17))) m->vx = -m->vx;
+            else m->x += m->vx;
+            minion_fall (m);
+         } }
+      }
       if ((m->y >> 4) > 8 * ROWS) { m->on = 0; continue; }
-      if (!pl_dead && overlap (pl_x + 3, pl_y + 2, 10, 14, (m->x >> 4) + 3, (m->y >> 4) + 4, 10, 12)) player_hurt ();
+      int crush = m->kind == MK_CRUSH;
+      if (!pl_dead && overlap (pl_x + 3, pl_y + 2, 10, 14, (m->x >> 4) + (crush ? 1 : 3), (m->y >> 4) + (crush ? 2 : 4), crush ? 14 : 10, crush ? 11 : 12)) player_hurt ();
    }
 }
 
@@ -689,6 +1115,25 @@ static void stage_palette (int b) {
    (void) sky_cols;
 }
 
+// each stage's identity: its gimmick (build_stage) and its enemies, the first twice as common
+static const int stage_foes [7][3] = {
+   { MK_HOP, MK_HOP, MK_WALK }, { MK_FLY, MK_FLY, MK_WALK }, { MK_TURRET, MK_WALK, MK_TURRET },
+   { MK_FLY, MK_FLY, MK_WALK }, { MK_HOP, MK_HOP, MK_WALK }, { MK_TURRET, MK_FLY, MK_WALK },
+   { MK_WALK, MK_CHASE, MK_CHASE } };
+static void add_gm (int type, int c0, int c1, int r, int a) {
+   if (ngm >= NGM) return;
+   gm [ngm].type = type; gm [ngm].c0 = c0; gm [ngm].c1 = c1; gm [ngm].r = r; gm [ngm].a = a; gm [ngm].b = 0;
+   ngm++;
+}
+static void add_spawn (int k, int x, int y) {
+   if (nspawn >= NSPAWN) return;
+   spawns [nspawn].kind = k; spawns [nspawn].x = x; spawns [nspawn].y = y; spawns [nspawn].done = 0;
+   nspawn++;
+}
+static void stage_reset (void) {
+   ngm = 0; nspawn = 0; gclk = 0;
+   for (int c = 0; c < WMAX; c++) belt_dir [c] = 0;
+}
 static void build_stage (int b) {
    uint32_t save = rs;
    rs = 0x1234567u * (uint32_t) (b + 1) | 1;
@@ -696,24 +1141,45 @@ static void build_stage (int b) {
    arena_x = 8 * (wcols - ACOLS);
    for (int r = 0; r < ROWS; r++) for (int c = 0; c < WMAX; c++) kind [r][c] = K_AIR;
    for (int r = 0; r < ROWS; r++) text_rows [r] = 0;
-   int c = 0, g = 24;
-   while (c < wcols - ACOLS) {
+   stage_reset ();
+   int c = 0, g = 24, A = wcols - ACOLS;
+   for (int seg = 0; c < A; seg++) {
       int len = 5 + (int) (rnd () % 6);
-      if (c + len > wcols - ACOLS - 6 || c < 12) { len = c < 12 ? 12 - c : wcols - ACOLS - c; }
-      int last = c + len >= wcols - ACOLS;
+      if (c + len > A - 6 || c < 12) { len = c < 12 ? 12 - c : A - c; }
+      int last = c + len >= A;
       if (last) g = FLOOR;
-      for (int i = c; i < c + len && i < wcols - ACOLS; i++)
+      for (int i = c; i < c + len && i < A; i++)
          for (int r = g; r < ROWS; r++) kind [r][i] = K_GROUND;
-      if (!last && len >= 6 && rnd () % 3 == 0) {        // a floating ledge above
+      int crusher = b == 6 && !last && c > 12 && len >= 7 && (seg & 1);
+      if (!last && !crusher && len >= 6 && rnd () % 3 == 0) {        // a floating ledge above
          int lr = g - 4 - (int) (rnd () % 2), lc = c + 1 + (int) (rnd () % 2);
-         for (int i = lc; i < lc + 3 + (int) (rnd () % 2); i++) if (lr > 4) kind [lr][i] = K_BRICK;
+         int lw = 3 + (int) (rnd () % 2);                            // clear of the segment's end:
+         for (int i = lc; i < lc + lw && i < c + len - 2; i++) if (lr > 4) kind [lr][i] = K_BRICK;   // a step up
       }
-      if (!last && c > 14 && rnd () % 6 == 0) {           // an enemy on this segment
-         int k = minion_new (8 * (c + len / 2), 8 * g - 16, rnd () & 1 ? 8 : -8, 1, T_ENEMY, B_ENEMY);
-         (void) k;
+      if (!last && c > 12) {                                         // gimmicks inside a segment
+         if ((b == 1 || (b == 6 && !(seg & 1))) && len >= 6) {       // a conveyor, this way or that
+            int dir = (seg & 2) ? 1 : -1;
+            for (int i = c + 1; i < c + len - 1; i++) { kind [g][i] = K_BELT; belt_dir [i] = (int8_t) dir; }
+         }
+         if (b == 5 && len >= 7) { int h = c + len / 2 - 1; add_gm (GM_HOT, h, h + 2, g, (seg * 67) % HOT_T); }
+         if (crusher) add_spawn (MK_CRUSH, 8 * (c + len / 2) - 8, 8 * g - 56);
+      }
+      if (!last && c > 14 && rnd () % 2 == 0) {                      // an enemy on this segment
+         int k = stage_foes [b][rnd () % 3];
+         add_spawn (k, 8 * (c + len / 2) + (crusher ? 24 : 0), 8 * g - (k == MK_FLY ? 34 : 16));
       }
       c += len;
-      if (c < wcols - ACOLS - 10 && c > 14 && rnd () % 4 == 0) c += 2 + (int) (rnd () % 2);   // a gap
+      int w = 0;                                                     // a feature after the segment
+      if (!last && (seg & 1) && c > 14 && c + 22 < A)
+         switch (b) {
+         case 0: w = 6; add_gm (GM_ALLOC, c, c + 5, g, (c * 37) % ALLOC_T); for (int i = c; i < c + 6; i++) kind [g][i] = K_GONE; break;
+         case 2: w = 3; for (int i = c; i < c + 3; i++) for (int r = g; r < ROWS; r++) kind [r][i] = K_NULL; break;
+         case 3: w = 5; add_gm (GM_CLOCK, c, c + 4, g, 0); for (int i = c; i < c + 5; i++) kind [g][i] = K_BRICK; break;
+         case 4: w = 4; add_gm (GM_CRUMBLE, c, c + 3, g, 0); for (int i = c; i < c + 4; i++) kind [g][i] = K_MARKED; break;
+         }
+      c += w;
+      if (w) continue;                                               // the floor goes on at g
+      if (c < A - 10 && c > 14 && rnd () % 4 == 0) c += 2 + (int) (rnd () % 2);   // a gap
       int ng = g + (int) (rnd () % 5) - 2;
       g = ng < 18 ? 18 : ng > 26 ? 26 : ng;
    }
@@ -736,13 +1202,26 @@ static void clear_objects (void) {
    for (int i = 0; i < NMIN; i++) mins [i].on = 0;
    for (int i = 0; i < 3; i++) shots [i].on = 0;
    boss.on = 0;
+   clock_stop = 0;
 }
+static void owned_update (void) {      // the attract demo owns every tactic; a player, what they won
+   pl_owned = demo ? (1 << NWEAPON) - 1 : 1 | (defeated << 1);
+#ifdef PROOF_TEST
+   if (test_weapon >= 0) pl_owned |= 1 << test_weapon;
+#endif
+   if (!(pl_owned & (1 << pl_weapon))) pl_weapon = W_LEMMA;
+}
+static void freeze_start (int n) { clock_stop = n; pal_set (1, 0x6A7080); }   // TICK: a stopped, grey sky
+static void freeze_end (void) { clock_stop = 0; pal_set (1, bosses [cur_boss].sky); }
 static void start_stage (int b) {
    cur_boss = b;
    clear_objects ();
    build_stage (b);
    pl_x = spawn_x = 24; pl_y = spawn_y = 8 * 24 - 16;
    pl_fx = pl_x << 4; pl_fy = pl_y << 4; pl_vy = 0; pl_lives = 5; pl_dead = 0; pl_hurt = 0; pl_face = 0; pl_certs = 0;
+   pl_prev = -1;                         // a button held from the title is not a press
+   for (int w = 0; w < NWEAPON; w++) pl_energy [w] = W_ENERGY;
+   owned_update ();
    player_bump_up ();
    cam = 0;
    g_state = G_PLAY; g_timer = 0;
@@ -751,6 +1230,7 @@ static void start_stage (int b) {
 static void title_screen (void) {
    clear_objects ();
    wcols = 40; arena_x = 0;
+   stage_reset ();
    for (int r = 0; r < ROWS; r++) { text_rows [r] = 0; for (int c = 0; c < WMAX; c++) kind [r][c] = r >= FLOOR ? K_GROUND : K_AIR; }
    stage_palette (sel);
    for (int i = 0; i < 64; i++) plane_owner [i] = -1;
@@ -796,30 +1276,102 @@ void proof_init (void) {
    demo = 1; demo_boss = 0; idle = 0; sel = 0;
 #ifdef PROOF_TEST
    if (getenv ("PROOF_TEST")) {
-      sscanf (getenv ("PROOF_TEST"), "%d,%d", &test_boss, &test_move);
+      if (sscanf (getenv ("PROOF_TEST"), "%d,%d,%d", &test_boss, &test_move, &test_weapon) < 3) test_weapon = -1;
+      if (test_boss < 0 || test_boss > 6) test_boss = 0;   // (unparsed: boss 0)
+      if (test_weapon >= NWEAPON) test_weapon = -1;
       demo_boss = test_boss;
       start_stage (test_boss);
+      if (test_weapon >= 0) pl_weapon = test_weapon;
       pl_x = spawn_x = arena_x - 16; pl_fx = pl_x << 4; pl_fy = pl_y << 4; player_bump_up ();
+      return;
+   }
+   if (getenv ("PROOF_STAGE")) {         // the demo from the start of this stage, damage on
+      demo_boss = atoi (getenv ("PROOF_STAGE")) % 7;
+      start_stage (demo_boss);
       return;
    }
 #endif
    start_stage (0);
 }
 
-// ---- the attract pilot: runs right, jumps gaps, walls and dangers, throws lemmas
+// ---- the attract pilot: runs right, jumps gaps, walls and dangers, throws; in a stage it reads the
+// gimmicks' timing (waits at a bridge until crossing it is safe, under a crusher until it is up),
+// in a fight it cycles through the owned tactics
+static int cell_safe (int c, int r, int dt0, int dt1) {   // solid and harmless from now + dt0 to + dt1
+   if (c < 0 || c >= wcols || r < 0 || r >= ROWS) return 0;
+   int i = gm_at (c, r);
+   if (i < 0) { int k = kind [r][c]; return k_solid (k) && k != K_HOT; }
+   const gimmick *q = &gm [i];
+   if (q->type == GM_CRUMBLE) return q->a == 0 || (q->a < 3 && q->b + dt1 < 42);
+   for (int d = dt0; ; d += 3) {
+      if (d > dt1) d = dt1;
+      if (!gm_cell_on (q, c, gclk + d) || gm_cell_hot (q, gclk + d)) return 0;
+      if (d == dt1) break;
+   }
+   return 1;
+}
+static int reach (int px) { return px <= 0 ? 0 : px * 2 / 3; }   // frames to run px (1.5 a frame)
+static int foe_ahead (int kind_mask, int range) {
+   for (int i = 0; i < NMIN; i++) {
+      int dx = (mins [i].x >> 4) - pl_x;
+      if (mins [i].on && (kind_mask & (1 << mins [i].kind)) && dx > 0 && dx < range) return 1;
+   }
+   return 0;
+}
 static uint32_t pilot (void) {
    uint32_t b = 0;
    if (g_state == G_TITLE) return 0;
    int fx = pl_x + 8, feet = pl_y + 16;
+   int want_w = W_LEMMA, fire_ok = 1;
+   int danger = 0;
+   for (int i = 0; i < NBUL; i++)
+      if (bul [i].on && bul [i].harm) {
+         int dx = (bul [i].x >> 4) - pl_x, dy = (bul [i].y >> 4) - pl_y;
+         if (iabs (dx) < 36 && dy > -40 && dy < 16) danger = 1;
+      }
    if (g_state == G_PLAY || g_state == G_ARENA) {
       b |= BTN_RIGHT;
+      int r = (feet + 2) >> 3, ac = (fx + 12) >> 3;
       int wall = solid_px (fx + 10, pl_y + 8) || solid_px (fx + 10, pl_y + 14);
-      int gap = !solid_px (fx + 12, feet + 2) && !solid_px (fx + 12, feet + 10);
-      int foe = 0;
-      for (int i = 0; i < NMIN; i++) if (mins [i].on && iabs ((mins [i].x >> 4) - pl_x) < 40 && (mins [i].x >> 4) > pl_x) foe = 1;
-      if ((wall || gap || (foe && (t & 15) < 3)) && (t & 1)) b |= BTN_UP;
+      int d0 = reach (8 * ac - pl_x - 12), d1 = reach (8 * ac + 8 - pl_x - 3) + 4;
+      int hazard = 0;
+      { int i = gm_at (ac, r); if (i >= 0 && gm [i].type == GM_HOT && !cell_safe (ac, r, d0, d1)) hazard = 1; }
+      int gap = hazard, below = -1;                   // a step down is walked; a pit, null floor, hot
+      for (int rr = r; rr < ROWS && rr <= r + 7 && below < 0; rr++)   // strip or vanishing cell is jumped
+         if (k_solid (kind [rr][ac]) || kind [rr][ac] == K_NULL) below = rr;
+      if (below < 0 || !cell_safe (ac, below, d0, d1)) gap = 1;
+      if (!pl_ground && pl_vy > 0) {                  // falling: do not drift past safe ground into a pit
+         int land = -1, here = -1;
+         for (int rr = r; rr < ROWS && land < 0; rr++) if (k_solid (kind [rr][ac]) || kind [rr][ac] == K_NULL) land = rr;
+         for (int rr = r; rr < ROWS && here < 0; rr++) if (k_solid (kind [rr][fx >> 3]) || kind [rr][fx >> 3] == K_NULL) here = rr;
+         if ((land < 0 || !cell_safe (ac, land, 0, 8)) && here >= 0 && cell_safe (fx >> 3, here, 0, 8)) b &= ~BTN_RIGHT;
+      }
+      int bridge = 0, wait = 0;
+      for (int i = 0; i < ngm; i++) {                 // a timed bridge ahead: cross it only if it holds
+         const gimmick *q = &gm [i];
+         if (q->type == GM_HOT || q->r != r) continue;
+         int edge = 8 * q->c0 - (pl_x + 12);
+         if (edge < -2 || edge > 20) continue;
+         bridge = 1;
+         for (int c = q->c0; c <= q->c1 && !wait; c++)
+            if (!cell_safe (c, r, reach (8 * c - pl_x - 12), reach (8 * c + 8 - pl_x - 3) + 6)) wait = pl_ground && edge >= 0;
+      }
+      for (int i = 0; i < NMIN; i++) {                // a crusher: pass under it only while it stays up
+         const minion *m = &mins [i];
+         if (!m->on || m->kind != MK_CRUSH) continue;
+         int mx = m->x >> 4, d = mx - (pl_x + 13);
+         if (d < 0 || d > 24) continue;
+         int need = reach (d + 16 + 10) + 6;
+         int up = (m->a == 0 && m->c >= need) || (m->a == 3 && (m->y >> 4) + 13 < pl_y - 2);
+         if (!up) wait = 1;
+      }
+      if (wait) b &= ~BTN_RIGHT;
+      if (bridge) gap = 0;                           // never jump at a bridge: wait for it
+      int foe = foe_ahead ((1 << MK_WALK) | (1 << MK_CHASE) | (1 << MK_HOP) | (1 << MK_TURRET), 40);
+      if (((wall && !wait) || gap || (foe && (t & 15) < 3) || (danger && !bridge)) && (t & 1)) b |= BTN_UP;
       if (pl_vy < 0) b |= BTN_UP;
       if ((t & 7) == 0) b |= BTN_FIRE2;
+      if (foe_ahead (1 << MK_FLY, 150) && pl_energy [W_PATH] >= w_cost [W_PATH]) want_w = W_PATH;   // homes on flyers
    } else if (g_state == G_FIGHT) {
       int want = arena_x + 64 + (int) ((t >> 6) % 3) * 40;
       if (boss.shield && pl_certs == 0)                   // a checker wants proofs: fetch a floor certificate
@@ -827,22 +1379,50 @@ static uint32_t pilot (void) {
             if (props [i].on && props [i].tile == sfont ('#') && props [i].y > pl_y - 8) want = props [i].x;
       if (pl_x < want - 4) b |= BTN_RIGHT;
       if (pl_x > want + 4) b |= BTN_LEFT;
-      int danger = 0;
-      for (int i = 0; i < NBUL; i++)
-         if (bul [i].on && bul [i].harm) {
-            int dx = (bul [i].x >> 4) - pl_x, dy = (bul [i].y >> 4) - pl_y;
-            if (iabs (dx) < 36 && dy > -40 && dy < 16) danger = 1;
-         }
       if (danger && (t & 1)) b |= BTN_UP;
       if (pl_vy < 0 && danger) b |= BTN_UP;
       if (boss.x < pl_x && (t & 1)) b = (b & ~BTN_RIGHT) | BTN_LEFT;
       if ((t & 3) == 0) b |= BTN_FIRE2;
+      want_w = (g_timer / 160 + cur_boss) % NWEAPON;  // each tactic in turn, 160 frames each
+      if (pl_energy [want_w] < w_cost [want_w]) want_w = W_LEMMA;
    }
+#ifdef PROOF_TEST
+   if (test_weapon >= 0) want_w = test_weapon;
+#endif
+   if (!(pl_owned & (1 << want_w))) want_w = W_LEMMA;
+   if (b & BTN_FIRE2)                                 // each tactic's own rhythm
+      switch (pl_weapon) {
+      case W_BRACES: {
+         int old = 0;
+         for (int i = 0; i < 3; i++) if (shots [i].on && shots [i].kind == W_BRACES && shots [i].a == 0 && shots [i].t > 100) old = 1;
+         fire_ok = !braces_out () || old;
+         break;
+      }
+      case W_TICK: fire_ok = !clock_stop && g_timer % 200 < 4; break;
+      case W_CPS: fire_ok = !cps_out (); break;
+      case W_CRUSH: fire_ok = pl_ground; break;
+      }
+   if (!fire_ok) b &= ~BTN_FIRE2;
+   if (want_w != pl_weapon) { b &= ~BTN_FIRE2; if (t & 1) b |= BTN_DOWN; }   // DOWN, an edge a press
    return b;
 }
 
 // ---- drawing (into the shadow)
-enum { S_HEART = 0, S_SCORE = 5, S_PLAYER = 11, S_SHOT = 12, S_BOSS = 15, S_BUL = 19, S_MIN = 43, S_PROP = 51, S_CURSOR = 61 };
+enum { S_HEART = 0, S_SCORE = 5, S_PLAYER = 11, S_SHOT = 12, S_BOSS = 15, S_BUL = 19, S_MIN = 43, S_PROP = 51, S_CURSOR = 61,
+       S_ICON = 62, S_GAUGE = 63 };
+static void draw_shot (int i) {
+   const shot_t *s = &shots [i];
+   if (!s->on || s->y > 210) { spr_off (S_SHOT + i); return; }     // low: the HUD line's slots
+   int tile = T_ICON + 4 * (s->kind - 1), fl = s->vx < 0 ? VDP_SPR_HFLIP : 0;
+   switch (s->kind) {
+   case W_LEMMA: tile = T_SHOT; break;
+   case W_BRACES: tile = T_BRACE; fl = s->hit ? VDP_SPR_HFLIP : 0; break;           // { and }
+   case W_CPS: fl = ((s->t >> 2) & 1 ? VDP_SPR_HFLIP : 0) | ((s->t >> 3) & 1 ? VDP_SPR_VFLIP : 0); break;   // it spins
+   case W_TRINITY: tile = T_PELLET; break;
+   case W_PATH: fl = 0; break;
+   }
+   spr (S_SHOT + i, s->x - cam, s->y, tile, s->proved ? B_BUL2 : B_SHOT, VDP_SPR_ON | fl);
+}
 static void draw (void) {
    for (int i = 0; i < 5; i++)
       if (g_state != G_TITLE && i < pl_lives) spr (S_HEART + i, 4 + 12 * i, 226, T_HEART, B_HUD, VDP_SPR_ON); else spr_off (S_HEART + i);
@@ -854,9 +1434,12 @@ static void draw (void) {
    int blink = pl_hurt && (t & 4);
    if (g_state == G_TITLE || pl_dead || blink) spr_off (S_PLAYER);
    else spr (S_PLAYER, pl_x - cam, pl_y, T_PLAYER + 4 * pl_anim, B_PLAYER, (pl_face ? VDP_SPR_HFLIP : 0) | VDP_SPR_ON);
-   for (int i = 0; i < 3; i++)
-      if (shots [i].on) spr (S_SHOT + i, shots [i].x - cam, shots [i].y, T_SHOT, shots [i].proved ? B_BUL2 : B_SHOT, VDP_SPR_ON | (shots [i].vx < 0 ? VDP_SPR_HFLIP : 0));
-      else spr_off (S_SHOT + i);
+   for (int i = 0; i < 3; i++) draw_shot (i);
+   if (g_state != G_TITLE) {                          // the tactic and its energy (HUD: 13 sprites)
+      spr (S_ICON, 72, 226, pl_weapon ? T_ICON + 4 * (pl_weapon - 1) : T_SHOT, B_SHOT, VDP_SPR_ON);
+      if (pl_weapon) spr (S_GAUGE, 88, 226, T_GAUGE + 4 * ((pl_energy [pl_weapon] + 3) / 4), B_PROP, VDP_SPR_ON);
+      else spr_off (S_GAUGE);
+   } else { spr_off (S_ICON); spr_off (S_GAUGE); }
    if (boss.on && !boss.hidden && !(boss.flash & 2)) {
       int base = T_BOSS + 32 * cur_boss + 16 * boss.frame;
       for (int q = 0; q < 4; q++) spr (S_BOSS + q, boss.x - cam + 16 * (q & 1), boss.y + 16 * (q >> 1), base + 4 * q, B_BOSS, VDP_SPR_ON);
@@ -867,15 +1450,45 @@ static void draw (void) {
       if (bul [i].on && (bul [i].y >> 4) <= 210)   // lower, it is in the ground and would cost HUD-line slots
          spr (S_BUL + i, (bul [i].x >> 4) - cam, bul [i].y >> 4, bul [i].tile, bul [i].bank, VDP_SPR_ON | bul [i].flags);
       else spr_off (S_BUL + i);
-   for (int i = 0; i < NMIN; i++)
-      if (mins [i].on) spr (S_MIN + i, (mins [i].x >> 4) - cam, mins [i].y >> 4, mins [i].tile + ((mins [i].t >> 3) & 1) * (mins [i].tile == T_ENEMY ? 4 : 0), mins [i].bank, VDP_SPR_ON | (mins [i].vx > 0 ? VDP_SPR_HFLIP : 0));
-      else spr_off (S_MIN + i);
+   for (int i = 0; i < NMIN; i++) {
+      const minion *m = &mins [i];
+      int x = m->x >> 4, y = m->y >> 4;
+      if (!m->on || y > 210) { spr_off (S_MIN + i); continue; }       // low: in a pit, the HUD line
+      int tile = m->tile, fl = m->vx > 0 ? VDP_SPR_HFLIP : 0;
+      if (tile == T_ENEMY || tile == T_FLYER) tile += ((m->t >> 3) & 1) * 4;
+      if (m->kind == MK_HOP && m->vy == 0 && m->c > 40) tile += 4;      // crouched, about to jump
+      if (m->kind == MK_TURRET || m->kind == MK_CRUSH) fl = m->kind == MK_TURRET && pl_x > x ? VDP_SPR_HFLIP : 0;
+      spr (S_MIN + i, x - cam, y, tile, m->bank, VDP_SPR_ON | fl);
+   }
    for (int i = 0; i < NPROP; i++)
       if (props [i].on) spr (S_PROP + i, props [i].x - cam, props [i].y, props [i].tile, props [i].bank, VDP_SPR_ON | props [i].flags);
       else spr_off (S_PROP + i);
    if (g_state == G_TITLE) spr (S_CURSOR, 32, 8 * (8 + 2 * sel) - 4, T_CURSOR, B_TEXT, VDP_SPR_ON);
    else spr_off (S_CURSOR);
    scroll_sh = (uint32_t) (cam & 511);
+}
+
+// a stage's own frame: its gimmicks and enemies, belts and hot floor (in a fight the boss does
+// these), and a checkpoint on plain ground away from them
+static int feet_kind (void) {
+   int r = (pl_y + 17) >> 3, c = (pl_x + 8) >> 3;
+   return r >= 0 && r < ROWS && c >= 0 && c < wcols ? kind [r][c] : K_AIR;
+}
+static void stage_frame (void) {
+   if (!clock_stop) gclk++;
+   gimmicks_update ();
+   if (g_state != G_PLAY) return;
+   spawns_update (cam);
+   int fk = feet_kind (), c = (pl_x + 8) >> 3;
+   if (pl_ground && fk == K_BELT && c >= 0 && c < WMAX && belt_dir [c]) player_push (12 * belt_dir [c]);
+   if (fk == K_HOT) player_hurt ();
+   if (pl_ground && !pl_hurt) {                       // a checkpoint: a pit puts you back here
+      int r = (pl_y + 16) >> 3, ok = r < ROWS;
+      for (int cc = ((pl_x + 3) >> 3) - 2; ok && cc <= ((pl_x + 12) >> 3) + 2; cc++)
+         ok = cc >= 0 && cc < wcols && kind [r][cc] == K_GROUND && gm_at (cc, r) < 0;
+      for (int i = 0; ok && i < NMIN; i++) if (mins [i].on && iabs ((mins [i].x >> 4) - pl_x) < 48) ok = 0;
+      if (ok) set_spawn (pl_x, pl_y);
+   }
 }
 
 static void next_demo (void) { demo_boss = (demo_boss + 1) % 7; sel = demo_boss; title_screen (); }
@@ -885,6 +1498,7 @@ int proof_frame (uint32_t buttons) {
    t++;
    if (buttons) { idle = 0; if (demo) { demo = 0; title_screen (); } }
    else if (idle < 1200) idle++;
+   owned_update ();
    if (demo) buttons = pilot ();
    psnd_frame ();
    g_timer++;
@@ -903,6 +1517,7 @@ int proof_frame (uint32_t buttons) {
    case G_PLAY: case G_ARENA:
       player_update (buttons);
       shots_update (); minions_update (); bullets_update ();
+      stage_frame ();
       if (g_state == G_PLAY) {
          int want = pl_x - 140;
          cam = want < 0 ? 0 : want > arena_x ? arena_x : want;
@@ -930,7 +1545,7 @@ int proof_frame (uint32_t buttons) {
       break;
    case G_FIGHT:
       player_update (buttons);
-      if (g_timer > 60) bosses [cur_boss].update ();
+      if (g_timer > 60) { if (!clock_stop) bosses [cur_boss].update (); }   // TICK stops the boss
       else if (g_timer == 2) arena_text (3, bosses [cur_boss].field);
       else if (g_timer == 60) arena_clear_text (3);
       shots_update (); minions_update (); bullets_update ();
@@ -945,6 +1560,18 @@ int proof_frame (uint32_t buttons) {
          for (int r = 3; r <= 7; r++) arena_clear_text (r);
          arena_text (3, "Q.E.D.");
          arena_text (5, "PROOF OBLIGATION DISCHARGED");
+         if (clock_stop) freeze_end ();
+         {                                            // the weapon get
+            static char line [41];
+            const char *a = "NEW TACTIC: ", *n = w_name [cur_boss + 1];
+            int k = 0;
+            while (*a && k < 40) line [k++] = *a++;
+            while (*n && k < 40) line [k++] = *n++;
+            line [k] = 0;
+            arena_text (8, line); arena_text (10, w_says [cur_boss + 1]);
+            if (!demo && !(defeated & (1 << cur_boss))) arena_text (12, "DOWN: CHANGE TACTIC");
+            psnd_get ();
+         }
          if (!demo) defeated |= 1 << cur_boss;
       }
       break;
@@ -954,6 +1581,7 @@ int proof_frame (uint32_t buttons) {
          if (demo) next_demo ();
          else if (defeated == 127) {
             g_state = G_END; g_timer = 0;
+            arena_clear_text (10); arena_clear_text (12);
             arena_text (8, "ALL SEVEN OBLIGATIONS");
             arena_text (9, "ARE DISCHARGED.");
             arena_text (11, "THE SYSTEM IS CORRECT.");
@@ -975,6 +1603,19 @@ int proof_frame (uint32_t buttons) {
    }
    if (demo && (g_state == G_PLAY || g_state == G_ARENA) && g_timer > 2400) next_demo ();
    if (demo && g_state == G_FIGHT && g_timer > 2400) next_demo ();
+   if (clock_stop && --clock_stop == 0) freeze_end ();
+#ifdef PROOF_TEST
+   if (getenv ("PROOF_TRACE")) {                      // host only: where the pilot gets to
+      static int last = -1;
+      if (g_state != last) fprintf (stderr, "trace: frame %u boss %d state %d lives %d x %d\n", t, cur_boss, g_state, pl_lives, pl_x);
+      last = g_state;
+   }
+   if (getenv ("PROOF_DBG")) {                        // PROOF_DBG=<from>,<to>: the player, frame by frame
+      int f0 = 0, f1 = 0; sscanf (getenv ("PROOF_DBG"), "%d,%d", &f0, &f1);
+      if ((int) t >= f0 && (int) t <= f1)
+         fprintf (stderr, "dbg %u: x %d y %d vy %d ground %d btn %x w %d feet %d\n", t, pl_x, pl_y, pl_vy, pl_ground, (unsigned) buttons, pl_weapon, feet_kind ());
+   }
+#endif
    if (g_state != G_TITLE) stream ();
    draw ();
    return score;
