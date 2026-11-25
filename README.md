@@ -156,6 +156,11 @@ results (the `board` and `lab` areas of the hwsh shell; `notes/hw-shell.md`):
 `lab.py restart` (JTAG refresh), `load BIT` (SRAM only), `serial --until RE` and `lock` act on
 the board under the machine's shared ULX3S lease lock.  `lab.py` never writes flash and cannot
 power-cycle the board; it refuses both with an error record saying what to do instead.
+`timing.py summary build/<b>/pnr-s*.log` gives the routed Fmax per clock and seed (never a
+placement estimate), `worst`/`path` the critical paths; `place.py` reads a nextpnr `--write` JSON;
+`fw.py` builds firmware with typed diagnostics and answers symbols, disassembly, PC -> line and CSR
+decode; `perf.py show|compare` tracks Fmax, CoreMark/MHz and DMIPS/MHz across builds from the
+recorded logs (`.hw/state.db`).  Tests: `tools/hw/tests/run_fpga_tests.py`.
 
 ## TempleOS HolyC monitor
 

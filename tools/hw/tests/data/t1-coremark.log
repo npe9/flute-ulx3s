@@ -1,0 +1,31 @@
+loader: waiting for boot banner on /dev/cu.usbserial-X ...
+loader: sending 23684 bytes to 0x80000000 ...
+loader: sent in 2.3s; relaying program output
+
+[81000137 00006297 c8428293 00006317 cfc30313 0062f663 0002a023 bfdd0291 : 08080808 08080808 08080808 08080808 08080808 08080808 00000001 00000066]
+BENCH coremark-timed-run cycles=6531507 instret=3138071 mtime=3265807 work=0
+BENCH IPC 0.480
+BENCH mcycle/mtime (expect 2.000 at 50 MHz) 2.000
+BENCH coremark-timed-run cycles=65292217 instret=31381004 mtime=32646122 work=0
+BENCH IPC 0.481
+BENCH mcycle/mtime (expect 2.000 at 50 MHz) 2.000
+BENCH coremark-timed-run cycles=718159161 instret=345181378 mtime=359079595 work=0
+BENCH IPC 0.481
+BENCH mcycle/mtime (expect 2.000 at 50 MHz) 2.000
+2K performance run parameters for coremark.
+CoreMark Size    : 666
+Total ticks      : 718158880
+Total time (secs): 14.363178
+Iterations/Sec   : 76.584725
+Iterations       : 1100
+Compiler version : GCC14.2.0
+Compiler flags   : -O2 -march=rv32imac_zicsr -mabi=ilp32
+Memory location  : STACK
+seedcrc          : 0xe9f5
+[0]crclist       : 0xe714
+[0]crcmatrix     : 0x1fd7
+[0]crcstate      : 0x8e3a
+[0]crcfinal      : 0x33ff
+Correct operation validated. See README.md for run and reporting rules.
+CoreMark 1.0 : 76.584725 / GCC14.2.0 -O2 -march=rv32imac_zicsr -mabi=ilp32 / STACK
+BENCH-DONE

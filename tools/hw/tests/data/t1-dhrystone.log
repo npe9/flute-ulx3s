@@ -1,0 +1,13 @@
+loader: waiting for boot banner on /dev/cu.usbserial-X ...
+loader: sending 8488 bytes to 0x80000000 ...
+loader: sent in 2.1s; relaying program output
+
+[81000137 00002297 12428293 00005317 93c30313 0062f663 0002a023 bfdd0291 : 08080808 08080808 08080808 08080808 08080808 08080808 08080808 08080808]
+BENCH dhrystone cycles=465004448 instret=203000754 mtime=232502249 work=500000
+BENCH IPC 0.437
+BENCH mcycle/mtime (expect 2.000 at 50 MHz) 2.000
+Cycles per Dhrystone: 930.002
+DMIPS/MHz: 0.612
+DMIPS at 50 MHz: 30.599
+BENCH-CHECK OK
+BENCH-DONE

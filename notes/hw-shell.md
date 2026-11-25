@@ -1,4 +1,4 @@
-# tools/hw: the `board` and `lab` areas of the hwsh shell
+# tools/hw: this repo's areas of the hwsh shell (board, lab, timing, place, fw, perf)
 
 hwsh (`~/src/hwsh`, CONTRACT.md) is a shared command shell for agents: a question about the
 hardware is answered by a query returning a few structured lines (or `--json`), not by reading
@@ -49,3 +49,34 @@ One real question ("the console RX pin and its IO standard, and UART0's address"
 
 Not done yet: `lab test` (the hardware suite as records), `serial --restart` (a capture that
 starts before the restart, so the first output is not missed), `board periph`, other boards.
+
+## hw timing / place / fw / perf (the FPGA flow and firmware)
+
+`tools/hw/timing.py`, `place.py`, `fw.py`, `perf.py` (shared parser `pnr.py`, CSR tables `csrs.py`);
+hwsh skills `fpga-timing`, `fw-query`, `perf-history`.
+
+| area | verbs | reads |
+|---|---|---|
+| `timing` | `summary FILE...` (Fmax per clock vs target, margin, LUT/FF/EBR %, band over seeds), `worst`, `path tpath:ID`, `expand`, `raw pnrlog:...`, `compare A B` | nextpnr logs (`build/*/pnr-s*.log`) and `--report` JSON |
+| `place` | `summary`, `modules [--depth N --under P]`, `location NAME`, `compare A B`; `congestion`/`route` refused (HW-E-UNSUPPORTED) | nextpnr `--write` JSON (`build/placediag/`) |
+| `fw` | `build -- CMD` / `diags LOG` (typed gcc/as/ld/make diagnostics), `sections`, `symbols`, `disasm FUNC`, `addr PC`, `csr NAME [VALUE]` | RISC-V binutils (`HW_RISCV_PREFIX`) |
+| `perf` | `record FILE...`, `seed`, `show`, `compare A B`, `history METRIC` | pnr logs + `build/bench/<build>-<bench>.log`, into `.hw/state.db` |
+
+Rules built in: only the post-route block of a log is an Fmax (AGENTS rule 7); a log that never
+routed answers `complete: false`, exit 5; a routed clock below target is `fail`, exit 1; a PASS
+under 5% margin is marked `THIN`.  Parsed logs and placement tables are cached by content under
+`~/.cache/hwsh/pnr/`.  Provenance stops at the generated Verilog (no bsc Verilog->BSV map yet);
+`rules:` lists only `WILL_FIRE_RL_`/`CAN_FIRE_RL_` names actually on a path.
+`hw perf seed` (2026-11-25) recorded every pnr and bench log on disk: 203 runs, 58 builds; seeded
+runs carry the artifact's sha256 and mtime and no commit (git_rev NULL).
+
+Tests: `python3 -I tools/hw/tests/run_fpga_tests.py`: 48 checks on fixtures in `tests/data`
+(a tiny design routed by this nextpnr, its report JSON and placement, two bench logs), each area
+with planted input changes as negative controls, plus 4 code mutants (placement estimate taken
+as Fmax, ld warnings as errors, perf dedupe by content only, misa letters off by one), all caught.
+
+One real question ("lx49c: routed sys_clk Fmax per seed, and the worst seed's critical path"):
+reading the three logs is 358,190 bytes (~90,000 tokens); a careful grep + sed of the fmax lines and
+the path section is 8,962 bytes (~2,200 tokens) and still shows the placement estimates beside the
+routed lines; `hw timing summary build/lx49c/pnr-s*.log` + `hw timing worst build/lx49c/pnr-s7.log
+--clock sys_clk` is 1,169 bytes (~300 tokens).

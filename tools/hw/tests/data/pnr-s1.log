@@ -1,0 +1,283 @@
+Info: constraining clock net 'clk' to 100.00 MHz
+Warning: IO 'q[15]' is unconstrained in LPF and will be automatically placed
+Warning: IO 'q[14]' is unconstrained in LPF and will be automatically placed
+Warning: IO 'q[13]' is unconstrained in LPF and will be automatically placed
+Warning: IO 'q[12]' is unconstrained in LPF and will be automatically placed
+Warning: IO 'q[11]' is unconstrained in LPF and will be automatically placed
+Warning: IO 'q[10]' is unconstrained in LPF and will be automatically placed
+Warning: IO 'q[9]' is unconstrained in LPF and will be automatically placed
+Warning: IO 'q[8]' is unconstrained in LPF and will be automatically placed
+Warning: IO 'q[7]' is unconstrained in LPF and will be automatically placed
+Warning: IO 'q[6]' is unconstrained in LPF and will be automatically placed
+Warning: IO 'q[5]' is unconstrained in LPF and will be automatically placed
+Warning: IO 'q[4]' is unconstrained in LPF and will be automatically placed
+Warning: IO 'q[3]' is unconstrained in LPF and will be automatically placed
+Warning: IO 'q[2]' is unconstrained in LPF and will be automatically placed
+Warning: IO 'q[1]' is unconstrained in LPF and will be automatically placed
+Warning: IO 'q[0]' is unconstrained in LPF and will be automatically placed
+Warning: IO 'b[7]' is unconstrained in LPF and will be automatically placed
+Warning: IO 'b[6]' is unconstrained in LPF and will be automatically placed
+Warning: IO 'b[5]' is unconstrained in LPF and will be automatically placed
+Warning: IO 'b[4]' is unconstrained in LPF and will be automatically placed
+Warning: IO 'b[3]' is unconstrained in LPF and will be automatically placed
+Warning: IO 'b[2]' is unconstrained in LPF and will be automatically placed
+Warning: IO 'b[1]' is unconstrained in LPF and will be automatically placed
+Warning: IO 'b[0]' is unconstrained in LPF and will be automatically placed
+Warning: IO 'a[7]' is unconstrained in LPF and will be automatically placed
+Warning: IO 'a[6]' is unconstrained in LPF and will be automatically placed
+Warning: IO 'a[5]' is unconstrained in LPF and will be automatically placed
+Warning: IO 'a[4]' is unconstrained in LPF and will be automatically placed
+Warning: IO 'a[3]' is unconstrained in LPF and will be automatically placed
+Warning: IO 'a[2]' is unconstrained in LPF and will be automatically placed
+Warning: IO 'a[1]' is unconstrained in LPF and will be automatically placed
+Warning: IO 'a[0]' is unconstrained in LPF and will be automatically placed
+
+Info: Logic utilisation before packing:
+Info:     Total LUT4s:        24/24288     0%
+Info:         logic LUTs:      8/24288     0%
+Info:         carry LUTs:     16/24288     0%
+Info:           RAM LUTs:      0/ 3036     0%
+Info:          RAMW LUTs:      0/ 6072     0%
+
+Info:      Total DFFs:        40/24288     0%
+
+Info: Packing IOs..
+Info: pin 'clk$tr_io' constrained to Bel 'X0/Y26/PIOA'.
+Info: Packing constants..
+Info: Packing carries...
+Info: Packing LUTs...
+Info: Packing LUT5-7s...
+Info: Packing FFs...
+Info:     24 FFs paired with LUTs.
+Info: Generating derived timing constraints...
+Info: Promoting globals...
+Info:     promoting clock net clk$TRELLIS_IO_IN to global network
+Info: Checksum: 0xced55226
+
+Info: Device utilisation:
+Info: 	          TRELLIS_IO:      33/    197    16%
+Info: 	                DCCA:       1/     56     1%
+Info: 	              DP16KD:       0/     56     0%
+Info: 	          MULT18X18D:       1/     28     3%
+Info: 	              ALU54B:       0/     14     0%
+Info: 	             EHXPLLL:       0/      2     0%
+Info: 	             EXTREFB:       0/      1     0%
+Info: 	                DCUA:       0/      1     0%
+Info: 	           PCSCLKDIV:       0/      2     0%
+Info: 	             IOLOGIC:       0/    128     0%
+Info: 	            SIOLOGIC:       0/     69     0%
+Info: 	                 GSR:       0/      1     0%
+Info: 	               JTAGG:       0/      1     0%
+Info: 	                OSCG:       0/      1     0%
+Info: 	               SEDGA:       0/      1     0%
+Info: 	                 DTR:       0/      1     0%
+Info: 	             USRMCLK:       0/      1     0%
+Info: 	             CLKDIVF:       0/      4     0%
+Info: 	           ECLKSYNCB:       0/     10     0%
+Info: 	             DLLDELD:       0/      8     0%
+Info: 	              DDRDLL:       0/      4     0%
+Info: 	             DQSBUFM:       0/      8     0%
+Info: 	     TRELLIS_ECLKBUF:       0/      8     0%
+Info: 	        ECLKBRIDGECS:       0/      2     0%
+Info: 	                DCSC:       0/      2     0%
+Info: 	          TRELLIS_FF:      40/  24288     0%
+Info: 	        TRELLIS_COMB:      30/  24288     0%
+Info: 	        TRELLIS_RAMW:       0/   3036     0%
+
+Info: Placed 1 cells based on constraints.
+Info: Creating initial analytic placement for 27 cells, random placement wirelen = 3608.
+Info:     at initial placer iter 0, wirelen = 1449
+Info:     at initial placer iter 1, wirelen = 1338
+Info:     at initial placer iter 2, wirelen = 1326
+Info:     at initial placer iter 3, wirelen = 1322
+Info: Running main analytical placer, max placement attempts per cell = 10000.
+Info:     at iteration #1, type ALL: wirelen solved = 1321, spread = 1400, legal = 1407; time = 0.00s
+Info: HeAP Placer Time: 0.01s
+Info:   of which solving equations: 0.00s
+Info:   of which spreading cells: 0.00s
+Info:   of which strict legalisation: 0.00s
+
+Info: Running simulated annealing placer for refinement.
+Info:   at iteration #1: temp = 0.000000, timing cost = 20, wirelen = 1407
+Info:   at iteration #5: temp = 0.000000, timing cost = 20, wirelen = 979
+Info:   at iteration #10: temp = 0.000000, timing cost = 20, wirelen = 966
+Info:   at iteration #13: temp = 0.000000, timing cost = 20, wirelen = 966 
+Info: SA placement time 0.01s
+
+Info: Max frequency for clock '$glbnet$clk$TRELLIS_IO_IN': 138.14 MHz (PASS at 100.00 MHz)
+
+Info: Max delay <async>                           -> posedge $glbnet$clk$TRELLIS_IO_IN: 5.12 ns
+Info: Max delay posedge $glbnet$clk$TRELLIS_IO_IN -> <async>                          : 6.45 ns
+
+Info: Slack histogram:
+Info:  legend: * represents 1 endpoint(s)
+Info:          + represents [1,1) endpoint(s)
+Info: [  2761,   3045) |******** 
+Info: [  3045,   3329) |******* 
+Info: [  3329,   3613) | 
+Info: [  3613,   3897) |* 
+Info: [  3897,   4181) | 
+Info: [  4181,   4465) | 
+Info: [  4465,   4749) | 
+Info: [  4749,   5033) | 
+Info: [  5033,   5317) | 
+Info: [  5317,   5601) | 
+Info: [  5601,   5885) | 
+Info: [  5885,   6169) | 
+Info: [  6169,   6453) | 
+Info: [  6453,   6737) | 
+Info: [  6737,   7021) | 
+Info: [  7021,   7305) | 
+Info: [  7305,   7589) | 
+Info: [  7589,   7873) | 
+Info: [  7873,   8157) |* 
+Info: [  8157,   8441) |******* 
+Info: Checksum: 0x6af817e3
+Info: Routing globals...
+Info:     routing clock net $glbnet$clk$TRELLIS_IO_IN using global 0
+
+Info: Routing..
+Info: Setting up routing queue.
+Info: Routing 145 arcs.
+Info:            |   (re-)routed arcs  |   delta    | remaining|       time spent     |
+Info:    IterCnt |  w/ripup   wo/ripup |  w/r  wo/r |      arcs| batch(sec) total(sec)|
+Info:        189 |       42        137 |   42   137 |         0|       0.10       0.10|
+Info: Routing complete.
+Info: Router1 time 0.10s
+Info: Checksum: 0x176343b2
+
+Info: Critical path report for clock '$glbnet$clk$TRELLIS_IO_IN' (posedge -> posedge):
+Info:       type curr  total name
+Info:   clk-to-q  0.52  0.52 Source ra_TRELLIS_FF_Q_1.Q
+Info:    routing  1.30  1.83 Net ra[6] (22,14) -> (23,13)
+Info:                          Sink ra_MULT18X18D_A0.A6
+Info:                          Defined in:
+Info:                               tiny.v:2.29-2.31
+Info:      logic  3.93  5.76 Source ra_MULT18X18D_A0.P2
+Info:    routing  1.53  7.28 Net ra_MULT18X18D_A0_P0[2] (23,13) -> (23,14)
+Info:                          Sink acc_TRELLIS_FF_Q_DI_CCU2C_S0_3$CCU2_COMB0.B
+Info:                          Defined in:
+Info:                               tiny.v:3.56-3.67
+Info:                               /opt/homebrew/bin/../share/yosys/ecp5/arith_map.v:32.22-32.23
+Info:      logic  0.45  7.73 Source acc_TRELLIS_FF_Q_DI_CCU2C_S0_3$CCU2_COMB0.FCO
+Info:    routing  0.00  7.73 Net acc_TRELLIS_FF_Q_DI_CCU2C_S0_3$CCU2_FCI_INT (23,14) -> (23,14)
+Info:                          Sink acc_TRELLIS_FF_Q_DI_CCU2C_S0_3$CCU2_COMB1.FCI
+Info:      logic  0.00  7.73 Source acc_TRELLIS_FF_Q_DI_CCU2C_S0_3$CCU2_COMB1.FCO
+Info:    routing  0.00  7.73 Net acc_TRELLIS_FF_Q_DI_CCU2C_S0_3_COUT (23,14) -> (23,14)
+Info:                          Sink acc_TRELLIS_FF_Q_DI_CCU2C_S0_2$CCU2_COMB0.FCI
+Info:                          Defined in:
+Info:                               tiny.v:3.56-3.67
+Info:                               /opt/homebrew/bin/../share/yosys/ecp5/arith_map.v:74.7-80.4
+Info:                               /opt/homebrew/bin/../share/yosys/ecp5/cells_sim.v:82.9-82.13
+Info:      logic  0.07  7.80 Source acc_TRELLIS_FF_Q_DI_CCU2C_S0_2$CCU2_COMB0.FCO
+Info:    routing  0.00  7.80 Net acc_TRELLIS_FF_Q_DI_CCU2C_S0_2$CCU2_FCI_INT (23,14) -> (23,14)
+Info:                          Sink acc_TRELLIS_FF_Q_DI_CCU2C_S0_2$CCU2_COMB1.FCI
+Info:      logic  0.00  7.80 Source acc_TRELLIS_FF_Q_DI_CCU2C_S0_2$CCU2_COMB1.FCO
+Info:    routing  0.00  7.80 Net acc_TRELLIS_FF_Q_DI_CCU2C_S0_2_COUT (23,14) -> (24,14)
+Info:                          Sink acc_TRELLIS_FF_Q_DI_CCU2C_S0_1$CCU2_COMB0.FCI
+Info:                          Defined in:
+Info:                               tiny.v:3.56-3.67
+Info:                               /opt/homebrew/bin/../share/yosys/ecp5/arith_map.v:74.7-80.4
+Info:                               /opt/homebrew/bin/../share/yosys/ecp5/cells_sim.v:82.9-82.13
+Info:      logic  0.07  7.87 Source acc_TRELLIS_FF_Q_DI_CCU2C_S0_1$CCU2_COMB0.FCO
+Info:    routing  0.00  7.87 Net acc_TRELLIS_FF_Q_DI_CCU2C_S0_1$CCU2_FCI_INT (24,14) -> (24,14)
+Info:                          Sink acc_TRELLIS_FF_Q_DI_CCU2C_S0_1$CCU2_COMB1.FCI
+Info:      logic  0.00  7.87 Source acc_TRELLIS_FF_Q_DI_CCU2C_S0_1$CCU2_COMB1.FCO
+Info:    routing  0.00  7.87 Net acc_TRELLIS_FF_Q_DI_CCU2C_S0_1_COUT (24,14) -> (24,14)
+Info:                          Sink acc_TRELLIS_FF_Q_DI_CCU2C_S0$CCU2_COMB0.FCI
+Info:                          Defined in:
+Info:                               tiny.v:3.56-3.67
+Info:                               /opt/homebrew/bin/../share/yosys/ecp5/arith_map.v:74.7-80.4
+Info:                               /opt/homebrew/bin/../share/yosys/ecp5/cells_sim.v:82.9-82.13
+Info:      logic  0.07  7.94 Source acc_TRELLIS_FF_Q_DI_CCU2C_S0$CCU2_COMB0.FCO
+Info:    routing  0.00  7.94 Net acc_TRELLIS_FF_Q_DI_CCU2C_S0$CCU2_FCI_INT (24,14) -> (24,14)
+Info:                          Sink acc_TRELLIS_FF_Q_DI_CCU2C_S0$CCU2_COMB1.FCI
+Info:      logic  0.00  7.94 Source acc_TRELLIS_FF_Q_DI_CCU2C_S0$CCU2_COMB1.FCO
+Info:    routing  0.00  7.94 Net acc_TRELLIS_FF_Q_DI_CCU2C_S0_COUT (24,14) -> (24,14)
+Info:                          Sink acc_TRELLIS_FF_Q_DI_CCU2C_S0_6$CCU2_COMB0.FCI
+Info:                          Defined in:
+Info:                               tiny.v:3.56-3.67
+Info:                               /opt/homebrew/bin/../share/yosys/ecp5/arith_map.v:74.7-80.4
+Info:                               /opt/homebrew/bin/../share/yosys/ecp5/cells_sim.v:82.9-82.13
+Info:      logic  0.07  8.01 Source acc_TRELLIS_FF_Q_DI_CCU2C_S0_6$CCU2_COMB0.FCO
+Info:    routing  0.00  8.01 Net acc_TRELLIS_FF_Q_DI_CCU2C_S0_6$CCU2_FCI_INT (24,14) -> (24,14)
+Info:                          Sink acc_TRELLIS_FF_Q_DI_CCU2C_S0_6$CCU2_COMB1.FCI
+Info:      logic  0.00  8.01 Source acc_TRELLIS_FF_Q_DI_CCU2C_S0_6$CCU2_COMB1.FCO
+Info:    routing  0.00  8.01 Net acc_TRELLIS_FF_Q_DI_CCU2C_S0_6_COUT (24,14) -> (24,14)
+Info:                          Sink acc_TRELLIS_FF_Q_DI_CCU2C_S0_5$CCU2_COMB0.FCI
+Info:                          Defined in:
+Info:                               tiny.v:3.56-3.67
+Info:                               /opt/homebrew/bin/../share/yosys/ecp5/arith_map.v:74.7-80.4
+Info:                               /opt/homebrew/bin/../share/yosys/ecp5/cells_sim.v:82.9-82.13
+Info:      logic  0.07  8.09 Source acc_TRELLIS_FF_Q_DI_CCU2C_S0_5$CCU2_COMB0.FCO
+Info:    routing  0.00  8.09 Net acc_TRELLIS_FF_Q_DI_CCU2C_S0_5$CCU2_FCI_INT (24,14) -> (24,14)
+Info:                          Sink acc_TRELLIS_FF_Q_DI_CCU2C_S0_5$CCU2_COMB1.FCI
+Info:      logic  0.00  8.09 Source acc_TRELLIS_FF_Q_DI_CCU2C_S0_5$CCU2_COMB1.FCO
+Info:    routing  0.00  8.09 Net acc_TRELLIS_FF_Q_DI_CCU2C_S0_5_COUT (24,14) -> (25,14)
+Info:                          Sink acc_TRELLIS_FF_Q_DI_CCU2C_S0_4$CCU2_COMB0.FCI
+Info:                          Defined in:
+Info:                               tiny.v:3.56-3.67
+Info:                               /opt/homebrew/bin/../share/yosys/ecp5/arith_map.v:74.7-80.4
+Info:                               /opt/homebrew/bin/../share/yosys/ecp5/cells_sim.v:82.9-82.13
+Info:      logic  0.07  8.16 Source acc_TRELLIS_FF_Q_DI_CCU2C_S0_4$CCU2_COMB0.FCO
+Info:    routing  0.00  8.16 Net acc_TRELLIS_FF_Q_DI_CCU2C_S0_4$CCU2_FCI_INT (25,14) -> (25,14)
+Info:                          Sink acc_TRELLIS_FF_Q_DI_CCU2C_S0_4$CCU2_COMB1.FCI
+Info:      logic  0.40  8.56 Source acc_TRELLIS_FF_Q_DI_CCU2C_S0_4$CCU2_COMB1.F
+Info:    routing  0.13  8.69 Net acc_TRELLIS_FF_Q_DI[15] (25,14) -> (25,14)
+Info:                          Sink acc_TRELLIS_FF_Q.DI
+Info:                          Defined in:
+Info:                               tiny.v:3.56-3.67
+Info:                               /opt/homebrew/bin/../share/yosys/ecp5/arith_map.v:34.26-34.27
+Info:      setup  0.00  8.69 Source acc_TRELLIS_FF_Q.DI
+Info: 5.73 ns logic, 2.96 ns routing
+
+Info: Critical path report for cross-domain path '<async>' -> 'posedge $glbnet$clk$TRELLIS_IO_IN':
+Info:       type curr  total name
+Info:     source  0.00  0.00 Source a[4]$tr_io.O
+Info:    routing  3.32  3.32 Net a[4]$TRELLIS_IO_IN (72,17) -> (23,15)
+Info:                          Sink ra_TRELLIS_FF_Q_3.M
+Info:                          Defined in:
+Info:                               tiny.v:1.36-1.37
+Info:      setup  0.00  3.32 Source ra_TRELLIS_FF_Q_3.M
+Info: 0.00 ns logic, 3.32 ns routing
+
+Info: Critical path report for cross-domain path 'posedge $glbnet$clk$TRELLIS_IO_IN' -> '<async>':
+Info:       type curr  total name
+Info:   clk-to-q  0.52  0.52 Source q_TRELLIS_FF_Q_2.Q
+Info:    routing  3.83  4.35 Net q[12]$TRELLIS_IO_OUT (24,12) -> (72,2)
+Info:                          Sink q[12]$tr_io.I
+Info:                          Defined in:
+Info:                               tiny.v:1.60-1.61
+Info: 0.52 ns logic, 3.83 ns routing
+
+Info: Max frequency for clock '$glbnet$clk$TRELLIS_IO_IN': 115.09 MHz (PASS at 100.00 MHz)
+
+Info: Max delay <async>                           -> posedge $glbnet$clk$TRELLIS_IO_IN: 3.32 ns
+Info: Max delay posedge $glbnet$clk$TRELLIS_IO_IN -> <async>                          : 4.35 ns
+
+Info: Slack histogram:
+Info:  legend: * represents 1 endpoint(s)
+Info:          + represents [1,1) endpoint(s)
+Info: [  1311,   1657) |********** 
+Info: [  1657,   2003) |***** 
+Info: [  2003,   2349) | 
+Info: [  2349,   2695) |* 
+Info: [  2695,   3041) | 
+Info: [  3041,   3387) | 
+Info: [  3387,   3733) | 
+Info: [  3733,   4079) | 
+Info: [  4079,   4425) | 
+Info: [  4425,   4771) | 
+Info: [  4771,   5117) | 
+Info: [  5117,   5463) | 
+Info: [  5463,   5809) | 
+Info: [  5809,   6155) | 
+Info: [  6155,   6501) | 
+Info: [  6501,   6847) | 
+Info: [  6847,   7193) | 
+Info: [  7193,   7539) | 
+Info: [  7539,   7885) | 
+Info: [  7885,   8231) |******** 
+32 warnings, 0 errors
+
+Info: Program finished normally.
