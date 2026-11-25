@@ -10,7 +10,7 @@ CHECKS="--ILP32 --unsigned-char --little-endian
         --undefined-shift-check --div-by-zero-check --unwinding-assertions"
 INC="-I ../../../sw/game2d -I ../../../sw/vdp"
 rc=0
-for th in ${@:-COMPILER KSTATE_LIVE KSTATE_CLOSED KSTATE_CONVERGE FIND FIAT KAMI}; do
+for th in ${@:-COMPILER KSTATE_LIVE KSTATE_CLOSED KSTATE_CONVERGE FIND FIAT KAMI PAXOS_INIT PAXOS_STEP PAXOS_AGREE}; do
    if [ $th = FIND ]; then                   # by exhaustive enumeration over ranks (find_exhaustive.c)
       cc -O2 -fsanitize=address,undefined $INC find_exhaustive.c -Wl,-dead_strip -o $OUT/find_exhaustive \
          && $OUT/find_exhaustive > $OUT/FIND.log 2>&1 && r=PASS || { r=FAIL; rc=1; }

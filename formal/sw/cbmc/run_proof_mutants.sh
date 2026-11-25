@@ -38,5 +38,15 @@ m find_scan FIND 77 "case 1: if (fd_a [fd_i] < fd_r) fd_i++;" "case 1: if (fd_a 
 m fiat_carry FIAT 10 "if (ft_l [i] > 9) { ft_l [i] -= 10;" "if (ft_l [i] > 9) { ft_l [i] -= 9;"
 # the pipeline shifts front to back, so one input fills every stage
 m kami_shift KAMI 10 "for (int s = 2; s > 0; s--) { km_q [s][0]" "for (int s = 1; s < 3; s++) { km_q [s][0]"
+# Paxos phase 2 ignores the votes the promises reported (proof_paxos_test.sh's planted bug)
+m px_votes PAXOS_STEP 10 "if (pb > px_phb [p]) { px_phb [p] = pb; px_pval [p] = pv; }" "if (pb > px_phb [p]) { px_phb [p] = pb; }"
+# a proposer goes to phase 2 on one promise, not a quorum of two
+m px_quorum PAXOS_STEP 10 "   if (n < 2) return 0;
+   px_pph [p] = 2;" "   if (n < 1) return 0;
+   px_pph [p] = 2;"
+# an acceptor votes in a ballot below the one it promised
+m px_promise PAXOS_STEP 10 "|| v < 1 || b < px_prom [a]) return 0;" "|| v < 1) return 0;"
+# the learner learns from one acceptor's Accepted
+m px_learn PAXOS_STEP 10 "for (int j = i + 1; j < PX_A; j++)" "for (int j = i; j < PX_A; j++)"
 echo "$missed missed"
 [ $missed = 0 ]

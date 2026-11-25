@@ -141,6 +141,9 @@ package scoreboard_pkg;
           PH_LOAD: begin
             if (b8 == 8'h0d) begin
               phase = PH_LF;
+            end else if (b8 == 8'h2e) begin
+              // the boot loader's progress mark, one after every 64 KB loaded
+              // (boot/boot_loader.c); neither an ACK nor a NAK
             end else begin
               handle_load_byte(b8);
             end

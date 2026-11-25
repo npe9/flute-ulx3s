@@ -194,8 +194,9 @@ directly.  See Verification for what is proved so far.
   volleys start above the figures, and every move was run with `HOST_OVERFLOW=2` (Verification).
   Over all the PROOF_TEST fight runs, the worst frame is 421 VDP writes.
 - CPU time a frame on the strict sim (50 MHz SoC, a frame is 840,000 cycles): over the first 120
-  frames (the title's init, then the demo's first stage run) mean 17,105 cycles, worst 186,428
-  (frame 0, which draws every tile and sprite).  No boss fight has run on the RTL, so the fights'
+  frames (the title's init, then the demo's first stage run) mean 25,321 cycles, worst 196,098
+  (frame 0, which draws every tile and sprite; before the tactics and the fight framework: 17,105
+  and 186,428).  No boss fight has run on the RTL, so the fights'
   costliest frames (Lamport's breadth-first layer, full bullet tables) are not yet measured in
   cycles.
 
@@ -233,18 +234,29 @@ What is proved and what is only tested, separately (notes/sw-verification-plan.m
   - KAMI: "the pipeline holds the spec's last three inputs" is inductive over `km_step`, so every
     output equals the spec's input three steps earlier, for runs of any length (the empty pipeline
     satisfies it).
-  - Planted bugs: `run_proof_mutants.sh` makes five one-line mutants (operator order, the K-state
-    copy rule, FIND's scan, the carry, the pipeline shift); each must fail its theorem.
-- **Paxos (`px_*`), tested, not yet proved.**
-  - The property expected is agreement: never `px_chosen (1)` and `px_chosen (2)` together, and
-    `px_learned != 0` implies `px_chosen (px_learned)`.  It should hold for any order, loss or
-    duplication of messages.
+  - Planted bugs: `run_proof_mutants.sh` makes nine one-line mutants (operator order, the K-state
+    copy rule, FIND's scan, the carry, the pipeline shift, and four in Paxos: phase 2 ignoring the
+    reported votes, a quorum of one, an acceptor voting below its promise, a learner trusting one
+    acceptor); each must fail its theorem.
+- **Paxos (`px_*`): agreement proved** (`run_proof.sh` PAXOS_INIT, PAXOS_STEP, PAXOS_AGREE).
+  - Agreement: never two values chosen, and `px_learned != 0` implies `px_chosen (px_learned)`,
+    for every schedule of any length.
+  - How: an inductive invariant (`px_inv` in `proof_algos.c`: each vote is for its ballot's
+    proposed value; a proposed value is safe at its ballot, i.e. for every lower ballot a quorum
+    voted it or can no longer vote there; a promise reports its acceptor's highest vote below the
+    ballot; a proposer's state is what its promises reported; the learner's records are votes).
+    CBMC proves it holds after `px_init`, that any single step from any state satisfying it keeps
+    it, and that it implies agreement.  The network is the set of every message ever sent (ghost
+    state): a step delivers any of them, at any time, any number of times, or never, so
+    reordering, duplication and loss are all covered; Prepare messages may even be forged, and an
+    Accepted message may be anything (the learner checks the vote).  Values 1..3, any own values.
+  - The first attempt failed the step proof on a learner record with a ballot but no value,
+    which the code never makes (`px_accepted` refuses value 0); the invariant now says so.
   - Its precondition: messages are ones the steps produce.  A Promise carries what
     `px_prepare` returned.  An Accept is `(b, px_pval [p])`, sent after `px_promise` returned 1.
     A stale message from an old ballot is fine; a forged one is not.  `px_accepted` checks the
-    vote itself.  The test's loop is the shape a CBMC harness would take.
-  - The steps are pure functions of their message's fields (`px_start`, `px_prepare`,
-    `px_promise`, `px_accept`, `px_accepted`, `px_chosen`), ready for a CBMC harness.
+    vote itself.  The proof assumes this of the game (it holds by how the game makes messages,
+    and the spec oracle checks agreement on every frame of the game, clause A6: tested).
   - `sw/game2d/proof_paxos_test.sh` extracts them from `proof_boss.c` and runs 1,000,000 random
     schedules of 120 steps each, covering any order, loss and duplication.  Agreement held in all
     of them; a value was learned in 978,921.
@@ -284,7 +296,9 @@ What is proved and what is only tested, separately (notes/sw-verification-plan.m
   hold for 8 runs x 3,000 frames.  Tested, not proved.
 - The strict-BRAM sim frame check (`TITLE=proof FRAMES=120 sim/game2d/frame_check.sh
   build/game2d`, the game2d+VDP+APU netlist): PASS -- the 640x480 scan-out identical to the
-  reference model's frame, the APU samples equal, its 624 writes = the host build's.  120 frames
+  reference model's frame, the APU samples equal, its 629 writes = the host build's.  The image
+  is now 92 KB; the first over 64 KB exposed a bench bug (the scoreboard counted the boot
+  loader's 64 KB progress mark as a NAK), fixed in `sim/strict_bram/scoreboard.sv`.  120 frames
   cover the init and the opening of the first stage only.
 - On the board: not yet run (the game2d SoC's timing is open).
 
