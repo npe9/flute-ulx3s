@@ -29,20 +29,30 @@ with contextlib.redirect_stdout(buf):
 #       do nothing until player_update counts it down, which no stub reaches); bullets_update
 #       takes at most one pickup per bullet slot (its loop runs pickup_update once per slot),
 #       interleaved with hurts in any order
+# @RH@ marks where a stub re-havocs the guard variables it may write (see below)
 def s3_call (R):
-   return 'if (nondet_int ()) boss_damage (nd (1, 4));'
+   return '@RH@ if (nondet_int ()) boss_damage (nd (1, 4));'
 def s2_call (R):
    if 'pickup_update' in R:
       hurt = ' else if (nondet_int ()) player_hurt ();' if 'player_hurt' in R else ''
-      return ('for (int k = 0; k < NBUL; k++) { if (nondet_int ()) pickup_update (&bul [k]);%s }   '
+      return ('for (int k = 0; k < NBUL; k++) { @RH@ if (nondet_int ()) pickup_update (&bul [k]);%s }   '
               '// pickups and hurts, any order' % hurt)
-   return 'if (nondet_int ()) player_hurt ();'
+   return '@RH@ if (nondet_int ()) player_hurt ();'
+def w45_call (R):
+   return 'for (int k = 0; k < NBUL; k++) { @RH@ if (nondet_int ()) pickup_update (&bul [k]); }   // energy pickups'
 FAMILIES = {
    'S3': (['boss.hp', 'boss.flash'], {'boss_damage'}, s3_call, {'next_demo', 'title_screen'},
           ['g_state', 'boss.on', 'boss.flash']),
    'S2': (['pl_lives', 'pl_dead', 'pl_hurt', 'got_hearts'], {'player_hurt', 'pickup_update'}, s2_call,
           {'next_demo', 'title_screen', 'player_update', 'start_stage'},
           ['g_state', 'pl_hurt', 'pl_dead', 'pl_lives']),
+   # W4/W5: fire stays inside the real player_update (which also switches tactics, in its own
+   # order); pickups as for S2, one per bullet slot; owned_update stays real (a stub that may
+   # select the lemma at any time loses that it resets only an unowned tactic, and that after its
+   # first call in a frame the owned set only grows)
+   'W45': (['pl_energy', 'got_energy'], {'fire', 'pickup_update'}, w45_call,
+           {'next_demo', 'title_screen', 'player_update', 'start_stage', 'owned_update'},
+           ['pl_weapon', 'pl_owned', 'pl_dead', 'g_state']),
 }
 KEEP, WRITERS, CALL, ALSO_REAL, GUARD_READS = FAMILIES[family]
 # a stub havocs, then calls the writers, so it cannot reproduce a callee that writes and then
@@ -165,10 +175,15 @@ for f in sorted(callees):
    left = [v for v in KEEP if (f in may[v] or f in writers[v]) and not (writers[v] & reach_from (f) <= WRITERS | REAL)]
    if left: sys.exit('gen_stubs: %s may write %s through a writer that is not the family\'s' % (f, ' '.join(left)))
    if R:
+      # a guard variable f may also write can change between any two writer calls, in the real
+      # callee's own order: re-havoc it before every call and after the last (any interleaving)
       bad = [v for v in GUARD_READS if v not in KEEP and (f in writers[v] or f in may[v])]
-      if bad: sys.exit('gen_stubs: %s reaches the writer and may also write %s, which its guard reads:'
-                       ' a stub would be unsound; keep it real' % (f, ' '.join(bad)))
-      body.append('   ' + CALL (R))
+      def rh (v):
+         if v.startswith('boss.'): return 'havoc_boss_except (%s);' % ', '.join('0' if v == 'boss.' + k else '1' for k in ('hp', 'flash', 'on', 'attack'))
+         return '__CPROVER_havoc_object (&%s);' % v
+      re_h = ' '.join(rh (v) for v in bad)
+      body.append('   ' + CALL (R).replace('@RH@', re_h).replace('  ', ' '))
+      if bad: body.append('   %s   // after the last call too' % re_h)
    if ret != 'void': body.append('   %s r; return r;' % ret)
    lines.append('%s stub_%s (%s) {' % (ret, f, plist))   # external: goto-cc keeps it
    lines += body

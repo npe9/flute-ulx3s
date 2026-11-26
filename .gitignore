@@ -28,3 +28,15 @@ test/debug/logs/
 tools/hw/local.toml
 __pycache__/
 .hw/
+# ---- local build outputs that kept showing as untracked ----
+.claude/
+.lia.cache
+formal/sw/rocq/*.vo
+formal/sw/rocq/*.vok
+formal/sw/rocq/*.vos
+formal/sw/rocq/*.glob
+formal/sw/rocq/.*.aux
+sw/game2d/*.elf
+sw/game2d/*.bin
+test/*.elf
+sim/*/mut/

@@ -14,7 +14,7 @@ CHECKS="--bounds-check --pointer-check --pointer-overflow-check --signed-overflo
         --undefined-shift-check --div-by-zero-check --unwinding-assertions"
 SRC=${GAME_SRC:-../../../sw/game2d}; INC="-I $SRC -I ../../../sw/vdp -I $OUT"
 rc=0
-for th in ${@:-BD_NOOP S3_FRAME HURT_NOOP S2_FRAME}; do
+for th in ${@:-BD_NOOP S3_FRAME HURT_NOOP S2_FRAME}; do   # W45_FRAME: in progress (notes/proof-obligation-spec.md)
    fam=${th%%_*}; [ $th = BD_NOOP ] && fam=S3; [ $th = HURT_NOOP ] && fam=S2
    python3 gen_stubs.py $OUT/stubs.h $fam > $OUT/$th.gen.log || { echo "$th: stub generation failed"; rc=1; continue; }
    for v in "" VACUITY; do

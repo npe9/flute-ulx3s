@@ -12,6 +12,9 @@
 //             0..90 frames of invulnerability), one frame satisfies spec_S2 and keeps I1 and I2:
 //             a stage starts with five hearts, hearts come back only from pickups (one each, up
 //             to five), at most one is lost a frame and only when not invulnerable
+//   W45_FRAME from any state with W2 (every tactic's energy 0..28) and a valid tactic, one frame
+//             satisfies spec_W45 and keeps W2: a stage starts full, firing takes exactly the
+//             tactic's cost and only if it is left, energy rises only from pickups
 //   HURT_NOOP while invulnerable, player_hurt changes no heart variable (why a stub needs at most
 //             one effective call a frame: nothing a stub reaches counts the invulnerability down)
 //   BD_NOOP   while the boss flashes, boss_damage changes neither hit points nor flash (why a
@@ -84,6 +87,31 @@ int main (void) {
    proof_observe (&post);
    __CPROVER_assert (spec_S2 (&pre, b, &post) == 0, "S2 holds for this frame");
    __CPROVER_assert (i12 (), "I1 and I2 (hearts, invulnerability) hold again");
+   DONE ();
+   return 0;
+}
+#endif
+#ifdef W45_FRAME
+static int w2 (void) {                           // W2 (energy 0..28) and W1's range (a tactic)
+   if (pl_weapon < 0 || pl_weapon >= NWEAPON) return 0;
+   for (int w = 0; w < NWEAPON; w++) if (pl_energy [w] < 0 || pl_energy [w] > W_ENERGY) return 0;
+   return 1;
+}
+int main (void) {
+   havoc_nonrule ();
+   __CPROVER_havoc_object (&boss); __CPROVER_havoc_object (&pl_energy);
+   g_state = nd (G_TITLE, G_END); demo = nondet_int (); cur_boss = nd (0, 6); defeated = nondet_int ();
+   pl_lives = nondet_int (); pl_dead = nondet_int (); pl_hurt = nondet_int (); pl_certs = nondet_int ();
+   score = nondet_int (); pl_weapon = nondet_int (); pl_owned = nondet_int (); t = nondet_int ();
+   got_hearts = nondet_int (); got_energy = nondet_int ();
+   __CPROVER_assume (w2 ());
+   spec_state pre, post;
+   proof_observe (&pre);
+   uint32_t b = (uint32_t) nondet_int ();
+   proof_frame (b);
+   proof_observe (&post);
+   __CPROVER_assert (spec_W45 (&pre, b, &post) == 0, "W4 and W5 hold for this frame");
+   __CPROVER_assert (w2 (), "W2 (energy 0..28) and the tactic range hold again");
    DONE ();
    return 0;
 }

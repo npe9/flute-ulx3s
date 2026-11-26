@@ -142,8 +142,9 @@ const char *spec_W45 (const spec_state *s, uint32_t buttons, const spec_state *n
    (void) buttons;
    int entered = s->state == SP_TITLE && n->state == SP_PLAY;
    // W4, W5: energy.  A stage starts with every tactic full; otherwise a tactic's energy falls
-   // only by firing it (exactly its cost, and only if that much was left) and rises only from an
-   // energy pickup (at most 10, one tactic)
+   // only by firing it (exactly its cost, and only if that much was left) and rises only from
+   // energy pickups: each gives at most 10 to one tactic (with the lemma selected, the emptiest
+   // owned one, chosen anew per pickup, so several pickups in a frame can fill several tactics)
    if (s->weapon >= 0 && n->weapon >= 0) {
       static const int cost [SP_NWEAPON] = { 0, 1, 2, 4, 7, 2, 1, 3 };
       if (entered) {
@@ -158,7 +159,7 @@ const char *spec_W45 (const spec_state *s, uint32_t buttons, const spec_state *n
                                 "W4: firing a tactic takes exactly its cost, only if it is left");
             if (d > 0) { REQUIRE (got && (unsigned) d <= SP_REFILL * got, "W5: energy rises only from a pickup, by at most 10 each"); rose++; }
          }
-         REQUIRE (rose <= 1, "W5: a pickup refills one tactic");
+         REQUIRE ((unsigned) rose <= got, "W5: each pickup refills one tactic");
       }
    }
    return 0;

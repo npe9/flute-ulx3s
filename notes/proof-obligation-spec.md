@@ -74,8 +74,9 @@ McCarthy .. Chlipala), with energy costs 0, 1, 2, 4, 7, 2, 1, 3.
   lemma always); the demo owns all.  With S4, a tactic is gained only by a real win.
 - **W4** A stage starts with every tactic full.  Otherwise a tactic's energy falls only by firing
   it: by exactly its cost, and only if that much was left.
-- **W5** Energy rises only from energy pickups, each refilling the selected tactic by at most 10;
-  in one frame only one tactic rises.
+- **W5** Energy rises only from energy pickups, each refilling one tactic by at most 10 (the
+  selected one; with the lemma selected, the emptiest owned tactic, chosen anew per pickup), so
+  in one frame at most as many tactics rise as pickups were taken.
 - Not stated yet: only the boss's weakness does 4 damage (the observation does not say which
   tactic's shot hit).
 
@@ -169,6 +170,19 @@ and W3 holds after every frame.
      the demo and `title_screen` had reset the timer, the stubs of `owned_update` and `pilot`
      could set it past 20 and start a stage in the same frame.  Stubs now havoc only what the
      census says their callee writes.
-   - Next: W4/W5 (energy), the same way.
+   - **W4/W5 (energy): in progress, not proved.**  The harness `W45_FRAME` exists (writers
+     `fire`, `pickup_update`, `start_stage`; W2 assumed and re-asserted), but is left out of the
+     default theorem list.  Its first run found a real spec error: with the lemma selected each
+     energy pickup refills the emptiest owned tactic *at that moment*, so several pickups in
+     one frame can raise several tactics; W5 now allows one rising tactic per pickup (spec
+     mutants 11/11 still caught, the 30,000-frame demo oracle 0 violations).  The second run's
+     counterexample was a stub artifact: the stub of `owned_update` could select the lemma
+     after `fire` had used a tactic switched to in the same frame, which the real code never
+     does.  Keeping `owned_update` real removes that, but CBMC then did not finish in 16 hours
+     (the earlier runs took about 7.5 minutes); next is a stub with `owned_update`'s own
+     postcondition (the selection changes only to the lemma, and only from an unowned tactic).
+     Stubs now also re-havoc, before every writer call and after the last, any guard variable
+     the stubbed callee may write (e.g. a bullet can kill the player between two pickups); the
+     S3 and S2 stubs are unchanged by this apart from whitespace.
 2. **The binary**: B2 makes the binary's behaviour equal the host build's on every fuzzed script;
    a proof needs tier 3 (the binary against Sail) for the whole frame, or a verified compiler.

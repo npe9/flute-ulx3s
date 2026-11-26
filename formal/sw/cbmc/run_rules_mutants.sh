@@ -19,5 +19,8 @@ m win_late    S3_FRAME "      if (boss.hp <= 0) {" "      if (boss.hp < 0) {"
 m hurt_guard  S2_FRAME "if (pl_hurt || pl_dead || g_state == G_WIN) return;" "if (pl_dead || g_state == G_WIN) return;"
 m double_hurt S2_FRAME "pl_lives--; pl_hurt = 90;" "pl_lives -= 2; if (pl_lives < 0) pl_lives = 0; pl_hurt = 90;"
 m heart_cap   S2_FRAME "if (pl_lives < 5) pl_lives++;" "pl_lives++;"
+# (enable once W45_FRAME proves) m fire_cost   W45_FRAME "if (!keep) pl_energy [w] -= w_cost [w];" "if (!keep) pl_energy [w] -= w_cost [w] + (w == W_PATH);"
+# (enable once W45_FRAME proves) m fire_empty  W45_FRAME "if (pl_energy [w] < w_cost [w]) { if (pressed) psnd_tink (); return; }" "if (pl_energy [w] < w_cost [w] - 1) { if (pressed) psnd_tink (); return; }"
+# (enable once W45_FRAME proves) m refill11    W45_FRAME "if (w != W_LEMMA) { pl_energy [w] += 10;" "if (w != W_LEMMA) { pl_energy [w] += 11;"
 echo "rule mutants: $caught of $n caught"
 [ $caught = $n ]
