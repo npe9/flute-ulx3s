@@ -4,7 +4,8 @@
 set -e
 cd "$(dirname "$0")"
 DEPTH=${1:-20}; MODE=${2:-}
-Y=${SVA_YOSYS:-$HOME/src/sv-yosys/third_party/yosys/build/yosys}
+Y=${SVA_YOSYS:-$HOME/src/sv-yosys/install/current/bin/yosys}
+"$Y" -V   # the build each result came from
 B=$(dirname "$Y")/yosys-smtbmc
 BSVLIB=${BSVLIB:-$(../../../scripts/bsc_lib.sh)}
 RTL=${RTL:-../../../build/verilog}

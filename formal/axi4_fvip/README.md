@@ -2,7 +2,7 @@
 
 - **Upstream:** https://github.com/YosysHQ-GmbH/SVA-AXI4-FVIP, commit `250f1ff`. The `AXI4/src` tree is flattened here and **unmodified**. ISC license, see `COPYING`.
 - **Fork:** https://github.com/npe9/SVA-AXI4-FVIP branch `flute-ulx3s` carries these harnesses as `AXI4/examples/flute_ulx3s` (run with `RTL=build/<variant>/verilog`).
-- **Tool:** the SVA yosys at `~/src/sv-yosys/third_party/yosys/build/yosys`, fork `npe9/yosys` branch `sva-frontend-ic3`, at `03cc3a9f4` or later. Builds before that zero struct parameter overrides, which gives false proofs. Stock yosys silently drops `bind`.
+- **Tool:** the SVA yosys at `~/src/sv-yosys/install/current/bin/yosys` (the Yosys session's gated install; `SVA_YOSYS` overrides), fork `npe9/yosys` branch `sva-frontend-ic3`, at `70bd63f45` (install t2b) or later: earlier builds miscompile a read after `<=` in the same block (fixed 284ee42ea) and a nested-case assignment followed by one in the enclosing arm (fixed 70bd63f45, an upstream bug too). Builds before that zero struct parameter overrides, which gives false proofs. Stock yosys silently drops `bind`.
 
 ## Flow
 ```
